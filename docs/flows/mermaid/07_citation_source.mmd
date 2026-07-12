@@ -1,0 +1,36 @@
+%% 07 Citation creation and source access | Status: REPLACED, public routes PROVISIONAL
+sequenceDiagram
+  participant RAG as Python RAG Service
+  participant Node as NodeJS Core
+  participant DB as MySQL
+  participant Client as Web / Mobile Client
+  participant Store as File Storage
+
+  RAG-->>Node: PROVISIONAL structured answer with source fragments and optional scores
+  Node->>DB: Resolve each vector_node_id to parent document_chunks and documents
+  loop Each citation fragment
+    Node->>Node: Build immutable title, page, section, text and locator snapshot
+    Note over Node: One parent chunk may produce multiple citation fragments
+  end
+  Node->>DB: In assistant-completion transaction, insert ordered citations
+  Note over Node,DB: Do not parse bracket markers from answer text, document_id and chunk_id may later become NULL
+
+  Client->>Node: PROVISIONAL citation/source request with user JWT
+  Node->>DB: Join citation, assistant message and chat session
+  Node->>Node: Authorize chat-session owner or permitted ADMIN access
+  alt Not authorized or resource is hidden by policy
+    Node-->>Client: 404 or 403
+  else Snapshot requested
+    Node-->>Client: Immutable source_text_snapshot and locator snapshots
+  else Original file requested
+    Node->>DB: Read current document state if document_id still exists
+    alt Document is READY and VISIBLE, or caller is uploader or ADMIN
+      Node->>Store: Resolve storage_key internally and open file
+      Store-->>Node: File stream
+      Node-->>Client: Stream original file without exposing storage_key
+    else Document reference is NULL, HIDDEN, DELETED or file is missing
+      Node-->>Client: Snapshot with originalAvailable false
+    end
+  end
+
+  Note over Node,DB: retrieval_score and rerank_score are optional citation fields, not usage cost

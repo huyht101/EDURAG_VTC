@@ -1,0 +1,43 @@
+%% 05 Hide, unhide and delete | Status: PROVISIONAL orchestration contract
+sequenceDiagram
+  participant Client as Web / Mobile Client
+  participant Node as NodeJS Public API
+  participant DB as MySQL
+  participant RAG as Python RAG Service
+
+  Client->>Node: PROVISIONAL hide, unhide or delete with user JWT
+  Node->>Node: Verify ACTIVE user and TEACHER owner or ADMIN
+  Node->>DB: BEGIN and lock document plus active processing job
+  Node->>DB: Validate processing_status, visibility_status and requested transition
+  alt Unauthorized, DELETED, busy, or unhide while not READY
+    Node->>DB: ROLLBACK
+    Node-->>Client: 403, 404 or 409
+  else Valid operation
+    opt Delete supersedes an active INGEST or REPROCESS job
+      Node->>DB: Set active job CANCELLED and document processing_status CANCELLED
+    end
+    Node->>DB: Insert SET_RETRIEVAL or DELETE_VECTORS job as QUEUED
+    Node->>DB: COMMIT
+    Node->>DB: Short transaction: increment attempt_count and set operation job RUNNING
+    alt Hide
+      Node->>RAG: PROVISIONAL set retrieval false with internal Bearer
+    else Unhide
+      Node->>RAG: PROVISIONAL set retrieval true with internal Bearer
+    else Delete
+      Node->>RAG: PROVISIONAL deactivate retrieval, then delete vectors
+    end
+    Note over Node,RAG: No distributed transaction and no open MySQL transaction
+    Node-->>Client: 202 with jobId
+
+    alt Python reports terminal success for the current attempt
+      RAG-->>Node: Callback through flow 02
+      Node->>DB: Transaction: job SUCCEEDED and apply HIDDEN, VISIBLE or DELETED
+      Node->>DB: For DELETED set deleted_at and retain file plus MySQL history
+    else Dispatch or operation fails
+      RAG-->>Node: Failure or timeout
+      Node->>DB: Persist FAILED and keep prior visibility state
+      Note over Node,DB: Retrieval may already be disabled, fail closed and retry the operation job
+    end
+  end
+
+  Note over DB: HIDDEN does not delete vectors, citations messages and usage are never deleted by this flow

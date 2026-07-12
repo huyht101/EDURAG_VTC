@@ -1,0 +1,24 @@
+%% 09 Usage and dashboard | Status: PROVISIONAL API, schema-backed read model
+flowchart TB
+  A[PROVISIONAL Admin Dashboard request with user JWT] --> B[Verify ACTIVE user and ADMIN role]
+  B --> C[Validate UTC date range and pagination]
+  C --> D[Aggregate documents by processing_status and visibility_status]
+  C --> E[Aggregate chat_sessions and chat_messages]
+  C --> F[Aggregate citations]
+  C --> G[Aggregate llm_usage_logs]
+
+  G --> H[Group by provider, model, operation_type and status]
+  H --> I[Use request_id plus call_index; one assistant message may have many calls]
+  I --> J[Sum prompt_tokens, completion_tokens and generated total_tokens]
+  J --> K[Sum estimated_cost while excluding NULL]
+
+  D --> L[Compose dashboard DTO]
+  E --> L
+  F --> L
+  K --> L
+  L --> M[Set usageScope to LLM_CALLS_ONLY]
+  M --> N[200 dashboard data]
+
+  Note1[retrieval_score and rerank_score belong to citations, not llm_usage_logs]
+  Note2[Embedding, OCR and reranker costs are not recorded by schema 1.0.0]
+  Note3[Dashboard routes, DTOs and cost-pricing provenance are PROVISIONAL]

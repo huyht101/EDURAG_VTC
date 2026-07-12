@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+
+# Local environment files (keep the documented template)
+.env
+.env.*
+!.env.example
+
+# Logs and test/build output
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+coverage/
+dist/
+build/
+
+# Temporary/runtime data
+tmp/
+temp/
+uploads/
+storage/
+.mysql/
+mysql_data/
+qdrant_data/
+
+# Editors and OS metadata
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local, read-only implementation references
+week2_nodejs_core_ref/

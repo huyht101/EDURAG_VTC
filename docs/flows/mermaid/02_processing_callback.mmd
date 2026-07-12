@@ -1,0 +1,49 @@
+%% 02 Processing callback | Status: PROVISIONAL contract, schema-accurate lifecycle
+sequenceDiagram
+  participant RAG as Python RAG Service
+  participant Node as NodeJS Internal API
+  participant DB as MySQL
+
+  RAG->>Node: PROVISIONAL callback with internal Bearer, jobId, attemptCount and event type
+  Node->>Node: Verify RAG_INTERNAL_TOKEN and validate payload
+  alt Authentication or payload is invalid
+    Node-->>RAG: 401 or 400
+  else Valid callback
+    Node->>DB: BEGIN and lock job plus document rows
+    Node->>DB: Compare jobId, status and attempt_count
+    alt Callback is stale or belongs to a superseded attempt
+      Node->>DB: ROLLBACK without business-state changes
+      Node-->>RAG: 200 ACK ignored
+    else Exact terminal callback was already applied
+      Node->>DB: COMMIT without duplicate writes
+      Node-->>RAG: 200 ACK duplicate
+    else PROGRESS event
+      Node->>DB: Set RUNNING, current_stage and callback_received_at
+      Node->>DB: COMMIT
+      Node-->>RAG: 200 ACK
+    else CHUNK_MANIFEST event
+      Node->>Node: Validate chunk indexes, UUID vector_node_id, hashes and locators
+      alt Job type is REPROCESS and this is the first accepted manifest batch
+        Note over Node,DB: No parallel generation exists in schema 1.0.0
+        Node->>DB: Delete old document_chunks after retrieval was disabled
+      end
+      Node->>DB: Insert chunks or verify an exact duplicate batch
+      Node->>DB: COMMIT
+      Node-->>RAG: 200 ACK batch
+    else SUCCEEDED terminal event
+      Node->>DB: Verify persisted chunk count and manifest ownership
+      Note over Node,RAG: PROVISIONAL terminal result must attest retrieval activation
+      Node->>DB: Set job SUCCEEDED, finished_at and callback_received_at
+      Node->>DB: Set document READY and processed_at for INGEST or REPROCESS
+      Node->>DB: Apply validated visibility transition for operation job types
+      Node->>DB: COMMIT
+      Node-->>RAG: 200 ACK terminal
+    else FAILED or CANCELLED terminal event
+      Node->>DB: Persist job status, error_code, error_message and timestamps
+      Node->>DB: Set document FAILED or CANCELLED only for INGEST or REPROCESS
+      Node->>DB: COMMIT
+      Node-->>RAG: 200 ACK terminal
+    end
+  end
+
+  Note over RAG,DB: Python never writes MySQL, vector_node_id maps the Python node to the Qdrant point

@@ -1,0 +1,44 @@
+%% 06 Chat RAG | Status: PROVISIONAL NodeJS-Python and public API contracts
+sequenceDiagram
+  participant Client as Web / Mobile Client
+  participant Node as NodeJS Public API
+  participant DB as MySQL
+  participant RAG as Python RAG Service
+
+  Client->>Node: PROVISIONAL send question with user JWT and clientRequestId
+  Node->>Node: Verify ACTIVE user and validate question
+  Node->>DB: Check session ownership, deleted_at and duplicate client_request_id
+  alt Existing clientRequestId
+    DB-->>Node: Existing USER message and related assistant state
+    Node-->>Client: Return current PENDING, COMPLETED or FAILED result
+  else New request
+    Node->>DB: BEGIN and lock chat_sessions row
+    Node->>DB: Allocate message_order values
+    Node->>DB: Insert USER COMPLETED with client_request_id
+    Node->>DB: Insert ASSISTANT PENDING with null content
+    Node->>DB: COMMIT
+    Node->>DB: Load bounded history ordered by message_order
+    Node->>RAG: PROVISIONAL query with internal Bearer, requestId, question and history window
+    Note over Node,RAG: Python receives request context only, MySQL remains chat-history source
+    alt Timeout or transport failure
+      Node->>DB: Set ASSISTANT FAILED and error_code
+      Note over Node,DB: Insert FAILED usage only if structured usage metadata was returned
+      Node-->>Client: 502 RAG unavailable, same clientRequestId remains idempotent
+    else Structured no-answer result
+      RAG-->>Node: noAnswer plus optional usage calls
+      Node->>DB: Transaction: ASSISTANT COMPLETED, no_answer true, usage rows and last_message_at
+      Node-->>Client: 200 no-answer result without citations
+    else Structured answer and source fragments
+      RAG-->>Node: Answer, structured sources and optional usage calls
+      Node->>DB: Map vector_node_id values to document_chunks and documents
+      alt Source mapping or snapshot validation fails
+        Node->>DB: Set ASSISTANT FAILED with source-mapping error
+        Node-->>Client: 502 unverifiable sources
+      else Sources are valid
+        Node->>DB: One transaction: complete ASSISTANT, insert citations and usage, update last_message_at
+        Node-->>Client: 200 answer with citation DTOs
+      end
+    end
+  end
+
+  Note over Client,RAG: Public and internal Bearer tokens are distinct, client never calls Python directly

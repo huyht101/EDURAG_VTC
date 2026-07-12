@@ -1,0 +1,38 @@
+%% 03 Document and job states | Status: schema-locked states, service transitions PROVISIONAL
+flowchart TB
+  subgraph DOC[documents.processing_status]
+    direction LR
+    DU[UPLOADED] -->|INGEST dispatch| DP[PROCESSING]
+    DP -->|INGEST or REPROCESS succeeds and manifest is persisted| DR[READY]
+    DP -->|Terminal failure| DF[FAILED]
+    DP -->|Terminal cancellation| DC[CANCELLED]
+    DF -->|REPROCESS| DP
+    DC -->|REPROCESS| DP
+    DR -->|Disable retrieval, then REPROCESS without parallel generation| DP
+  end
+
+  subgraph VIS[documents.visibility_status]
+    direction LR
+    VV[VISIBLE] -->|SET_RETRIEVAL false succeeds| VH[HIDDEN]
+    VH -->|READY and SET_RETRIEVAL true succeeds| VV
+    VV -->|DELETE_VECTORS succeeds and deleted_at is set| VD[DELETED]
+    VH -->|DELETE_VECTORS succeeds and deleted_at is set| VD
+  end
+
+  subgraph JOB[document_processing_jobs.status]
+    direction LR
+    JQ[QUEUED] -->|Dispatch and increment attempt_count| JR[RUNNING]
+    JQ -->|Cancel before dispatch| JC[CANCELLED]
+    JR -->|Terminal success| JS[SUCCEEDED]
+    JR -->|Terminal failure| JF[FAILED]
+    JR -->|Superseded or document delete| JC
+    JF -->|Retry if attempt_count is below max_attempts| JQ
+  end
+
+  STALE[Stale callback: attemptCount does not match] -.-> IGNORED[ACK ignored; no state change]
+  TYPES[Job types: INGEST, REPROCESS, SET_RETRIEVAL, DELETE_VECTORS]
+  STAGE[current_stage is nullable and has no schema enum]
+
+  DR ~~~ VV
+  VD ~~~ JQ
+  JC ~~~ STALE
