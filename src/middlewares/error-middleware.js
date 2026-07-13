@@ -21,11 +21,13 @@ function errorHandler(err, req, res, next) {
   console.error(`[ERROR LOG] ${new Date().toISOString()} - status: ${status} - code: ${errorCode}`);
   console.error(err.stack || err);
 
-  res.status(status).json({
+  const body = {
     success: false,
     message: err.message || 'Lỗi hệ thống nghiêm trọng (Internal Server Error).',
     errorCode: errorCode
-  });
+  };
+  if (err.data !== undefined) body.data = err.data;
+  res.status(status).json(body);
 }
 
 module.exports = {

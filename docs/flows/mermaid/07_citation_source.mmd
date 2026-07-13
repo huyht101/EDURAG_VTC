@@ -1,4 +1,4 @@
-%% 07 Citation creation and source access | Status: REPLACED, public routes PROVISIONAL
+%% 07 Citation creation and source access | Status: MVP IMPLEMENTED
 sequenceDiagram
   participant RAG as Python RAG Service
   participant Node as NodeJS Core
@@ -6,7 +6,7 @@ sequenceDiagram
   participant Client as Web / Mobile Client
   participant Store as File Storage
 
-  RAG-->>Node: PROVISIONAL structured answer with source fragments and optional scores
+  RAG-->>Node: Structured answer with source fragments and optional scores
   Node->>DB: Resolve each vector_node_id to parent document_chunks and documents
   loop Each citation fragment
     Node->>Node: Build immutable title, page, section, text and locator snapshot
@@ -15,7 +15,7 @@ sequenceDiagram
   Node->>DB: In assistant-completion transaction, insert ordered citations
   Note over Node,DB: Do not parse bracket markers from answer text, document_id and chunk_id may later become NULL
 
-  Client->>Node: PROVISIONAL citation/source request with user JWT
+  Client->>Node: Citation/source request with user JWT
   Node->>DB: Join citation, assistant message and chat session
   Node->>Node: Authorize chat-session owner or permitted ADMIN access
   alt Not authorized or resource is hidden by policy

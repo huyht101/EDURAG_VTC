@@ -10,8 +10,22 @@ const { notFound, errorHandler } = require('./middlewares/error-middleware');
 
 const authRoutes = require('./routes/auth-routes');
 const userRoutes = require('./routes/user-routes');
+const documentRoutes = require('./routes/document-routes');
+const internalRagRoutes = require('./routes/internal-rag-routes');
+const chatRoutes = require('./routes/chat-routes');
+const citationRoutes = require('./routes/citation-routes');
+const dashboardRoutes = require('./routes/dashboard-routes');
 
 const app = express();
+
+// The internal complete-manifest callback can be larger than the public JSON API.
+// Keep this route-specific so unauthenticated public endpoints retain Express's 100 KB default.
+app.use(
+  '/api/internal/rag',
+  express.json({ limit: '10mb' }),
+  responseMiddleware,
+  internalRagRoutes
+);
 
 // ─────────────────────────────────────────────
 // 1. Body Parsing
@@ -54,6 +68,10 @@ app.get('/health', (req, res) => {
 // ─────────────────────────────────────────────
 app.use('/api/auth', authRoutes);
 app.use('/api', userRoutes);        // covers /api/profile and /api/admin/users
+app.use('/api/documents', documentRoutes);
+app.use('/api/chat', chatRoutes);
+app.use('/api/citations', citationRoutes);
+app.use('/api/admin/dashboard', dashboardRoutes);
 
 // ─────────────────────────────────────────────
 // 7. 404 Not Found & Global Error Handler

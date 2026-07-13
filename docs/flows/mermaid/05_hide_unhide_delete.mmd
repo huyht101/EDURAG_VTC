@@ -1,11 +1,11 @@
-%% 05 Hide, unhide and delete | Status: PROVISIONAL orchestration contract
+%% 05 Hide, unhide and delete | Status: MVP IMPLEMENTED
 sequenceDiagram
   participant Client as Web / Mobile Client
   participant Node as NodeJS Public API
   participant DB as MySQL
   participant RAG as Python RAG Service
 
-  Client->>Node: PROVISIONAL hide, unhide or delete with user JWT
+  Client->>Node: Hide, unhide or delete with user JWT
   Node->>Node: Verify ACTIVE user and TEACHER owner or ADMIN
   Node->>DB: BEGIN and lock document plus active processing job
   Node->>DB: Validate processing_status, visibility_status and requested transition
@@ -20,11 +20,11 @@ sequenceDiagram
     Node->>DB: COMMIT
     Node->>DB: Short transaction: increment attempt_count and set operation job RUNNING
     alt Hide
-      Node->>RAG: PROVISIONAL set retrieval false with internal Bearer
+      Node->>RAG: Set retrieval false with internal Bearer
     else Unhide
-      Node->>RAG: PROVISIONAL set retrieval true with internal Bearer
+      Node->>RAG: Set retrieval true with internal Bearer
     else Delete
-      Node->>RAG: PROVISIONAL deactivate retrieval, then delete vectors
+      Node->>RAG: Deactivate retrieval, then delete vectors
     end
     Note over Node,RAG: No distributed transaction and no open MySQL transaction
     Node-->>Client: 202 with jobId
@@ -36,7 +36,7 @@ sequenceDiagram
     else Dispatch or operation fails
       RAG-->>Node: Failure or timeout
       Node->>DB: Persist FAILED and keep prior visibility state
-      Note over Node,DB: Retrieval may already be disabled, fail closed and retry the operation job
+      Note over Node,DB: No automatic retry, inspect and reconcile manually before another operation
     end
   end
 

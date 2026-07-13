@@ -1,9 +1,9 @@
-%% 08 Chat history | Status: PROVISIONAL public routes, schema-accurate persistence
+%% 08 Chat history | Status: MVP IMPLEMENTED
 flowchart TB
-  A[PROVISIONAL Chat Session API request with user JWT] --> B[Verify ACTIVE user]
+  A[Chat Session API request with user JWT] --> B[Verify ACTIVE user]
   B --> C{Operation}
   C -->|Create| D[Insert chat_sessions owned by req.user.id]
-  C -->|List| E[Filter user_id and deleted_at IS NULL; paginate by stable cursor]
+  C -->|List| E[Filter user_id and deleted_at IS NULL; paginate by offset and limit]
   C -->|Detail or history| F[Authorize session owner]
   C -->|Continue| G[Authorize owner and require deleted_at IS NULL]
   C -->|Soft delete| H[Lock session and set deleted_at]
@@ -21,4 +21,4 @@ flowchart TB
 
   Note1[MySQL is the durable history source]
   Note2[Python receives only a bounded history window for the current query]
-  Note3[Route names, cursor shape and history-window limit are PROVISIONAL]
+  Note3[History window and offset-limit maximum are configuration or service bounded]

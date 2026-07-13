@@ -14,17 +14,20 @@ const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$
 function validateRegister(body) {
   if (!body) return { error: 'Dữ liệu yêu cầu trống.' };
 
-  const { email, password, fullName, role, studentCode, dateOfBirth } = body;
+  const {
+    email, password, fullName, phone, role, studentCode, dateOfBirth,
+    academicTitle, degree, department
+  } = body;
 
-  if (!email || !emailRegex.test(email)) {
+  if (typeof email !== 'string' || email.length > 254 || !emailRegex.test(email)) {
     return { error: 'Email không hợp lệ.' };
   }
 
-  if (!password || !passwordRegex.test(password)) {
+  if (typeof password !== 'string' || password.length > 128 || !passwordRegex.test(password)) {
     return { error: 'Mật khẩu phải chứa tối thiểu 8 ký tự, gồm chữ hoa, chữ thường, chữ số và ký tự đặc biệt.' };
   }
 
-  if (!fullName || fullName.trim() === '') {
+  if (typeof fullName !== 'string' || !fullName.trim() || fullName.trim().length > 150) {
     return { error: 'Họ và tên không được để trống.' };
   }
 
@@ -32,11 +35,24 @@ function validateRegister(body) {
     return { error: 'Vai trò phải là STUDENT hoặc TEACHER.' };
   }
 
+  if (phone !== undefined && phone !== null
+    && (typeof phone !== 'string' || phone.length > 20)) {
+    return { error: 'Số điện thoại không hợp lệ.' };
+  }
+  for (const [field, value, maxLength] of [
+    ['academicTitle', academicTitle, 100], ['degree', degree, 100], ['department', department, 150]
+  ]) {
+    if (value !== undefined && value !== null
+      && (typeof value !== 'string' || value.length > maxLength)) {
+      return { error: `${field} không hợp lệ.` };
+    }
+  }
+
   if (role === ROLES.STUDENT) {
-    if (!studentCode || studentCode.trim() === '') {
+    if (typeof studentCode !== 'string' || !studentCode.trim() || studentCode.trim().length > 32) {
       return { error: 'Mã sinh viên là bắt buộc đối với Sinh viên.' };
     }
-    if (!dateOfBirth || isNaN(Date.parse(dateOfBirth))) {
+    if (typeof dateOfBirth !== 'string' || Number.isNaN(Date.parse(dateOfBirth))) {
       return { error: 'Ngày sinh không hợp lệ (Định dạng mẫu YYYY-MM-DD).' };
     }
   }
@@ -45,7 +61,7 @@ function validateRegister(body) {
 }
 
 function validateForgotPassword(body) {
-  if (!body?.email || !emailRegex.test(body.email)) {
+  if (typeof body?.email !== 'string' || body.email.length > 254 || !emailRegex.test(body.email)) {
     return { error: 'Email không hợp lệ.' };
   }
   return null;
@@ -58,10 +74,10 @@ function validateLogin(body) {
   if (!body) return { error: 'Dữ liệu yêu cầu trống.' };
   const { email, password } = body;
 
-  if (!email || email.trim() === '') {
+  if (typeof email !== 'string' || !email.trim() || email.length > 254) {
     return { error: 'Email không được để trống.' };
   }
-  if (!password || password.trim() === '') {
+  if (typeof password !== 'string' || !password || password.length > 1024) {
     return { error: 'Mật khẩu không được để trống.' };
   }
   return null;
@@ -74,10 +90,10 @@ function validateVerifyOtp(body) {
   if (!body) return { error: 'Dữ liệu yêu cầu trống.' };
   const { email, otpCode } = body;
 
-  if (!email || !emailRegex.test(email)) {
+  if (typeof email !== 'string' || email.length > 254 || !emailRegex.test(email)) {
     return { error: 'Email không hợp lệ.' };
   }
-  if (!otpCode || !/^\d{6}$/.test(otpCode)) {
+  if (typeof otpCode !== 'string' || !/^\d{6}$/.test(otpCode)) {
     return { error: 'Mã OTP phải là chuỗi gồm 6 chữ số.' };
   }
   return null;
@@ -90,10 +106,10 @@ function validateChangePassword(body) {
   if (!body) return { error: 'Dữ liệu yêu cầu trống.' };
   const { oldPassword, newPassword } = body;
 
-  if (!oldPassword || oldPassword.trim() === '') {
+  if (typeof oldPassword !== 'string' || !oldPassword || oldPassword.length > 1024) {
     return { error: 'Mật khẩu cũ là bắt buộc.' };
   }
-  if (!newPassword || !passwordRegex.test(newPassword)) {
+  if (typeof newPassword !== 'string' || newPassword.length > 128 || !passwordRegex.test(newPassword)) {
     return { error: 'Mật khẩu mới không đủ độ phức tạp an toàn.' };
   }
   return null;
@@ -106,10 +122,10 @@ function validateResetPassword(body) {
   if (!body) return { error: 'Dữ liệu yêu cầu trống.' };
   const { token, newPassword } = body;
 
-  if (!token || token.trim() === '') {
+  if (typeof token !== 'string' || !token.trim() || token.length > 512) {
     return { error: 'Token khôi phục mật khẩu là bắt buộc.' };
   }
-  if (!newPassword || !passwordRegex.test(newPassword)) {
+  if (typeof newPassword !== 'string' || newPassword.length > 128 || !passwordRegex.test(newPassword)) {
     return { error: 'Mật khẩu mới không đủ độ phức tạp an toàn.' };
   }
   return null;

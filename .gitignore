@@ -17,13 +17,13 @@ dist/
 build/
 
 # Temporary/runtime data
-tmp/
-temp/
-uploads/
-storage/
-.mysql/
-mysql_data/
-qdrant_data/
+/tmp/
+/temp/
+/uploads/
+/storage/
+/.mysql/
+/mysql_data/
+/qdrant_data/
 
 # Editors and OS metadata
 .vscode/

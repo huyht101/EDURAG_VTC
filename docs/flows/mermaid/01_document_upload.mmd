@@ -1,4 +1,4 @@
-%% 01 Document upload | Status: PROVISIONAL contract, reviewed against schema 1.0.0
+%% 01 Document upload | Status: MVP IMPLEMENTED
 sequenceDiagram
   participant Client as Web / Mobile Client
   participant Node as NodeJS Public API
@@ -15,7 +15,7 @@ sequenceDiagram
     alt Request or file is invalid
       Node-->>Client: 400 validation error
     else Valid input
-      Note over Node,Store: PROVISIONAL storage adapter, schema supports LOCAL or OBJECT
+      Note over Node,Store: Local storage adapter is implemented, OBJECT remains future scope
       Node->>Store: Persist original file and compute relative storage_key plus SHA-256
       Store-->>Node: Stored file metadata
       Node->>DB: BEGIN transaction
@@ -27,15 +27,14 @@ sequenceDiagram
         Node-->>Client: 500 upload failed
       else Metadata and job committed
         Node->>DB: Short transaction: increment attempt_count and set job RUNNING
-        Node->>RAG: PROVISIONAL start ingest with internal Bearer and String(documentId)
+        Node->>RAG: Start ingest with internal Bearer and String(documentId)
         Note over Node,RAG: No MySQL transaction remains open during this call
         alt Python accepts dispatch
           RAG-->>Node: Accepted
           Node-->>Client: 202 with documentId and jobId
         else Dispatch is temporarily unavailable
-          Node->>DB: Record failure and retry only below max_attempts
-          Note over Node,DB: PROVISIONAL retry trigger and public response are not implemented
-          Node-->>Client: 202 if durable retry exists, otherwise 503
+          Node->>DB: Mark job and document FAILED, retain file
+          Node-->>Client: 503 with documentId and jobId, no automatic retry
         end
       end
     end

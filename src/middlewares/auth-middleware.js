@@ -41,15 +41,4 @@ async function authMiddleware(req, res, next) {
   }
 }
 
-function mockAuthMiddleware(req, _res, next) {
-  req.user = {
-    id: Number.parseInt(req.headers['x-mock-id'] || '2', 10),
-    email: req.headers['x-mock-email'] || 'mockuser@test.com',
-    role: req.headers['x-mock-role'] || 'TEACHER',
-    status: req.headers['x-mock-status'] || STATUSES.ACTIVE,
-    authVersion: Number.parseInt(req.headers['x-mock-auth-version'] || '1', 10)
-  };
-  next();
-}
-
-module.exports = { authMiddleware, mockAuthMiddleware };
+module.exports = { authMiddleware };

@@ -1,6 +1,6 @@
-%% 09 Usage and dashboard | Status: PROVISIONAL API, schema-backed read model
+%% 09 Usage and dashboard | Status: MVP IMPLEMENTED basic summary
 flowchart TB
-  A[PROVISIONAL Admin Dashboard request with user JWT] --> B[Verify ACTIVE user and ADMIN role]
+  A[Admin Dashboard request with user JWT] --> B[Verify ACTIVE user and ADMIN role]
   B --> C[Validate UTC date range and pagination]
   C --> D[Aggregate documents by processing_status and visibility_status]
   C --> E[Aggregate chat_sessions and chat_messages]
@@ -21,4 +21,4 @@ flowchart TB
 
   Note1[retrieval_score and rerank_score belong to citations, not llm_usage_logs]
   Note2[Embedding, OCR and reranker costs are not recorded by schema 1.0.0]
-  Note3[Dashboard routes, DTOs and cost-pricing provenance are PROVISIONAL]
+  Note3[Dashboard is aggregate-only; cost pricing provenance remains external]

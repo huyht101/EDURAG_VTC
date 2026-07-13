@@ -4,9 +4,9 @@
  * Express middleware runner for custom validators
  * @param {Function} validatorFunc - Validation logic function returning { error: string|null }
  */
-function validateRequest(validatorFunc) {
+function validateRequest(validatorFunc, source = 'body') {
   return (req, res, next) => {
-    const result = validatorFunc(req.body);
+    const result = validatorFunc(req[source]);
     
     if (result && result.error) {
       return res.status(400).json({

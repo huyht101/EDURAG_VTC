@@ -1,25 +1,13 @@
-# Document flow decisions
+# Document flow implementation notes
 
-## Evidence level
+- Public Document routes, local storage, complete-manifest callback and mock/remote adapter are implemented.
+- TEACHER ownership and ADMIN global access are enforced in both route and service layers.
+- Upload writes the generated local file before the document/job transaction and compensates by deleting that file if the transaction fails.
+- Ingest dispatch happens after commit. Remote failure marks job/document `FAILED`, retains the original file and returns 503; no durable retry is promised.
+- Mock ingest is accepted but still requires the internal callback to make the document `READY`.
+- Callback locks job/document rows, checks `jobId + attemptCount`, acknowledges duplicate/stale callbacks, and persists one complete manifest transactionally.
+- Hide/unhide/delete use existing operation job types. Mock operations complete immediately; remote operations stay `RUNNING` until callback.
+- Hide preserves vectors; delete soft-deletes MySQL metadata and preserves file/history.
+- Public DTOs and file responses never expose `storage_key`.
 
-Document routes, controllers, services, repositories, validators, upload storage and callback endpoints do not exist yet. The diagrams are based on schema 1.0.0, the implemented JWT/internal-Bearer/transaction foundations, and the reviewed reference flow.
-
-## Locked decisions reflected in diagrams
-
-- Only TEACHER owners and ADMIN manage documents; STUDENT uses citation/source access.
-- NodeJS writes `documents`, `document_processing_jobs` and `document_chunks`; Python never writes MySQL.
-- NodeJS calls Python only after committing MySQL work and never holds a transaction during the call.
-- `document_processing_jobs.attempt_count` guards stale callbacks; exact repeated callbacks are idempotent.
-- The service layer must enforce at most one active INGEST or REPROCESS job per document under a row lock.
-- `document_chunks.vector_node_id` is the mapping to the Python node/Qdrant point.
-- Document `READY` requires a persisted manifest and `processed_at`.
-- Hiding disables retrieval but retains vectors; delete deactivates retrieval, removes vectors, then soft-deletes MySQL metadata while retaining file/history.
-- Public responses never expose `storage_key`.
-
-## Reprocess limitation from schema
-
-Schema 1.0.0 has one unique `(document_id, chunk_index)` and no generation/version table. Therefore the diagrams do not claim zero-downtime reprocess or parallel active generations. Reprocess must first fail closed by disabling retrieval, then replace old chunks. If it fails, citation snapshots remain readable even when old `chunk_id` references become null.
-
-## Implementation status
-
-All Document API operations and NodeJS–Python document payloads remain `PROVISIONAL`. No Redis, BullMQ, broker, or hidden dispatcher is assumed.
+Public reprocess, batching, durable scheduling and parallel generations remain outside MVP.

@@ -1,11 +1,11 @@
-%% 06 Chat RAG | Status: PROVISIONAL NodeJS-Python and public API contracts
+%% 06 Chat RAG | Status: MVP IMPLEMENTED with mock/remote adapter
 sequenceDiagram
   participant Client as Web / Mobile Client
   participant Node as NodeJS Public API
   participant DB as MySQL
   participant RAG as Python RAG Service
 
-  Client->>Node: PROVISIONAL send question with user JWT and clientRequestId
+  Client->>Node: Send question with user JWT and clientRequestId
   Node->>Node: Verify ACTIVE user and validate question
   Node->>DB: Check session ownership, deleted_at and duplicate client_request_id
   alt Existing clientRequestId
@@ -18,7 +18,7 @@ sequenceDiagram
     Node->>DB: Insert ASSISTANT PENDING with null content
     Node->>DB: COMMIT
     Node->>DB: Load bounded history ordered by message_order
-    Node->>RAG: PROVISIONAL query with internal Bearer, requestId, question and history window
+    Node->>RAG: Query with internal Bearer, requestId, question and history window
     Note over Node,RAG: Python receives request context only, MySQL remains chat-history source
     alt Timeout or transport failure
       Node->>DB: Set ASSISTANT FAILED and error_code

@@ -1,4 +1,5 @@
 const pool = require('../configs/db');
+const sqlPageNumbers = require('../utils/pagination');
 
 function executorOrPool(executor) {
   return executor || pool;
@@ -99,6 +100,7 @@ async function checkDuplicate({ email, studentCode }, executor) {
 
 async function listUsers({ page = 1, limit = 10, search = '', role = '', status = '' }, executor) {
   const offset = (page - 1) * limit;
+  const normalized = sqlPageNumbers(offset, limit);
   const params = [];
   let where = 'WHERE 1 = 1';
 
@@ -127,8 +129,8 @@ async function listUsers({ page = 1, limit = 10, search = '', role = '', status 
      JOIN roles r ON u.role_id = r.id
      ${where}
      ORDER BY u.created_at DESC
-     LIMIT ? OFFSET ?`,
-    [...params, limit, offset]
+     LIMIT ${normalized.limit} OFFSET ${normalized.offset}`,
+    params
   );
 
   return { total: countRows[0].total, users: dataRows };

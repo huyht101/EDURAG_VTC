@@ -1,6 +1,6 @@
-%% 04 Document management | Status: all public Document operations are PROVISIONAL
+%% 04 Document management | Status: MVP IMPLEMENTED
 flowchart TB
-  A[PROVISIONAL Document API request with user JWT] --> B[Implemented JWT middleware checks ACTIVE and authVersion]
+  A[Document API request with user JWT] --> B[JWT middleware checks ACTIVE and authVersion]
   B --> C{Role and ownership}
   C -->|ADMIN| D[Scope: every document]
   C -->|TEACHER| E[Scope: documents.uploaded_by equals req.user.id]
@@ -22,4 +22,4 @@ flowchart TB
   K --> P[Resolve storage_key internally; never expose it to client]
 
   Note1[DELETED documents are soft-deleted and excluded from normal lists]
-  Note2[Routes, DTOs, pagination style and source endpoint names are not implemented]
+  Note2[Implemented pagination uses normalized offset and limit with maximum 100]

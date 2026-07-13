@@ -1,99 +1,67 @@
-# EDURAG_VTC
+# EDURAG_VTC — NodeJS/Core
 
-NodeJS/Core backend của EduRAG, dùng Express, JavaScript CommonJS, `mysql2/promise` và SQL thuần trong repository layer. NodeJS là thành phần duy nhất ghi MySQL. Python RAG Service là service riêng và chưa được tích hợp trong compatibility gate này.
+Backend MVP cho trợ lý học tập RAG. NodeJS/Express sở hữu public API, authorization, file storage và toàn bộ dữ liệu nghiệp vụ MySQL; Python RAG là service nội bộ riêng và không ghi MySQL.
 
-## Trạng thái hiện tại
+Stack chính: Node.js 20+, Express, JavaScript CommonJS, `mysql2/promise`, MySQL 8.4 và local file storage. Không dùng ORM, Redis hay message broker.
 
-- Foundation/Auth/Profile/Admin User tương thích database schema 1.0.0.
-- Database bootstrap có đủ 12 bảng tại `src/database/schema.sql`.
-- Document, upload, processing callback, Chat, Citation và Dashboard: **planned / not implemented**.
-- Admin OTP và password reset có persistence/security foundation nhưng chưa có email provider.
-- Không có refresh-token table, ORM, Redis, BullMQ hoặc NodeJS client truy cập Qdrant.
+## Docker demo nhanh
 
-Tài liệu Part 1 hiện hành: [docs/account/README.md](docs/account/README.md). Các tài liệu cũ nằm dưới `docs/history/` và không phải specification hiện hành.
+> **DEMO ONLY:** các credential dưới đây cố ý đơn giản cho máy local, tuyệt đối không dùng cho production.
 
-## Yêu cầu
-
-- Node.js 20 trở lên.
-- Docker và Docker Compose nếu chạy bằng container.
-- MySQL 8.4, timezone UTC, database `edurag`.
-
-## Cài đặt và chạy
-
-```powershell
-npm.cmd ci
-Copy-Item .env.example .env
+```text
+Admin: admin@example.com / 123456
+MySQL: root / 123456
+App:   http://localhost:5001
+Docs:  http://localhost:5001/api-docs
 ```
 
-Thay tất cả giá trị `replace_with_...` trong `.env` bằng secret riêng. Không commit `.env`.
-
 ```powershell
-# Chỉ dùng cho development; xóa database volume hiện tại.
 docker compose down -v
-docker compose up -d db qdrant
-
-# Seed Admin idempotent từ env
-npm.cmd run seed:admin
-
-# Chạy NodeJS local
-npm.cmd run dev
-```
-
-MySQL tự chạy `src/database/schema.sql` khi volume mới được tạo. Schema dùng `CREATE TABLE IF NOT EXISTS`; chạy lần hai chỉ kiểm tra bootstrap không phá dữ liệu, không phải migration mechanism.
-
-Chạy lại bootstrap schema đã tích hợp từ `week2_nodejs_core_ref/database_setup.sql`:
-
-```powershell
-Get-Content -Raw src/database/schema.sql | docker compose exec -T db sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD"'
-```
-
-Chạy toàn bộ stack container:
-
-```powershell
 docker compose up --build
-docker compose run --rm app npm run seed:admin
 ```
 
-Swagger UI: `http://localhost:5000/api-docs`
-OpenAPI JSON: `http://localhost:5000/api-docs.json`
+Fresh volume tự chạy theo thứ tự:
 
-## Endpoint Part 1 đã triển khai
+1. [`src/database/schema.sql`](src/database/schema.sql) — schema 1.0.0 và ba role.
+2. [`src/database/demo_seed.sql`](src/database/demo_seed.sql) — Demo Admin idempotent.
 
-| Method | Route | Trạng thái |
-|---|---|---|
-| GET | `/health` | Hoạt động |
-| POST | `/api/auth/register` | Student ACTIVE; Teacher PENDING; user/profile atomic |
-| POST | `/api/auth/login` | Chỉ ACTIVE; Admin cần OTP |
-| POST | `/api/auth/admin/verify-otp` | Hoạt động; email delivery chưa tích hợp |
-| POST | `/api/auth/logout` | Stateless client-side logout |
-| POST | `/api/auth/forgot-password` | Tạo token an toàn; email delivery chưa tích hợp |
-| POST | `/api/auth/reset-password` | Atomic password/auth_version/token update |
-| GET | `/api/profile` | Hoạt động |
-| PUT | `/api/profile` | Student date_of_birth; Teacher fields nullable |
-| PUT | `/api/profile/password` | Tăng auth_version; JWT cũ mất hiệu lực |
-| GET | `/api/admin/users` | ADMIN list/filter/pagination |
-| GET | `/api/admin/users/:id` | ADMIN detail |
-| PUT | `/api/admin/users/:id/status` | Approve/reject/reopen/lock/unlock theo transition |
+Admin login vẫn verify bcrypt từ MySQL và yêu cầu OTP. Trong Docker demo, OTP development-only xuất hiện trong `docker compose logs app`; sau đó gọi `/api/auth/admin/verify-otp` để nhận JWT. Không có authentication bypass.
 
-Admin CRUD đầy đủ chưa được triển khai; hiện chỉ có list, detail và status workflow.
-
-## Development-only token delivery
-
-Project chưa có email provider. Để smoke-test OTP/reset token trên development, đặt:
-
-```dotenv
-NODE_ENV=development
-AUTH_DEV_DELIVERY_LOG_SECRETS=true
-```
-
-Không bật adapter này trong production. Plaintext OTP/reset token không được log khi adapter tắt.
-
-## Kiểm tra tĩnh
+Nếu cổng `5001` bận:
 
 ```powershell
-npm.cmd run check
-docker compose --env-file .env config
-git diff --check
+$env:APP_HOST_PORT=55001
+docker compose up --build
 ```
 
-Không có test framework tại thời điểm compatibility gate; `npm run check` chỉ kiểm tra cú pháp JavaScript.
+Qdrant không cần cho mock demo. Team RAG có thể bật riêng bằng `docker compose --profile rag up`.
+
+## Trạng thái MVP
+
+- Foundation/Auth/Profile/Admin User: implemented.
+- Document/upload/jobs/internal callback: implemented.
+- Chat/history/citation/usage/dashboard: implemented.
+- RAG mock mode: implemented và dùng mặc định.
+- Remote Python RAG: contract đã có, chưa integration-test với service thật.
+- PDF, DOCX, TXT: hỗ trợ; PPTX/OCR để sau.
+- Local storage và offset/limit pagination: MVP only.
+
+## Tài liệu
+
+- [Documentation index](docs/README.md)
+- [Database source and bootstrap](docs/database/README.md)
+- [Public API conventions](docs/api/public-api.md)
+- [Internal NodeJS–Python contract](docs/api/internal-rag-contract.md)
+- [NodeJS/Core flows](docs/flows/README.md)
+- OpenAPI runtime: `/api-docs` và `/api-docs.json`
+
+## Chạy NodeJS local
+
+```powershell
+Copy-Item .env.example .env
+npm ci
+npm run check
+npm start
+```
+
+Với local NodeJS, dùng MySQL demo trên `127.0.0.1:3306`. Xem [local development](docs/setup/local-development.md) và [Docker demo](docs/setup/docker-demo.md) để biết reset, test và giới hạn bảo mật.
