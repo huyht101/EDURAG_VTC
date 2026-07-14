@@ -1,25 +1,25 @@
-%% 04 Document management | Status: MVP IMPLEMENTED
+%% 04 Document management | Detailed NodeJS/Core flow
 flowchart TB
-  A[Document API request with user JWT] --> B[JWT middleware checks ACTIVE and authVersion]
+  A[Web document request with user JWT] --> B[Require ACTIVE account and current authVersion]
   B --> C{Role and ownership}
-  C -->|ADMIN| D[Scope: every document]
-  C -->|TEACHER| E[Scope: documents.uploaded_by equals req.user.id]
-  C -->|STUDENT| F[403; source access is only through an authorized citation]
+  C -->|ADMIN| D[Manage every document]
+  C -->|TEACHER| E[Manage only documents uploaded by the current user]
+  C -->|STUDENT| F[Document Management API is forbidden]
   D --> G{Requested operation}
   E --> G
 
-  G -->|List| H[Read documents with pagination and validated processing or visibility filters]
+  G -->|List| H[Search, filter and paginate documents]
   G -->|Detail| I[Read metadata and latest processing job]
-  G -->|Update metadata| J{Only mutable title is changed?}
-  G -->|Open original source| K[Authorize current document and stream through NodeJS]
+  G -->|Update metadata| J{Only title changes?}
+  G -->|Open original file| K[Authorize and stream through NodeJS]
   G -->|Hide, unhide or delete| L[Continue in flow 05]
 
-  J -->|Yes| M[Update documents.title; no re-index]
-  J -->|No, file content changes| N[Create a new document through flow 01]
+  J -->|Yes| M[Update title without reprocessing]
+  J -->|No, file content changes| N[Upload a new document through flow 01]
   H --> O[Return public DTO without storage_key]
   I --> O
   M --> O
-  K --> P[Resolve storage_key internally; never expose it to client]
+  K --> P[Resolve storage_key internally and never expose it]
 
-  Note1[DELETED documents are soft-deleted and excluded from normal lists]
-  Note2[Implemented pagination uses normalized offset and limit with maximum 100]
+  N1[DELETED documents are excluded from normal lists]
+  N2[Pagination uses normalized offset and limit, maximum 100]

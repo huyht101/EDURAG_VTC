@@ -12,7 +12,7 @@ Stack chính: Node.js 20+, Express, JavaScript CommonJS, `mysql2/promise`, MySQL
 Admin: admin@example.com / 123456
 MySQL: root / 123456
 App:   http://localhost:5001
-Docs:  http://localhost:5001/api-docs
+Docs(Swagger):  http://localhost:5001/api-docs
 ```
 
 ```powershell

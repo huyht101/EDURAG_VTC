@@ -1,40 +1,39 @@
-%% 01 Document upload | Status: MVP IMPLEMENTED
+%% 01 Document upload | Detailed NodeJS/Core flow
 sequenceDiagram
-  participant Client as Web / Mobile Client
+  participant Web as Web Document Management
   participant Node as NodeJS Public API
-  participant Store as File Storage
+  participant Store as Local File Storage
   participant DB as MySQL
   participant RAG as Python RAG Service
 
-  Client->>Node: Upload document with user JWT Bearer
-  Node->>Node: Verify ACTIVE user and TEACHER or ADMIN role
+  Web->>Node: Upload document with user JWT
+  Node->>Node: Require ACTIVE TEACHER or ADMIN
   alt Authentication or authorization fails
-    Node-->>Client: 401 or 403
+    Node-->>Web: 401 or 403
   else Authorized
-    Node->>Node: Validate metadata, size, PDF/DOCX/TXT, MIME and signature
+    Node->>Node: Validate title, size, PDF/DOCX/TXT, MIME and file signature
     alt Request or file is invalid
-      Node-->>Client: 400 validation error
+      Node-->>Web: 400 validation error
     else Valid input
-      Note over Node,Store: Local storage adapter is implemented, OBJECT remains future scope
-      Node->>Store: Persist original file and compute relative storage_key plus SHA-256
+      Node->>Store: Persist original file and compute relative storage_key and SHA-256
       Store-->>Node: Stored file metadata
       Node->>DB: BEGIN transaction
-      Node->>DB: INSERT documents as UPLOADED and VISIBLE
+      Node->>DB: INSERT document as UPLOADED and VISIBLE
       Node->>DB: INSERT INGEST job as QUEUED
       Node->>DB: COMMIT
       alt MySQL transaction fails
-        Node->>Store: Compensate by deleting newly stored file
-        Node-->>Client: 500 upload failed
-      else Metadata and job committed
-        Node->>DB: Short transaction: increment attempt_count and set job RUNNING
-        Node->>RAG: Start ingest with internal Bearer and String(documentId)
-        Note over Node,RAG: No MySQL transaction remains open during this call
+        Node->>Store: Delete the newly stored file
+        Node-->>Web: 500 upload failed
+      else Document and job committed
+        Node->>DB: Short transaction: increment attempt_count, set job RUNNING and document PROCESSING
+        Node->>RAG: Start ingest with internal Bearer and string document ID
+        Note over Node,RAG: No MySQL transaction remains open during the network call
         alt Python accepts dispatch
-          RAG-->>Node: Accepted
-          Node-->>Client: 202 with documentId and jobId
-        else Dispatch is temporarily unavailable
-          Node->>DB: Mark job and document FAILED, retain file
-          Node-->>Client: 503 with documentId and jobId, no automatic retry
+          RAG-->>Node: accepted = true
+          Node-->>Web: 202 with documentId and jobId
+        else Python rejects, times out or is unavailable
+          Node->>DB: Mark job and document FAILED, retain original file
+          Node-->>Web: 503 with documentId and jobId
         end
       end
     end

@@ -1,45 +1,49 @@
-%% 02 Processing callback | Status: MVP IMPLEMENTED, complete manifest only
+%% 02 Processing callback | Detailed NodeJS/Core flow, complete manifest only
 sequenceDiagram
   participant RAG as Python RAG Service
   participant Node as NodeJS Internal API
   participant DB as MySQL
 
-  RAG->>Node: Callback with internal Bearer, jobId, attemptCount and event type
-  Node->>Node: Verify RAG_INTERNAL_TOKEN and validate payload
-  alt Authentication or payload is invalid
+  RAG->>Node: Callback with internal Bearer, jobId, attemptCount and eventType
+  Node->>Node: Verify internal token and validate payload
+  alt Token or payload is invalid
     Node-->>RAG: 401 or 400
   else Valid callback
-    Node->>DB: BEGIN and lock job plus document rows
-    Node->>DB: Compare jobId, status and attempt_count
-    alt Callback is stale or belongs to a superseded attempt
-      Node->>DB: ROLLBACK without business-state changes
+    Node->>DB: BEGIN and lock job and document rows
+    Node->>DB: Compare document, status and attempt_count
+    alt Stale attempt or job is not RUNNING
+      Note over Node,DB: Commit without business-state changes
       Node-->>RAG: 200 ACK ignored
-    else Exact terminal callback was already applied
-      Node->>DB: COMMIT without duplicate writes
+    else Same terminal callback was already applied
+      Note over Node,DB: Commit without duplicate writes
       Node-->>RAG: 200 ACK duplicate
     else PROGRESS event
-      Node->>DB: Set RUNNING, current_stage and callback_received_at
+      Node->>DB: Update current_stage and callback timestamp
       Node->>DB: COMMIT
       Node-->>RAG: 200 ACK
-    else SUCCEEDED terminal event
-      Node->>Node: Validate one complete manifest, UUIDs, hashes and locators
-      opt Job type is REPROCESS
-        Note over Node,DB: No parallel generation exists in schema 1.0.0
-        Node->>DB: Delete old document_chunks after retrieval was disabled
+    else SUCCEEDED event
+      alt Job type is INGEST or REPROCESS
+        Node->>Node: Validate the complete manifest, UUIDs, hashes and locators
+        opt Job type is REPROCESS
+          Node->>DB: Delete old chunks for the document
+        end
+        Node->>DB: Insert the complete manifest and verify persisted count
+        Node->>DB: Mark job SUCCEEDED and document READY
+      else Job type is SET_RETRIEVAL or DELETE_VECTORS
+        Node->>DB: Validate job_config target visibility
+        Node->>DB: Mark job SUCCEEDED and apply VISIBLE, HIDDEN or DELETED
       end
-      Node->>DB: Insert complete manifest and verify persisted chunk count
-      Note over Node,RAG: SUCCEEDED terminal callback attests Python-side completion
-      Node->>DB: Set job SUCCEEDED, finished_at and callback_received_at
-      Node->>DB: Set document READY and processed_at for INGEST or REPROCESS
-      Node->>DB: Apply validated visibility transition for operation job types
       Node->>DB: COMMIT
       Node-->>RAG: 200 ACK terminal
-    else FAILED or CANCELLED terminal event
-      Node->>DB: Persist job status, error_code, error_message and timestamps
-      Node->>DB: Set document FAILED or CANCELLED only for INGEST or REPROCESS
+    else FAILED or CANCELLED event
+      Node->>DB: Persist job status, error and terminal timestamps
+      opt Job type is INGEST or REPROCESS
+        Node->>DB: Set document FAILED or CANCELLED
+      end
+      Note over Node,DB: A failed visibility operation keeps the previous visibility state
       Node->>DB: COMMIT
       Node-->>RAG: 200 ACK terminal
     end
   end
 
-  Note over RAG,DB: Python never writes MySQL, vector_node_id maps the Python node to the Qdrant point
+  Note over RAG,DB: Python never writes MySQL, vector_node_id maps a source chunk to its Qdrant point

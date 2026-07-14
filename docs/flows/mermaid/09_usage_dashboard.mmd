@@ -1,24 +1,23 @@
-%% 09 Usage and dashboard | Status: MVP IMPLEMENTED basic summary
+%% 09 Usage and dashboard | Detailed NodeJS/Core flow
 flowchart TB
-  A[Admin Dashboard request with user JWT] --> B[Verify ACTIVE user and ADMIN role]
-  B --> C[Validate UTC date range and pagination]
-  C --> D[Aggregate documents by processing_status and visibility_status]
-  C --> E[Aggregate chat_sessions and chat_messages]
-  C --> F[Aggregate citations]
+  A[Admin dashboard request with user JWT] --> B[Require ACTIVE ADMIN]
+  B --> C[Validate optional UTC range, from before to]
+  C --> D[Count documents by processing and visibility status]
+  C --> E[Count chat sessions and messages]
+  C --> F[Count citations]
   C --> G[Aggregate llm_usage_logs]
 
-  G --> H[Group by provider, model, operation_type and status]
-  H --> I[Use request_id plus call_index; one assistant message may have many calls]
-  I --> J[Sum prompt_tokens, completion_tokens and generated total_tokens]
-  J --> K[Sum estimated_cost while excluding NULL]
+  G --> H[Group by provider, model, status and currency]
+  H --> I[Count calls and sum token values]
+  I --> J[Sum estimated_cost while excluding NULL]
 
-  D --> L[Compose dashboard DTO]
-  E --> L
-  F --> L
-  K --> L
-  L --> M[Set usageScope to LLM_CALLS_ONLY]
-  M --> N[200 dashboard data]
+  D --> K[Compose dashboard DTO]
+  E --> K
+  F --> K
+  J --> K
+  K --> L[Set usage.scope to LLM_CALLS_ONLY]
+  L --> M[200 dashboard data]
 
-  Note1[retrieval_score and rerank_score belong to citations, not llm_usage_logs]
-  Note2[Embedding, OCR and reranker costs are not recorded by schema 1.0.0]
-  Note3[Dashboard is aggregate-only; cost pricing provenance remains external]
+  N1[request_id and call_index prevent duplicate usage rows]
+  N2[The schema does not record embedding, OCR or reranking costs]
+  N3[The dashboard exposes aggregate summary data only]

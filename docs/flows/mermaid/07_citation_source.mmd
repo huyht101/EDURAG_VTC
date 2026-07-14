@@ -1,36 +1,40 @@
-%% 07 Citation creation and source access | Status: MVP IMPLEMENTED
+%% 07 Citation creation and source access | Detailed NodeJS/Core flow
 sequenceDiagram
   participant RAG as Python RAG Service
   participant Node as NodeJS Core
   participant DB as MySQL
-  participant Client as Web / Mobile Client
-  participant Store as File Storage
+  participant Client as Web or Mobile Client
+  participant Store as Local File Storage
 
   RAG-->>Node: Structured answer with source fragments and optional scores
-  Node->>DB: Resolve each vector_node_id to parent document_chunks and documents
-  loop Each citation fragment
+  Node->>DB: Resolve vector_node_id to document_chunks and documents
+  loop Each source fragment
     Node->>Node: Build immutable title, page, section, text and locator snapshot
     Note over Node: One parent chunk may produce multiple citation fragments
   end
-  Node->>DB: In assistant-completion transaction, insert ordered citations
-  Note over Node,DB: Do not parse bracket markers from answer text, document_id and chunk_id may later become NULL
+  Node->>DB: Insert ordered citations in the assistant-completion transaction
+  Note over Node,DB: Do not parse bracket markers such as [1], and retain snapshots after hide or delete
 
-  Client->>Node: Citation/source request with user JWT
-  Node->>DB: Join citation, assistant message and chat session
-  Node->>Node: Authorize chat-session owner or permitted ADMIN access
-  alt Not authorized or resource is hidden by policy
-    Node-->>Client: 404 or 403
+  Client->>Node: Request citation snapshot or original file with user JWT
+  Node->>DB: Read citation, assistant message and chat session
+  Node->>Node: Authorize chat-session owner or ADMIN
+  alt Not authorized
+    Node-->>Client: 404 citation not found
   else Snapshot requested
-    Node-->>Client: Immutable source_text_snapshot and locator snapshots
+    Node-->>Client: Immutable source snapshot and originalAvailable
   else Original file requested
-    Node->>DB: Read current document state if document_id still exists
-    alt Document is READY and VISIBLE, or caller is uploader or ADMIN
-      Node->>Store: Resolve storage_key internally and open file
+    Node->>DB: Read current document and source authorization context
+    alt ADMIN or uploader and storage_key exists
+      Node->>Store: Open file using internal storage_key
       Store-->>Node: File stream
-      Node-->>Client: Stream original file without exposing storage_key
-    else Document reference is NULL, HIDDEN, DELETED or file is missing
-      Node-->>Client: Snapshot with originalAvailable false
+      Node-->>Client: Stream file without exposing storage_key
+    else Normal session owner and document is READY and VISIBLE
+      Node->>Store: Open file using internal storage_key
+      Store-->>Node: File stream
+      Node-->>Client: Stream file without exposing storage_key
+    else Original file is not authorized or unavailable by state
+      Node-->>Client: 409 original source unavailable
     end
   end
 
-  Note over Node,DB: retrieval_score and rerank_score are optional citation fields, not usage cost
+  Note over Node,Store: If the database storage_key exists but the physical file is missing, the file endpoint returns 404 while the citation snapshot remains available

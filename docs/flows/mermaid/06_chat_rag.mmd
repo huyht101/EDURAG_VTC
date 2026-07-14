@@ -1,44 +1,45 @@
-%% 06 Chat RAG | Status: MVP IMPLEMENTED with mock/remote adapter
+%% 06 Chat RAG | Detailed NodeJS/Core flow
 sequenceDiagram
-  participant Client as Web / Mobile Client
+  participant Client as Web or Mobile Client
   participant Node as NodeJS Public API
   participant DB as MySQL
   participant RAG as Python RAG Service
 
   Client->>Node: Send question with user JWT and clientRequestId
-  Node->>Node: Verify ACTIVE user and validate question
-  Node->>DB: Check session ownership, deleted_at and duplicate client_request_id
-  alt Existing clientRequestId
-    DB-->>Node: Existing USER message and related assistant state
-    Node-->>Client: Return current PENDING, COMPLETED or FAILED result
+  Node->>Node: Require ACTIVE account and validate question
+  Node->>DB: Check session ownership and client_request_id
+  alt clientRequestId already exists in the same session
+    DB-->>Node: Existing USER and ASSISTANT pair
+    Node-->>Client: Return current PENDING, COMPLETED or FAILED state
   else New request
-    Node->>DB: BEGIN and lock chat_sessions row
-    Node->>DB: Allocate message_order values
+    Node->>DB: BEGIN and lock chat session
+    Node->>DB: Allocate next message_order values
     Node->>DB: Insert USER COMPLETED with client_request_id
     Node->>DB: Insert ASSISTANT PENDING with null content
     Node->>DB: COMMIT
-    Node->>DB: Load bounded history ordered by message_order
-    Node->>RAG: Query with internal Bearer, requestId, question and history window
-    Note over Node,RAG: Python receives request context only, MySQL remains chat-history source
-    alt Timeout or transport failure
-      Node->>DB: Set ASSISTANT FAILED and error_code
-      Note over Node,DB: Insert FAILED usage only if structured usage metadata was returned
-      Node-->>Client: 502 RAG unavailable, same clientRequestId remains idempotent
-    else Structured no-answer result
-      RAG-->>Node: noAnswer plus optional usage calls
-      Node->>DB: Transaction: ASSISTANT COMPLETED, no_answer true, usage rows and last_message_at
-      Node-->>Client: 200 no-answer result without citations
-    else Structured answer and source fragments
-      RAG-->>Node: Answer, structured sources and optional usage calls
-      Node->>DB: Map vector_node_id values to document_chunks and documents
-      alt Source mapping or snapshot validation fails
-        Node->>DB: Set ASSISTANT FAILED with source-mapping error
-        Node-->>Client: 502 unverifiable sources
-      else Sources are valid
-        Node->>DB: One transaction: complete ASSISTANT, insert citations and usage, update last_message_at
-        Node-->>Client: 200 answer with citation DTOs
+    Node->>DB: Load bounded completed history by message_order
+    Node->>RAG: Query with internal Bearer, requestId, question and history
+    Note over Node,RAG: Retrieval uses the shared READY and VISIBLE corpus, with no subject or document selection
+    Note over Node,RAG: MySQL owns durable history, while Python receives only the current history window
+    alt RAG timeout or transport failure
+      Node->>DB: Set ASSISTANT FAILED and persist error_code
+      Node-->>Client: 502 or 503, clientRequestId remains idempotent
+    else Valid no-answer result
+      RAG-->>Node: noAnswer and optional usageCalls
+      Node->>DB: Transaction: complete ASSISTANT, persist usage and touch session
+      Node-->>Client: 200 without fabricated citations
+    else Structured answer, sources may be empty
+      RAG-->>Node: answer, sources and usageCalls
+      Node->>DB: Resolve vector_node_id to READY and VISIBLE chunks and documents
+      Node->>Node: Validate source snapshots and usage metadata
+      alt Source or usage validation fails
+        Node->>DB: Set ASSISTANT FAILED
+        Node-->>Client: 502 unverifiable RAG result
+      else Result is valid
+        Node->>DB: One transaction: complete ASSISTANT, insert citations and usage, touch session
+        Node-->>Client: 200 with answer and citation DTOs
       end
     end
   end
 
-  Note over Client,RAG: Public and internal Bearer tokens are distinct, client never calls Python directly
+  Note over Client,RAG: The client never calls Python directly, and user JWT is separate from the internal token
