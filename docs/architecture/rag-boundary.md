@@ -1,26 +1,35 @@
 # NodeJS–Python RAG boundary
 
-NodeJS là orchestrator và thành phần duy nhất ghi MySQL. Python sở hữu parsing/chunking/embedding/retrieval/generation và Qdrant; Python không giữ chat history bền vững.
+## Direction
 
-## NodeJS gửi
+- Client → NodeJS: public user JWT.
+- NodeJS → Python: internal Bearer, snake_case JSON.
+- Python → NodeJS callback: internal Bearer, snake_case JSON.
+- NodeJS → MySQL: business persistence.
+- Python → Qdrant: vector/retrieval persistence.
 
-- Start ingest/reprocess với `documentId = String(documents.id)`, job và attempt.
-- Set retrieval state cho hide/unhide.
-- Delete vectors cho soft delete.
-- Chat query với câu hỏi và bounded history window.
+Không có Client → Python, NodeJS → Qdrant hoặc Python → MySQL.
 
-NodeJS không hard-code Qdrant payload key. Mapping `ref_doc_id`/`retrieval_enabled` và nội bộ LlamaIndex thuộc Python contract.
+## Shared file boundary
 
-## Python trả
+NodeJS lưu generated relative `storage_key`. Remote ingest chuyển key thành absolute path nhìn thấy từ Python qua `RAG_SHARED_UPLOAD_DIR`, sau containment validation.
 
-- Progress hoặc terminal complete-manifest callback.
-- Structured answer, sources và LLM usage calls.
-- Source dùng `vectorNodeId`; NodeJS resolve qua `document_chunks`, hydrate metadata và persist immutable citation snapshot.
+Python cần read-only access tới cùng file root. Original filename không dùng làm storage path.
 
-Internal requests dùng `Authorization: Bearer <RAG_INTERNAL_TOKEN>`. Remote adapter dùng contract v0.1 snake_case tại HTTP boundary và giữ normalized camelCase bên trong NodeJS. Contract tests với mocked transport đã có; remote end-to-end với service Python thật chưa chạy.
+## Normalization
 
-Shared file path được tạo từ generated `storage_key` và `RAG_SHARED_UPLOAD_DIR` sau containment validation. `RAG_DEFAULT_SUBJECT_ID=mvp-global` chỉ là compatibility shim cho Python hiện tại, không thêm subject scope vào MySQL/public API.
+NodeJS service/controller dùng camelCase. [`rag-contract.js`](../../src/clients/rag-contract.js) chịu trách nhiệm:
 
-Complete manifest vẫn bắt buộc full chunk text/hash; citation vẫn bắt buộc `vector_node_id`. Các thiếu hụt Python hiện tại được theo dõi tại [internal contract v0.1](../api/internal-rag-contract.md), không được NodeJS che bằng preview/fake mapping.
+- exact method/path;
+- snake_case serialization;
+- `action=hide|unhide`;
+- empty `teacher_metadata`;
+- `chunk_manifest`/`chunks` normalization;
+- citation and usage normalization;
+- upstream error mapping.
 
-Không có durable scheduler, callback batching, public reprocess hoặc zero-downtime generation trong MVP.
+## Consistency
+
+Network call không nằm trong MySQL transaction. Callback dùng processing attempt để chống stale, terminal callback idempotent và complete manifest transaction để chỉ chuyển document sang `READY` sau persist.
+
+Contract chi tiết nằm duy nhất tại [internal RAG contract](../api/internal-rag-contract.md). Deployment topology nằm tại [Python handoff deployment guide](../handoffs/python-rag-v0.1/03_deployment-and-env.md).

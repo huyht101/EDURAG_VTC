@@ -5,9 +5,5 @@
   "subject_id": "mvp-global",
   "file_path": "/shared/uploads/documents/2026/07/44444444-4444-4444-8444-444444444444.pdf",
   "callback_url": "http://node:5000/api/internal/rag/processing-callback",
-  "teacher_metadata": {
-    "user_id": "7",
-    "email": "teacher@example.test",
-    "role": "TEACHER"
-  }
+  "teacher_metadata": {}
 }

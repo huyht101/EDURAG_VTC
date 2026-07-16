@@ -9,13 +9,6 @@ function pageNumber(value) {
 }
 
 function buildIngestRequest(payload, config) {
-  const teacherMetadata = payload.teacherMetadata
-    ? {
-      user_id: String(payload.teacherMetadata.userId ?? payload.teacherMetadata.user_id),
-      email: payload.teacherMetadata.email,
-      role: payload.teacherMetadata.role
-    }
-    : null;
   return {
     method: 'POST',
     path: '/api/ingest',
@@ -26,7 +19,7 @@ function buildIngestRequest(payload, config) {
       subject_id: config.defaultSubjectId,
       file_path: resolveSharedUploadPath(payload.file.storageKey, config.sharedUploadDirectory),
       callback_url: config.callbackUrl,
-      teacher_metadata: teacherMetadata
+      teacher_metadata: {}
     }
   };
 }
@@ -38,7 +31,7 @@ function buildVisibilityRequest(payload, config) {
     body: {
       job_id: String(payload.jobId),
       attempt_count: Number(payload.attemptCount),
-      visible: Boolean(payload.enabled),
+      action: payload.enabled ? 'unhide' : 'hide',
       callback_url: config.callbackUrl
     }
   };
@@ -184,9 +177,23 @@ function normalizeProcessingCallback(payload) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw appError(400, 'RAG_CALLBACK_INVALID', 'RAG callback body must be an object.');
   }
-  const chunks = payload.chunks === undefined
+  const chunksManifest = payload.chunks === undefined
     ? undefined
     : Array.isArray(payload.chunks) ? payload.chunks.map(normalizeCallbackChunk) : payload.chunks;
+  const pythonManifest = payload.chunk_manifest === undefined
+    ? undefined
+    : Array.isArray(payload.chunk_manifest)
+      ? payload.chunk_manifest.map(normalizeCallbackChunk)
+      : payload.chunk_manifest;
+  if (chunksManifest !== undefined && pythonManifest !== undefined
+    && JSON.stringify(chunksManifest) !== JSON.stringify(pythonManifest)) {
+    throw appError(
+      400,
+      'RAG_CALLBACK_MANIFEST_CONFLICT',
+      'Callback chunks and chunk_manifest contain conflicting data.'
+    );
+  }
+  const chunks = chunksManifest ?? pythonManifest;
   const rawResult = payload.result || {};
   const rawError = payload.error || {};
   return {

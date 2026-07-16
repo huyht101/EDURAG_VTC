@@ -23,7 +23,7 @@ sequenceDiagram
       Node-->>RAG: 200 ACK
     else SUCCEEDED event
       alt Job type is INGEST or REPROCESS
-        Node->>Node: Require full chunk_text and SHA-256 hash, then map UUID chunk_id alias
+        Node->>Node: Normalize chunk_manifest or chunks, require full text/hash and UUID
         opt Job type is REPROCESS
           Node->>DB: Delete old chunks for the document
         end

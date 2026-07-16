@@ -25,11 +25,11 @@ sequenceDiagram
       Node->>DB: Set ASSISTANT FAILED and persist error_code
       Node-->>Client: 502 or 503, clientRequestId remains idempotent
     else Valid no-answer result
-      RAG-->>Node: no_answer and optional usage or usage_calls
+      RAG-->>Node: no_answer=true, string answer, confidence=low, usage may be null
       Node->>DB: Transaction: complete ASSISTANT, persist usage and touch session
       Node-->>Client: 200 without fabricated citations
     else Structured answer, sources may be empty
-      RAG-->>Node: answer, citations with vector_node_id, and usage
+      RAG-->>Node: answer, confidence string, citations with vector_node_id, and usage
       Node->>DB: Resolve vector_node_id to READY and VISIBLE chunks and documents
       Node->>Node: Validate source snapshots and usage metadata
       alt Source or usage validation fails

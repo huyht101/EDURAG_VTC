@@ -1,11 +1,7 @@
 {
-  "answer": null,
+  "answer": "Không đủ dữ liệu/Không tìm thấy thông tin liên quan trong tài liệu hiện có.",
   "no_answer": true,
-  "confidence": 0.12,
+  "confidence": "low",
   "citations": [],
-  "usage": {
-    "model": "gemini-confirmed",
-    "prompt_tokens": 18,
-    "completion_tokens": 0
-  }
+  "usage": null
 }

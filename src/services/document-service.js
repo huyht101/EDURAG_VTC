@@ -113,11 +113,6 @@ async function uploadDocument(user, file, requestedTitle) {
         fileType: stored.fileType,
         mimeType: stored.mimeType,
         checksumSha256: stored.checksumSha256
-      },
-      teacherMetadata: {
-        userId: String(user.id),
-        email: user.email,
-        role: user.role
       }
     });
     if (!dispatch.accepted) throw appError(503, 'RAG_DISPATCH_REJECTED', 'Python RAG service từ chối ingest job.');

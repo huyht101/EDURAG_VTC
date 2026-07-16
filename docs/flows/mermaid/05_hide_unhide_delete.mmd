@@ -20,13 +20,13 @@ sequenceDiagram
     Node->>DB: COMMIT
     Node->>DB: Short transaction: increment attempt_count and set job RUNNING
     alt Hide
-      Node->>RAG: PATCH /api/docs/{doc_id}/visibility with visible=false
+      Node->>RAG: PATCH /api/docs/{doc_id}/visibility with action=hide
     else Unhide
-      Node->>RAG: PATCH /api/docs/{doc_id}/visibility with visible=true
+      Node->>RAG: PATCH /api/docs/{doc_id}/visibility with action=unhide
     else Delete
       Node->>RAG: DELETE /api/ingest/{doc_id}
     end
-    Note over Node,RAG: Bodies and async callbacks for visibility/delete remain provisional pending Python confirmation
+    Note over Node,RAG: Python runtime accepts these exact methods, paths and actions
 
     alt Python rejects, times out or is unavailable
       Node->>DB: Mark operation job FAILED and retain previous visibility

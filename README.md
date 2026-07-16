@@ -1,8 +1,15 @@
-# EDURAG_VTC — NodeJS/Core
+# EDURAG_VTC
 
 Backend MVP cho trợ lý học tập RAG. NodeJS/Express sở hữu public API, authorization, file storage và toàn bộ dữ liệu nghiệp vụ MySQL; Python RAG là service nội bộ riêng và không ghi MySQL.
 
 Stack chính: Node.js 20+, Express, JavaScript CommonJS, `mysql2/promise`, MySQL 8.4 và local file storage. Không dùng ORM, Redis hay message broker.
+
+```text
+src/             NodeJS/Core runtime
+python-service/  Python FastAPI RAG runtime
+docs/            Canonical architecture, contract, status and handoff docs
+tests/           NodeJS contract fixtures
+```
 
 ## Docker demo nhanh
 
@@ -49,10 +56,13 @@ Qdrant không cần cho mock demo. Team RAG có thể bật riêng bằng `docke
 ## Tài liệu
 
 - [Documentation index](docs/README.md)
+- [System overview](docs/architecture/system-overview.md)
 - [Database source and bootstrap](docs/database/README.md)
 - [Public API conventions](docs/api/public-api.md)
 - [Internal NodeJS–Python contract](docs/api/internal-rag-contract.md)
 - [NodeJS/Core flows](docs/flows/README.md)
+- [Week 3 integration readiness](docs/status/week3-integration-readiness.md)
+- [Python service local setup](python-service/README.md)
 - OpenAPI runtime: `/api-docs` và `/api-docs.json`
 
 ## Chạy NodeJS local

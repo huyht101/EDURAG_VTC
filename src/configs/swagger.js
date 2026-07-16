@@ -129,6 +129,33 @@ const definition = {
           clientRequestId: { type: 'string', format: 'uuid' }
         }
       },
+      ProcessingChunkManifestItem: {
+        type: 'object',
+        required: ['chunk_index', 'chunk_text', 'content_hash'],
+        oneOf: [
+          { required: ['vector_node_id'] },
+          { required: ['chunk_id'] }
+        ],
+        properties: {
+          chunk_index: { type: 'integer', minimum: 0 },
+          vector_node_id: { type: 'string', format: 'uuid' },
+          chunk_id: {
+            type: 'string',
+            format: 'uuid',
+            description: 'Python runtime alias for vector_node_id.'
+          },
+          chunk_text: { type: 'string', minLength: 1, maxLength: 65535 },
+          content_hash: { type: 'string', pattern: '^[0-9a-fA-F]{64}$' },
+          token_count: { type: 'integer', minimum: 1 },
+          page_number: {
+            type: 'integer',
+            nullable: true,
+            description: 'Values <= 0 are normalized to null at the Node boundary.'
+          },
+          section_title: { type: 'string', maxLength: 500, nullable: true },
+          source_locator: { type: 'object', nullable: true }
+        }
+      },
       ProcessingCallbackBody: {
         type: 'object', required: ['event_type', 'job_id', 'attempt_count'],
         properties: {
@@ -143,34 +170,13 @@ const definition = {
           stage: { type: 'string', maxLength: 32 },
           chunks: {
             type: 'array',
-            description: 'Complete manifest for successful INGEST. Preview-only chunks are rejected.',
-            items: {
-              type: 'object',
-              required: ['chunk_index', 'chunk_text', 'content_hash'],
-              oneOf: [
-                { required: ['vector_node_id'] },
-                { required: ['chunk_id'] }
-              ],
-              properties: {
-                chunk_index: { type: 'integer', minimum: 0 },
-                vector_node_id: { type: 'string', format: 'uuid' },
-                chunk_id: {
-                  type: 'string',
-                  format: 'uuid',
-                  description: 'Python compatibility alias for vector_node_id.'
-                },
-                chunk_text: { type: 'string', minLength: 1, maxLength: 65535 },
-                content_hash: { type: 'string', pattern: '^[0-9a-fA-F]{64}$' },
-                token_count: { type: 'integer', minimum: 1 },
-                page_number: {
-                  type: 'integer',
-                  nullable: true,
-                  description: 'Values <= 0 are normalized to null at the Node boundary.'
-                },
-                section_title: { type: 'string', maxLength: 500, nullable: true },
-                source_locator: { type: 'object', nullable: true }
-              }
-            }
+            description: 'Node compatibility alias for a complete manifest.',
+            items: { $ref: '#/components/schemas/ProcessingChunkManifestItem' }
+          },
+          chunk_manifest: {
+            type: 'array',
+            description: 'Python runtime field for the complete manifest. Preview-only chunks are rejected.',
+            items: { $ref: '#/components/schemas/ProcessingChunkManifestItem' }
           },
           result: { type: 'object' },
           error: { type: 'object' }

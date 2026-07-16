@@ -28,6 +28,7 @@ sequenceDiagram
         Node->>DB: Short transaction: increment attempt_count, set job RUNNING and document PROCESSING
         Node->>RAG: POST /api/ingest with internal Bearer and snake_case body
         Note over Node,RAG: file_path comes from storage_key + shared root and subject_id=mvp-global is a compatibility shim
+        Note over Node,RAG: teacher_metadata is empty so identity and authorization PII never enters Qdrant
         Note over Node,RAG: No MySQL transaction remains open during the network call
         alt Python accepts dispatch
           RAG-->>Node: accepted = true

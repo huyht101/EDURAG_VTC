@@ -83,9 +83,9 @@ async function testIngestContract() {
     attemptCount: 2,
     file: { storageKey },
     teacherMetadata: {
-      userId: expectedRequest.teacher_metadata.user_id,
-      email: expectedRequest.teacher_metadata.email,
-      role: expectedRequest.teacher_metadata.role
+      userId: '7',
+      email: 'must-not-cross-boundary@example.test',
+      role: 'TEACHER'
     }
   }));
 
@@ -136,6 +136,22 @@ async function testDocumentOperations() {
   assertBearer(visibility.call);
   assert.deepEqual(parsedBody(visibility.call), fixture('documents/visibility-request.json'));
 
+  const unhide = await captureRemote(
+    jsonResponse({ accepted: true, job_id: '104' }),
+    (client) => client.setRetrieval({
+      documentId: '42',
+      jobId: '104',
+      attemptCount: 2,
+      enabled: true
+    })
+  );
+  assert.deepEqual(parsedBody(unhide.call), {
+    job_id: '104',
+    attempt_count: 2,
+    action: 'unhide',
+    callback_url: config.callbackUrl
+  });
+
   const deletion = await captureRemote(
     jsonResponse({ accepted: true, job_id: '103' }),
     (client) => client.deleteVectors({
@@ -181,12 +197,12 @@ async function testChatContract() {
     callIndex: 1,
     operationType: 'ANSWER_GENERATION',
     provider: 'GOOGLE',
-    model: 'gemini-confirmed',
+    model: 'models/gemini-2.0-flash',
     promptTokens: 21,
     completionTokens: 8,
     estimatedCost: null,
     currency: 'USD',
-    latencyMs: 250,
+    latencyMs: null,
     status: 'SUCCEEDED',
     errorCode: null
   });
@@ -197,6 +213,7 @@ async function testChatContract() {
   };
   const noAnswer = normalizeQueryResult(noAnswerPayload);
   assert.equal(noAnswer.noAnswer, true);
+  assert.equal(noAnswer.answer, noAnswerPayload.answer);
   assert.deepEqual(noAnswer.sources, []);
   assert.throws(
     () => normalizeQueryResult({
@@ -309,15 +326,15 @@ async function testCallbackContract() {
   assert.equal(normalized.jobId, 101);
   assert.equal(normalized.documentId, 42);
   assert.equal(normalized.attemptCount, 2);
-  assert.equal(normalized.chunks[0].vectorNodeId, raw.chunks[0].chunk_id);
+  assert.equal(normalized.chunks[0].vectorNodeId, raw.chunk_manifest[0].chunk_id);
   assert.equal(normalized.chunks[0].chunkText, 'Chunk one full text.');
   assert.equal(normalized.chunks[1].pageNumber, null);
   assert.equal(validateProcessingCallback(normalized), null);
 
   const incompleteAlias = JSON.parse(JSON.stringify(raw));
-  incompleteAlias.chunks[0] = {
+  incompleteAlias.chunk_manifest[0] = {
     chunk_index: 0,
-    chunk_id: incompleteAlias.chunks[0].chunk_id,
+    chunk_id: incompleteAlias.chunk_manifest[0].chunk_id,
     text_preview: 'Preview is not the complete chunk.'
   };
   assert.throws(
@@ -327,13 +344,34 @@ async function testCallbackContract() {
 
   const incompleteManifest = normalizeProcessingCallback({
     ...raw,
-    chunks: [{
+    chunk_manifest: [{
       chunk_index: 0,
-      vector_node_id: raw.chunks[1].vector_node_id,
+      vector_node_id: raw.chunk_manifest[1].vector_node_id,
       text_preview: 'Preview is not the complete chunk.'
     }]
   });
   assert.match(validateProcessingCallback(incompleteManifest).error, /chunkText/);
+
+  const chunksAlias = {
+    ...raw,
+    chunks: raw.chunk_manifest
+  };
+  delete chunksAlias.chunk_manifest;
+  assert.deepEqual(
+    normalizeProcessingCallback(chunksAlias).chunks,
+    normalized.chunks
+  );
+
+  const conflictingManifests = {
+    ...raw,
+    chunks: JSON.parse(JSON.stringify(raw.chunk_manifest))
+  };
+  conflictingManifests.chunks[0].chunk_text = 'Conflicting complete text.';
+  conflictingManifests.chunks[0].content_hash = sha256('Conflicting complete text.');
+  assert.throws(
+    () => normalizeProcessingCallback(conflictingManifests),
+    (error) => error.code === 'RAG_CALLBACK_MANIFEST_CONFLICT'
+  );
 
   assert.equal(sha256(normalized.chunks[0].chunkText), normalized.chunks[0].contentHash);
   assert.equal(sha256(normalized.chunks[1].chunkText), normalized.chunks[1].contentHash);

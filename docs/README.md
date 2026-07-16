@@ -1,9 +1,10 @@
-# Tài liệu EDURAG NodeJS/Core
+# EDURAG documentation
 
 Tài liệu hiện hành được tổ chức theo nguồn sự thật, không phụ thuộc thư mục tham chiếu local hoặc đường dẫn máy cá nhân.
 
 ## Bắt đầu
 
+- [System overview](architecture/system-overview.md)
 - [Local development](setup/local-development.md)
 - [Docker demo](setup/docker-demo.md)
 - [Database bootstrap](database/README.md)
@@ -12,6 +13,7 @@ Tài liệu hiện hành được tổ chức theo nguồn sự thật, không p
 ## Kiến trúc
 
 - [NodeJS/Core architecture](architecture/nodejs-core.md)
+- [Python RAG runtime](architecture/python-rag.md)
 - [NodeJS–Python RAG boundary](architecture/rag-boundary.md)
 - [Database design](database/design.md)
 - [Database data dictionary](database/data-dictionary.md)
@@ -29,4 +31,9 @@ Tài liệu hiện hành được tổ chức theo nguồn sự thật, không p
 
 - [Mermaid flow index](flows/README.md)
 
-`src/database/schema.sql` là executable database source of truth. OpenAPI là danh mục endpoint/request/response chi tiết. Markdown chỉ giải thích boundary, lifecycle, transaction và giới hạn MVP để tránh lặp tài liệu.
+## Status và handoff
+
+- [Week 3 integration readiness](status/week3-integration-readiness.md)
+- [Python RAG v0.1 handoff](handoffs/python-rag-v0.1/00_README_FIRST.md)
+
+`src/database/schema.sql` là executable database source of truth. OpenAPI là danh mục public endpoint chi tiết. [`api/internal-rag-contract.md`](api/internal-rag-contract.md) là contract nội bộ canonical duy nhất.

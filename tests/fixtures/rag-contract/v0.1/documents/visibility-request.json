@@ -1,6 +1,6 @@
 {
   "job_id": "102",
   "attempt_count": 1,
-  "visible": false,
+  "action": "hide",
   "callback_url": "http://node:5000/api/internal/rag/processing-callback"
 }

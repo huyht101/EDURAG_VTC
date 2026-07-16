@@ -1,5 +1,7 @@
 # Dependencies
 node_modules/
+.venv/
+venv/
 
 # Local environment files (keep the documented template)
 .env
@@ -15,6 +17,11 @@ yarn-error.log*
 coverage/
 dist/
 build/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 # Temporary/runtime data
 /tmp/
@@ -24,6 +31,9 @@ build/
 /.mysql/
 /mysql_data/
 /qdrant_data/
+/python-service/qdrant_data/
+/python-service/uploads/
+/python-service/.cache/
 
 # Editors and OS metadata
 .vscode/
@@ -33,3 +43,7 @@ Thumbs.db
 
 # Local, read-only implementation references
 week2_nodejs_core_ref/
+
+# Generated handoff packages and original source import archive
+/artifacts/
+/python-service/*.zip

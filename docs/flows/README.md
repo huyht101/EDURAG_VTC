@@ -2,7 +2,7 @@
 
 ## Scope and conventions
 
-These diagrams describe the implemented Week 2 Part 2 NodeJS/Core MVP behavior and its remaining external boundaries.
+These diagrams describe the implemented NodeJS/Core MVP behavior and its remaining external boundaries.
 
 - Public client calls use a user JWT Bearer token.
 - NodeJS/Python calls use the separate `RAG_INTERNAL_TOKEN` Bearer token.
