@@ -1,3 +1,5 @@
+const crypto = require('crypto');
+
 const JOB_STATUSES = require('../constants/job-statuses');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -13,6 +15,10 @@ function validateChunk(chunk, index) {
     return `chunks[${index}].chunkText phải có từ 1 đến 65535 bytes UTF-8.`;
   }
   if (!SHA256.test(chunk.contentHash || '')) return `chunks[${index}].contentHash không hợp lệ.`;
+  const actualHash = crypto.createHash('sha256').update(chunk.chunkText, 'utf8').digest('hex');
+  if (chunk.contentHash.toLowerCase() !== actualHash) {
+    return `chunks[${index}].contentHash không khớp chunkText.`;
+  }
   if (chunk.tokenCount !== undefined && (!Number.isInteger(chunk.tokenCount) || chunk.tokenCount <= 0)) {
     return `chunks[${index}].tokenCount không hợp lệ.`;
   }
@@ -34,6 +40,10 @@ function validateChunk(chunk, index) {
 function validateProcessingCallback(body) {
   if (!body || typeof body !== 'object') return { error: 'Callback payload là bắt buộc.' };
   if (!Number.isSafeInteger(Number(body.jobId)) || Number(body.jobId) <= 0) return { error: 'jobId không hợp lệ.' };
+  if (body.documentId !== undefined
+    && (!Number.isSafeInteger(Number(body.documentId)) || Number(body.documentId) <= 0)) {
+    return { error: 'documentId không hợp lệ.' };
+  }
   if (!Number.isInteger(body.attemptCount) || body.attemptCount < 1) return { error: 'attemptCount không hợp lệ.' };
   if (!EVENTS.includes(body.eventType)) return { error: 'eventType không hợp lệ.' };
   if (body.eventType === 'PROGRESS' && body.stage !== undefined

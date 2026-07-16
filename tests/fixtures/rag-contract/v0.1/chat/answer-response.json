@@ -1,0 +1,25 @@
+{
+  "answer": "The document contains the requested information.",
+  "no_answer": false,
+  "confidence": 0.91,
+  "citations": [
+    {
+      "vector_node_id": "11111111-1111-4111-8111-111111111111",
+      "doc_id": "42",
+      "snippet": "A verified source fragment.",
+      "page_number": 1,
+      "chapter": "Introduction",
+      "source_locator": {
+        "paragraph": 1
+      },
+      "retrieval_score": 0.88,
+      "rerank_score": 0.93
+    }
+  ],
+  "usage": {
+    "model": "gemini-confirmed",
+    "prompt_tokens": 21,
+    "completion_tokens": 8,
+    "latency_ms": 250
+  }
+}

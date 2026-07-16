@@ -3,10 +3,11 @@
 - Chat session CRUD, offset-limit history, soft delete and ownership checks are implemented.
 - A session row lock allocates stable `message_order`; `client_request_id` prevents duplicate USER messages.
 - USER and ASSISTANT PENDING rows commit before the RAG network call.
-- Mock and remote RAG clients return the same normalized answer/source/usage structure.
+- Mock and remote RAG clients return the same normalized answer/source/usage structure. Remote HTTP uses `POST /api/query`, snake_case and lowercase history roles.
 - Python receives only the bounded current history window; MySQL remains durable history.
 - Assistant completion, verified citation fragments, usage rows and `last_message_at` persist in one transaction.
 - Citation fragments resolve through `document_chunks.vector_node_id`; bracket markers are never parsed.
+- Remote citations without `vector_node_id` are rejected; Python currently needs a contract change to provide that ID.
 - Citation snapshot access survives document hide/delete. Original file access follows current authorization/state.
 - Multiple usage calls per assistant message are supported. Dashboard scope is `LLM_CALLS_ONLY`.
 

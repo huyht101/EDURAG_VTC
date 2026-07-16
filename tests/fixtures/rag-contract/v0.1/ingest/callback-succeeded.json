@@ -1,0 +1,41 @@
+{
+  "job_id": 101,
+  "doc_id": 42,
+  "attempt_count": 2,
+  "event_type": "SUCCEEDED",
+  "stage": "COMPLETED",
+  "chunks": [
+    {
+      "chunk_index": 0,
+      "chunk_id": "11111111-1111-4111-8111-111111111111",
+      "chunk_text": "Chunk one full text.",
+      "content_hash": "3f475660ca980c930b5ea52e46d9e3628b99e01a01218ac5010c8dbdd9c63ef2",
+      "token_count": 5,
+      "page_number": 1,
+      "chapter": "Introduction",
+      "source_locator": {
+        "paragraph": 1
+      }
+    },
+    {
+      "chunk_index": 1,
+      "vector_node_id": "22222222-2222-4222-8222-222222222222",
+      "chunk_text": "Chunk two full text.",
+      "content_hash": "601fa3a72e8d7810150276b05c7ba184053944c536157c37e178d9ba139dfc5d",
+      "token_count": 5,
+      "page_number": 0,
+      "section": "Details",
+      "source_locator": {
+        "paragraph": 2
+      }
+    }
+  ],
+  "result": {
+    "current_stage": "COMPLETED",
+    "pipeline_version": "python-v0.1",
+    "parser_name": "confirmed-parser",
+    "embedding_model": "confirmed-model",
+    "embedding_dimension": 768,
+    "vector_collection": "confirmed-collection"
+  }
+}

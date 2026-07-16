@@ -1,0 +1,16 @@
+{
+  "request_id": "33333333-3333-4333-8333-333333333333",
+  "user_id": "9",
+  "conversation_id": "501",
+  "question": "What does the document say?",
+  "history": [
+    {
+      "role": "user",
+      "content": "Earlier question"
+    },
+    {
+      "role": "assistant",
+      "content": "Earlier answer"
+    }
+  ]
+}

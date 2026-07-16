@@ -1,14 +1,44 @@
 const ragConfig = require('../configs/rag');
 const appError = require('../utils/app-error');
+const {
+  buildIngestRequest,
+  buildVisibilityRequest,
+  buildDeleteRequest,
+  buildQueryRequest,
+  normalizeAcceptedResponse,
+  normalizeQueryResult
+} = require('./rag-contract');
 
-function normalizeQueryResult(payload) {
-  const result = payload?.data || payload || {};
-  return {
-    answer: result.answer === undefined ? null : result.answer,
-    noAnswer: Boolean(result.noAnswer),
-    sources: Array.isArray(result.sources) ? result.sources : [],
-    usageCalls: Array.isArray(result.usageCalls) ? result.usageCalls : []
-  };
+function redactSecret(value, secret) {
+  if (!secret || typeof value !== 'string') return value;
+  return value.split(secret).join('[REDACTED]');
+}
+
+function safeUpstreamText(value, internalToken) {
+  const firstLine = redactSecret(value, internalToken).split(/\r?\n/, 1)[0].trim();
+  return firstLine.slice(0, 500) || 'Python RAG service rejected the request.';
+}
+
+function upstreamMessage(payload, status, internalToken) {
+  if (payload && typeof payload === 'object') {
+    if (typeof payload.message === 'string' && payload.message) {
+      return safeUpstreamText(payload.message, internalToken);
+    }
+    if (typeof payload.detail === 'string' && payload.detail) {
+      return safeUpstreamText(payload.detail, internalToken);
+    }
+    if (Array.isArray(payload.detail)) return `Python validation failed (${payload.detail.length} issue(s)).`;
+  }
+  return `Python RAG service returned HTTP ${status}.`;
+}
+
+function upstreamCode(payload, status) {
+  if (payload && typeof payload.error_code === 'string'
+    && /^[A-Z][A-Z0-9_]{0,63}$/.test(payload.error_code)) {
+    return payload.error_code;
+  }
+  if (status === 422) return 'RAG_UPSTREAM_VALIDATION_ERROR';
+  return status >= 500 ? 'RAG_SERVICE_UNAVAILABLE' : 'RAG_UPSTREAM_ERROR';
 }
 
 class MockRagClient {
@@ -67,64 +97,92 @@ class MockRagClient {
 }
 
 class RemoteRagClient {
-  constructor(config = ragConfig) {
+  constructor(config = ragConfig, fetchImpl = global.fetch) {
     if (!config.serviceUrl) throw new Error('RAG_SERVICE_URL is required in remote mode.');
+    if (typeof fetchImpl !== 'function') throw new Error('A fetch implementation is required.');
     this.config = config;
+    this.fetch = fetchImpl;
   }
 
-  async request(path, payload) {
+  async request(operation, timeoutMs = this.config.requestTimeoutMs) {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.config.requestTimeoutMs);
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const response = await fetch(new URL(path, this.config.serviceUrl), {
-        method: 'POST',
+      const response = await this.fetch(new URL(operation.path, this.config.serviceUrl), {
+        method: operation.method,
         headers: {
           authorization: `Bearer ${this.config.internalToken}`,
           'content-type': 'application/json'
         },
-        body: JSON.stringify(payload),
+        body: operation.body === undefined ? undefined : JSON.stringify(operation.body),
         signal: controller.signal
       });
-      if (!response.ok) {
-        throw appError(503, 'RAG_SERVICE_UNAVAILABLE', `RAG service returned HTTP ${response.status}.`);
-      }
       const text = await response.text();
-      return text ? JSON.parse(text) : {};
+      let payload = {};
+      if (text) {
+        try {
+          payload = JSON.parse(text);
+        } catch (_error) {
+          throw appError(
+            502,
+            'RAG_UPSTREAM_INVALID_RESPONSE',
+            'Python RAG service returned a non-JSON response.'
+          );
+        }
+      }
+      if (!response.ok) {
+        const status = response.status >= 500 ? 503 : 502;
+        throw appError(
+          status,
+          upstreamCode(payload, response.status),
+          upstreamMessage(payload, response.status, this.config.internalToken)
+        );
+      }
+      return payload;
     } catch (error) {
       if (error.status) throw error;
-      const code = error.name === 'AbortError' ? 'RAG_REQUEST_TIMEOUT' : 'RAG_SERVICE_UNAVAILABLE';
-      throw appError(503, code, 'Không thể kết nối Python RAG service.');
+      if (error.name === 'AbortError') {
+        throw appError(503, 'RAG_REQUEST_TIMEOUT', 'Python RAG service request timed out.');
+      }
+      throw appError(503, 'RAG_SERVICE_UNAVAILABLE', 'Cannot connect to Python RAG service.');
     } finally {
       clearTimeout(timeout);
     }
   }
 
   async startIngest(payload) {
-    const result = await this.request('/internal/documents/ingest', payload);
-    return { accepted: result.accepted !== false, completed: false, mode: 'remote' };
+    const operation = buildIngestRequest(payload, this.config);
+    return normalizeAcceptedResponse(await this.request(operation), payload.jobId);
   }
 
   async setRetrieval(payload) {
-    const result = await this.request('/internal/documents/retrieval', payload);
-    return { accepted: result.accepted !== false, completed: false, mode: 'remote' };
+    const operation = buildVisibilityRequest(payload, this.config);
+    return normalizeAcceptedResponse(await this.request(operation), payload.jobId);
   }
 
   async deleteVectors(payload) {
-    const result = await this.request('/internal/documents/vectors/delete', payload);
-    return { accepted: result.accepted !== false, completed: false, mode: 'remote' };
+    const operation = buildDeleteRequest(payload, this.config);
+    return normalizeAcceptedResponse(await this.request(operation), payload.jobId);
   }
 
   async query(payload) {
-    return normalizeQueryResult(await this.request('/internal/chat/query', payload));
+    const operation = buildQueryRequest(payload);
+    return normalizeQueryResult(await this.request(operation, this.config.queryTimeoutMs));
   }
 }
 
-function createRagClient(mode = ragConfig.mode, config = ragConfig) {
-  return mode === 'remote' ? new RemoteRagClient(config) : new MockRagClient();
+function createRagClient(mode = ragConfig.mode, config = ragConfig, fetchImpl = global.fetch) {
+  return mode === 'remote' ? new RemoteRagClient(config, fetchImpl) : new MockRagClient();
 }
 
 function getRagClient() {
   return createRagClient();
 }
 
-module.exports = { createRagClient, getRagClient, normalizeQueryResult };
+module.exports = {
+  MockRagClient,
+  RemoteRagClient,
+  createRagClient,
+  getRagClient,
+  normalizeQueryResult
+};

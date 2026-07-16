@@ -18,18 +18,18 @@ sequenceDiagram
     Node->>DB: Insert ASSISTANT PENDING with null content
     Node->>DB: COMMIT
     Node->>DB: Load bounded completed history by message_order
-    Node->>RAG: Query with internal Bearer, requestId, question and history
+    Node->>RAG: POST /api/query with internal Bearer and snake_case request
     Note over Node,RAG: Retrieval uses the shared READY and VISIBLE corpus, with no subject or document selection
     Note over Node,RAG: MySQL owns durable history, while Python receives only the current history window
     alt RAG timeout or transport failure
       Node->>DB: Set ASSISTANT FAILED and persist error_code
       Node-->>Client: 502 or 503, clientRequestId remains idempotent
     else Valid no-answer result
-      RAG-->>Node: noAnswer and optional usageCalls
+      RAG-->>Node: no_answer and optional usage or usage_calls
       Node->>DB: Transaction: complete ASSISTANT, persist usage and touch session
       Node-->>Client: 200 without fabricated citations
     else Structured answer, sources may be empty
-      RAG-->>Node: answer, sources and usageCalls
+      RAG-->>Node: answer, citations with vector_node_id, and usage
       Node->>DB: Resolve vector_node_id to READY and VISIBLE chunks and documents
       Node->>Node: Validate source snapshots and usage metadata
       alt Source or usage validation fails

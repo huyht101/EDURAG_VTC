@@ -20,13 +20,13 @@ sequenceDiagram
     Node->>DB: COMMIT
     Node->>DB: Short transaction: increment attempt_count and set job RUNNING
     alt Hide
-      Node->>RAG: Set retrieval false
+      Node->>RAG: PATCH /api/docs/{doc_id}/visibility with visible=false
     else Unhide
-      Node->>RAG: Set retrieval true
+      Node->>RAG: PATCH /api/docs/{doc_id}/visibility with visible=true
     else Delete
-      Node->>RAG: Delete vectors for the document
+      Node->>RAG: DELETE /api/ingest/{doc_id}
     end
-    Note over Node,RAG: Python owns retrieval and Qdrant operation semantics
+    Note over Node,RAG: Bodies and async callbacks for visibility/delete remain provisional pending Python confirmation
 
     alt Python rejects, times out or is unavailable
       Node->>DB: Mark operation job FAILED and retain previous visibility

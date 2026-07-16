@@ -14,6 +14,11 @@ module.exports = {
     if (!Number.isSafeInteger(value) || value <= 0) throw new Error('RAG_REQUEST_TIMEOUT_MS must be positive.');
     return value;
   },
+  get queryTimeoutMs() {
+    const value = Number(process.env.RAG_QUERY_TIMEOUT_MS || 60000);
+    if (!Number.isSafeInteger(value) || value <= 0) throw new Error('RAG_QUERY_TIMEOUT_MS must be positive.');
+    return value;
+  },
   get historyMessageLimit() {
     const value = Number(process.env.RAG_HISTORY_MESSAGE_LIMIT || 20);
     if (!Number.isSafeInteger(value) || value < 1 || value > 100) {
@@ -26,5 +31,31 @@ module.exports = {
       throw new Error('RAG_INTERNAL_TOKEN must contain at least 32 characters.');
     }
     return process.env.RAG_INTERNAL_TOKEN;
+  },
+  get defaultSubjectId() {
+    const value = String(process.env.RAG_DEFAULT_SUBJECT_ID || 'mvp-global').trim();
+    if (!value || value.length > 100) {
+      throw new Error('RAG_DEFAULT_SUBJECT_ID must contain between 1 and 100 characters.');
+    }
+    return value;
+  },
+  get sharedUploadDirectory() {
+    const value = String(process.env.RAG_SHARED_UPLOAD_DIR || '/shared/uploads').trim();
+    if (!value) throw new Error('RAG_SHARED_UPLOAD_DIR is required.');
+    return value;
+  },
+  get callbackUrl() {
+    const value = process.env.RAG_CALLBACK_URL
+      || 'http://localhost:5000/api/internal/rag/processing-callback';
+    let parsed;
+    try {
+      parsed = new URL(value);
+    } catch (_error) {
+      throw new Error('RAG_CALLBACK_URL must be a valid absolute URL.');
+    }
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      throw new Error('RAG_CALLBACK_URL must use http or https.');
+    }
+    return parsed.toString();
   }
 };

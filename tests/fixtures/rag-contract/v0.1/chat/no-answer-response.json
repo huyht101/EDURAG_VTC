@@ -1,0 +1,11 @@
+{
+  "answer": null,
+  "no_answer": true,
+  "confidence": 0.12,
+  "citations": [],
+  "usage": {
+    "model": "gemini-confirmed",
+    "prompt_tokens": 18,
+    "completion_tokens": 0
+  }
+}

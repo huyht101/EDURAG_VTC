@@ -21,11 +21,24 @@ function terminalStatus(eventType) {
   return [JOB_STATUSES.SUCCEEDED, JOB_STATUSES.FAILED, JOB_STATUSES.CANCELLED].includes(eventType);
 }
 
-async function handleCallback(payload) {
-  return withTransaction(async (connection) => {
-    const job = await jobRepo.findByIdForUpdate(Number(payload.jobId), connection);
+const defaultDependencies = {
+  withTransaction,
+  jobRepo,
+  documentRepo,
+  chunkRepo
+};
+
+async function handleCallback(payload, dependencies = defaultDependencies) {
+  const {
+    withTransaction: runTransaction,
+    jobRepo: jobs,
+    documentRepo: documents,
+    chunkRepo: chunks
+  } = dependencies;
+  return runTransaction(async (connection) => {
+    const job = await jobs.findByIdForUpdate(Number(payload.jobId), connection);
     if (!job) throw appError(404, 'PROCESSING_JOB_NOT_FOUND', 'Không tìm thấy processing job.');
-    const document = await documentRepo.findByIdForUpdate(job.document_id, connection);
+    const document = await documents.findByIdForUpdate(job.document_id, connection);
     if (!document) throw appError(404, 'DOCUMENT_NOT_FOUND', 'Không tìm thấy document của processing job.');
     if (payload.documentId !== undefined && String(payload.documentId) !== String(job.document_id)) {
       throw appError(400, 'CALLBACK_DOCUMENT_MISMATCH', 'documentId không khớp processing job.');
@@ -45,7 +58,7 @@ async function handleCallback(payload) {
     }
 
     if (payload.eventType === 'PROGRESS') {
-      await jobRepo.markProgress(job.id, payload.stage || null, connection);
+      await jobs.markProgress(job.id, payload.stage || null, connection);
       return { acknowledged: true, jobId: job.id, status: JOB_STATUSES.RUNNING };
     }
 
@@ -55,19 +68,19 @@ async function handleCallback(payload) {
           throw appError(400, 'CHUNK_MANIFEST_REQUIRED', 'Callback success cần complete chunk manifest.');
         }
         if (job.job_type === JOB_TYPES.REPROCESS) {
-          await chunkRepo.deleteByDocument(job.document_id, connection);
+          await chunks.deleteByDocument(job.document_id, connection);
         }
-        await chunkRepo.insertManifest(job.document_id, job.id, payload.chunks, connection);
-        const totalChunks = await chunkRepo.countByJob(job.id, connection);
+        await chunks.insertManifest(job.document_id, job.id, payload.chunks, connection);
+        const totalChunks = await chunks.countByJob(job.id, connection);
         if (totalChunks !== payload.chunks.length) {
           throw appError(400, 'CHUNK_MANIFEST_COUNT_MISMATCH', 'Số chunk persist không khớp manifest.');
         }
-        await jobRepo.markSucceeded(job.id, {
+        await jobs.markSucceeded(job.id, {
           ...(payload.result || {}),
           totalChunks,
           currentStage: payload.result?.currentStage || 'COMPLETED'
         }, connection);
-        await documentRepo.updateProcessingStatus(
+        await documents.updateProcessingStatus(
           job.document_id,
           DOCUMENT_STATUSES.processing.READY,
           connection
@@ -77,11 +90,11 @@ async function handleCallback(payload) {
         if (!Object.values(DOCUMENT_STATUSES.visibility).includes(config.targetVisibility)) {
           throw appError(400, 'INVALID_OPERATION_JOB_CONFIG', 'Operation job thiếu targetVisibility hợp lệ.');
         }
-        await jobRepo.markSucceeded(job.id, {
+        await jobs.markSucceeded(job.id, {
           ...(payload.result || {}),
           currentStage: payload.result?.currentStage || 'COMPLETED'
         }, connection);
-        await documentRepo.updateVisibility(job.document_id, config.targetVisibility, connection);
+        await documents.updateVisibility(job.document_id, config.targetVisibility, connection);
       }
       return { acknowledged: true, jobId: job.id, status: JOB_STATUSES.SUCCEEDED };
     }
@@ -89,12 +102,12 @@ async function handleCallback(payload) {
     const errorCode = payload.error?.code || `PROCESSING_${payload.eventType}`;
     const errorMessage = payload.error?.message || null;
     if (payload.eventType === JOB_STATUSES.FAILED) {
-      await jobRepo.markFailed(job.id, errorCode, errorMessage, connection);
+      await jobs.markFailed(job.id, errorCode, errorMessage, connection);
     } else {
-      await jobRepo.markCancelled(job.id, errorCode, errorMessage, connection);
+      await jobs.markCancelled(job.id, errorCode, errorMessage, connection);
     }
     if ([JOB_TYPES.INGEST, JOB_TYPES.REPROCESS].includes(job.job_type)) {
-      await documentRepo.updateProcessingStatus(
+      await documents.updateProcessingStatus(
         job.document_id,
         payload.eventType === JOB_STATUSES.FAILED
           ? DOCUMENT_STATUSES.processing.FAILED

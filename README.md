@@ -42,7 +42,7 @@ Qdrant không cần cho mock demo. Team RAG có thể bật riêng bằng `docke
 - Document/upload/jobs/internal callback: implemented.
 - Chat/history/citation/usage/dashboard: implemented.
 - RAG mock mode: implemented và dùng mặc định.
-- Remote Python RAG: contract đã có, chưa integration-test với service thật.
+- Remote Python RAG: contract v0.1 và mocked HTTP contract tests đã có; chưa integration-test với service thật.
 - PDF, DOCX, TXT: hỗ trợ; PPTX/OCR để sau.
 - Local storage và offset/limit pagination: MVP only.
 
@@ -61,7 +61,10 @@ Qdrant không cần cho mock demo. Team RAG có thể bật riêng bằng `docke
 Copy-Item .env.example .env
 npm ci
 npm run check
+npm run test:contract
 npm start
 ```
 
 Với local NodeJS, dùng MySQL demo trên `127.0.0.1:3306`. Xem [local development](docs/setup/local-development.md) và [Docker demo](docs/setup/docker-demo.md) để biết reset, test và giới hạn bảo mật.
+
+`RAG_MODE=mock` vẫn là mặc định. Remote mode cần shared upload path nhìn thấy từ Python, callback URL và internal token đồng nhất; xem [contract v0.1](docs/api/internal-rag-contract.md). Python hiện còn blocker về callback attempt, complete manifest, citation vector ID và inbound Bearer auth, nên chưa được coi là remote-ready.

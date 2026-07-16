@@ -45,7 +45,11 @@ services:
       RAG_SERVICE_URL: ${RAG_SERVICE_URL:-http://host.docker.internal:8000}
       RAG_INTERNAL_TOKEN: ${RAG_INTERNAL_TOKEN:-demo-only-rag-internal-token-change-production}
       RAG_REQUEST_TIMEOUT_MS: ${RAG_REQUEST_TIMEOUT_MS:-10000}
+      RAG_QUERY_TIMEOUT_MS: ${RAG_QUERY_TIMEOUT_MS:-60000}
       RAG_HISTORY_MESSAGE_LIMIT: ${RAG_HISTORY_MESSAGE_LIMIT:-20}
+      RAG_DEFAULT_SUBJECT_ID: ${RAG_DEFAULT_SUBJECT_ID:-mvp-global}
+      RAG_SHARED_UPLOAD_DIR: ${RAG_SHARED_UPLOAD_DIR:-/shared/uploads}
+      RAG_CALLBACK_URL: ${RAG_CALLBACK_URL:-http://localhost:5001/api/internal/rag/processing-callback}
       TZ: UTC
     ports:
       - "127.0.0.1:${APP_HOST_PORT:-5001}:5000"

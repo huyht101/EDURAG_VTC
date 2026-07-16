@@ -1,0 +1,5 @@
+{
+  "job_id": "103",
+  "attempt_count": 1,
+  "callback_url": "http://node:5000/api/internal/rag/processing-callback"
+}

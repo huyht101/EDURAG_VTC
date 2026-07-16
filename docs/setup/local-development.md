@@ -10,6 +10,7 @@
 Copy-Item .env.example .env
 npm ci
 npm run check
+npm run test:contract
 npm start
 ```
 
@@ -34,8 +35,21 @@ Demo seed chỉ insert Admin khi email chưa tồn tại; không overwrite passw
 
 ```powershell
 npm run check
+npm run test:contract
 npm run test:part2
 docker compose config --quiet
 ```
 
 Smoke suite cần database đã bootstrap, Demo Admin và các env bắt buộc. Nó tạo dữ liệu test có suffix ngẫu nhiên và dùng HTTP thật trên một cổng tạm; chỉ chạy trên development database.
+
+## RAG modes
+
+`RAG_MODE=mock` không cần Python và vẫn là default. Với `RAG_MODE=remote`:
+
+- NodeJS và Python phải dùng cùng `RAG_INTERNAL_TOKEN`;
+- `RAG_SHARED_UPLOAD_DIR` là absolute path Python nhìn thấy cho cùng upload root;
+- `RAG_CALLBACK_URL` phải truy cập được từ Python;
+- dispatch dùng `RAG_REQUEST_TIMEOUT_MS`, query dùng `RAG_QUERY_TIMEOUT_MS`;
+- `RAG_DEFAULT_SUBJECT_ID=mvp-global` chỉ là compatibility shim, không phải public subject scope.
+
+Contract tests không gọi Python thật. Xem [internal contract v0.1](../api/internal-rag-contract.md) để biết các blocker Python trước remote E2E.

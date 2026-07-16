@@ -14,8 +14,8 @@ const definition = {
   openapi: '3.0.3',
   info: {
     title: 'EduRAG NodeJS/Core API',
-    version: '1.0.0-week2',
-    description: 'Foundation, Part 1 và Week 2 Part 2 APIs. RAG mock mode đã triển khai; remote Python contract chưa integration-test.'
+    version: '1.0.0-week3-contract-v0.1',
+    description: 'Foundation, Part 1 và Week 2 Part 2 APIs. RAG mock mode đã triển khai; remote contract v0.1 đã có NodeJS contract tests nhưng chưa chạy end-to-end với Python thật.'
   },
   servers: [{ url: 'http://localhost:5001', description: 'Docker demo default' }],
   components: {
@@ -130,14 +130,48 @@ const definition = {
         }
       },
       ProcessingCallbackBody: {
-        type: 'object', required: ['eventType', 'jobId', 'attemptCount'],
+        type: 'object', required: ['event_type', 'job_id', 'attempt_count'],
         properties: {
-          eventType: { type: 'string', enum: ['PROGRESS', 'SUCCEEDED', 'FAILED', 'CANCELLED'] },
-          jobId: { type: 'integer' },
-          documentId: { type: 'integer' },
-          attemptCount: { type: 'integer', minimum: 1 },
+          event_type: { type: 'string', enum: ['PROGRESS', 'SUCCEEDED', 'FAILED', 'CANCELLED'] },
+          job_id: { type: 'integer' },
+          doc_id: { type: 'integer' },
+          attempt_count: {
+            type: 'integer',
+            minimum: 1,
+            description: 'Immutable processing-job attempt; never callback HTTP delivery retry.'
+          },
           stage: { type: 'string', maxLength: 32 },
-          chunks: { type: 'array', description: 'Complete manifest for MVP; required for successful INGEST.' },
+          chunks: {
+            type: 'array',
+            description: 'Complete manifest for successful INGEST. Preview-only chunks are rejected.',
+            items: {
+              type: 'object',
+              required: ['chunk_index', 'chunk_text', 'content_hash'],
+              oneOf: [
+                { required: ['vector_node_id'] },
+                { required: ['chunk_id'] }
+              ],
+              properties: {
+                chunk_index: { type: 'integer', minimum: 0 },
+                vector_node_id: { type: 'string', format: 'uuid' },
+                chunk_id: {
+                  type: 'string',
+                  format: 'uuid',
+                  description: 'Python compatibility alias for vector_node_id.'
+                },
+                chunk_text: { type: 'string', minLength: 1, maxLength: 65535 },
+                content_hash: { type: 'string', pattern: '^[0-9a-fA-F]{64}$' },
+                token_count: { type: 'integer', minimum: 1 },
+                page_number: {
+                  type: 'integer',
+                  nullable: true,
+                  description: 'Values <= 0 are normalized to null at the Node boundary.'
+                },
+                section_title: { type: 'string', maxLength: 500, nullable: true },
+                source_locator: { type: 'object', nullable: true }
+              }
+            }
+          },
           result: { type: 'object' },
           error: { type: 'object' }
         }

@@ -26,7 +26,8 @@ sequenceDiagram
         Node-->>Web: 500 upload failed
       else Document and job committed
         Node->>DB: Short transaction: increment attempt_count, set job RUNNING and document PROCESSING
-        Node->>RAG: Start ingest with internal Bearer and string document ID
+        Node->>RAG: POST /api/ingest with internal Bearer and snake_case body
+        Note over Node,RAG: file_path comes from storage_key + shared root and subject_id=mvp-global is a compatibility shim
         Note over Node,RAG: No MySQL transaction remains open during the network call
         alt Python accepts dispatch
           RAG-->>Node: accepted = true
