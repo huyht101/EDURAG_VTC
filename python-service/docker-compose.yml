@@ -1,13 +1,15 @@
+version: '3.8'
+
 services:
   rag-service:
     build: .
     ports:
       - "8000:8000"
     environment:
-      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
-      - LLAMA_CLOUD_API_KEY=${LLAMA_CLOUD_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - LLAMA_CLOUD_API_KEY=${LLAMA_CLOUD_API_KEY}
       - QDRANT_URL=http://qdrant:6333
-      - INTERNAL_SECRET=${INTERNAL_SECRET:-}
+      - INTERNAL_SECRET=${INTERNAL_SECRET:-change-me-in-production}
     depends_on:
       - qdrant
     volumes:

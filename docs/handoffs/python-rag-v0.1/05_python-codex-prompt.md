@@ -1,4 +1,6 @@
-# Python Codex implementation prompt
+# Archived Python Codex implementation prompt
+
+> Internal execution aid, not an API contract. Review it against the current upstream Python repository, root canonical contract and latest snapshot status before reuse.
 
 Bạn đang làm việc trực tiếp trong repository Python RAG service của EDURAG.
 

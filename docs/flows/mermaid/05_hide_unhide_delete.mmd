@@ -26,7 +26,7 @@ sequenceDiagram
     else Delete
       Node->>RAG: DELETE /api/ingest/{doc_id}
     end
-    Note over Node,RAG: Python runtime accepts these exact methods, paths and actions
+    Note over Node,RAG: Current Python snapshot shows these methods, paths and actions
 
     alt Python rejects, times out or is unavailable
       Node->>DB: Mark operation job FAILED and retain previous visibility

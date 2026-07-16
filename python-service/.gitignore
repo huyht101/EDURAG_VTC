@@ -1,17 +1,7 @@
 .venv/
-venv/
 __pycache__/
 *.pyc
 .idea/
 .pytest_cache/
-.mypy_cache/
-.ruff_cache/
 .env
-.env.*
-!.env.example
 .vscode/
-qdrant_data/
-uploads/
-.cache/
-*.log
-*.zip

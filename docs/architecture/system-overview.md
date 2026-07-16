@@ -8,6 +8,8 @@ EDURAG gồm ba ownership boundary:
 
 NodeJS là thành phần duy nhất ghi MySQL. Python không giữ durable chat history. NodeJS không truy cập Qdrant.
 
+Team Python/Data-RAG sở hữu repository Python upstream riêng. `python-service/` trong repository này là tracked integration snapshot phục vụ audit/debug, không phải canonical Python implementation và không bảo đảm luôn là upstream mới nhất.
+
 ## Data flow
 
 - Upload: Node lưu file, tạo document/job, rồi dispatch Python sau commit.
@@ -23,4 +25,5 @@ MySQL và Qdrant không có distributed transaction. Lifecycle dùng fail-closed
 - Public API: runtime OpenAPI `/api-docs.json`.
 - Internal boundary: [`docs/api/internal-rag-contract.md`](../api/internal-rag-contract.md).
 - Current readiness: [`docs/status/week3-integration-readiness.md`](../status/week3-integration-readiness.md).
-- Python runtime: [`python-service/`](../../python-service/).
+- Python source of truth: repository upstream của team Python, được ghi tại [`python-service/Link.txt`](../../python-service/Link.txt).
+- Current audit evidence: periodically refreshed [`python-service/`](../../python-service/) snapshot.

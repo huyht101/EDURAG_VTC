@@ -72,4 +72,4 @@ Python:
 - `CALLBACK_TIMEOUT`
 - `CALLBACK_MAX_RETRIES`
 
-Set `INTERNAL_SECRET` explicitly. Python `core/config.py` still has a weak fallback and must not be relied on for integration or production.
+Set `INTERNAL_SECRET` explicitly. The current snapshot's `core/config.py` has a weak fallback; confirm the latest upstream behavior before integration and never rely on that fallback.

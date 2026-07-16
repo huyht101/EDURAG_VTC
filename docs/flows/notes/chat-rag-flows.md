@@ -7,7 +7,7 @@
 - Python receives only the bounded current history window; MySQL remains durable history.
 - Assistant completion, verified citation fragments, usage rows and `last_message_at` persist in one transaction.
 - Citation fragments resolve through `document_chunks.vector_node_id`; bracket markers are never parsed.
-- Remote citations without `vector_node_id` are rejected; Python currently needs a contract change to provide that ID.
+- Remote citations without `vector_node_id` are rejected; the current snapshot lacks that ID and the fix must be upstreamed by the Python team.
 - Citation snapshot access survives document hide/delete. Original file access follows current authorization/state.
 - Multiple usage calls per assistant message are supported. Dashboard scope is `LLM_CALLS_ONLY`.
 

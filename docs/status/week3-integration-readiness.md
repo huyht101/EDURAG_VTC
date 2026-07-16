@@ -4,6 +4,8 @@ Baseline Node commit: `c66bf056d0bea40542c2a3ce558e7ea641523c4d`.
 
 Remote end-to-end chưa chạy. Tài liệu này là release gate cho Phase 2, không phải tuyên bố production readiness.
 
+Python source of truth nằm ở repository upstream của team Python. Kết luận Python bên dưới chỉ dựa trên tracked `python-service/` snapshot hiện tại; snapshot chưa ghi exact upstream commit nên có thể không đại diện bản mới nhất.
+
 ## Implemented in NodeJS
 
 - Mock/remote RAG adapter, internal Bearer header và split timeouts.
@@ -15,7 +17,7 @@ Remote end-to-end chưa chạy. Tài liệu này là release gate cho Phase 2, k
 - Structured citation/usage normalization.
 - Contract fixtures/tests and Part 2 regression.
 
-## Implemented in Python
+## Observed in current Python snapshot
 
 - FastAPI ingest/query/visibility/delete/health routes.
 - File parsing and Qdrant ingest.
@@ -24,7 +26,7 @@ Remote end-to-end chưa chạy. Tài liệu này là release gate cho Phase 2, k
 - Callback sender with Bearer.
 - Query history, confidence string, citation snippets and usage.
 
-## Compatible now
+## Observed compatible at the snapshot boundary
 
 - HTTP paths/methods.
 - Accepted responses and custom error format.
@@ -33,7 +35,7 @@ Remote end-to-end chưa chạy. Tài liệu này là release gate cho Phase 2, k
 - Query question/conversation/history.
 - Citation `snippet` alias and usage fields.
 
-## Required Python changes
+## Target changes to upstream Python
 
 1. Accept and preserve processing `attempt_count`; do not replace it with callback delivery retry.
 2. Return complete `chunk_manifest` with full `chunk_text` and matching SHA-256 `content_hash`.
@@ -50,7 +52,8 @@ Remote end-to-end chưa chạy. Tài liệu này là release gate cho Phase 2, k
 
 ## Definition of Ready for Phase 2
 
-- Four Python changes implemented with tests.
+- Four Python changes implemented and upstreamed with tests.
+- Snapshot refreshed from an identified upstream commit containing those changes.
 - Python contract tests pass against handoff fixtures.
 - Node contract and Part 2 regression pass.
 - Shared-volume path verified in selected topology.

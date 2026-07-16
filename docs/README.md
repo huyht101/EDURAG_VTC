@@ -13,7 +13,7 @@ Tài liệu hiện hành được tổ chức theo nguồn sự thật, không p
 ## Kiến trúc
 
 - [NodeJS/Core architecture](architecture/nodejs-core.md)
-- [Python RAG runtime](architecture/python-rag.md)
+- [Python RAG integration snapshot](architecture/python-rag.md)
 - [NodeJS–Python RAG boundary](architecture/rag-boundary.md)
 - [Database design](database/design.md)
 - [Database data dictionary](database/data-dictionary.md)
@@ -34,6 +34,10 @@ Tài liệu hiện hành được tổ chức theo nguồn sự thật, không p
 ## Status và handoff
 
 - [Week 3 integration readiness](status/week3-integration-readiness.md)
-- [Python RAG v0.1 handoff](handoffs/python-rag-v0.1/00_README_FIRST.md)
+- [Python snapshot refresh guide](setup/python-snapshot-refresh.md)
+
+## Internal records
+
+- [Historical Python RAG v0.1 handoff notes](handoffs/python-rag-v0.1/00_README_FIRST.md)
 
 `src/database/schema.sql` là executable database source of truth. OpenAPI là danh mục public endpoint chi tiết. [`api/internal-rag-contract.md`](api/internal-rag-contract.md) là contract nội bộ canonical duy nhất.

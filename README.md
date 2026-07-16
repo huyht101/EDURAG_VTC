@@ -6,10 +6,12 @@ Stack chính: Node.js 20+, Express, JavaScript CommonJS, `mysql2/promise`, MySQL
 
 ```text
 src/             NodeJS/Core runtime
-python-service/  Python FastAPI RAG runtime
+python-service/  Tracked integration snapshot from the Python team's upstream repository
 docs/            Canonical architecture, contract, status and handoff docs
 tests/           NodeJS contract fixtures
 ```
+
+NodeJS/Core tại repository root là project chính. Team Python/Data-RAG duy trì Python production source trong repository riêng; `python-service/` chỉ là snapshot gần nhất dùng để audit compatibility và có thể bị thay thế trong lần refresh sau.
 
 ## Docker demo nhanh
 
@@ -62,7 +64,8 @@ Qdrant không cần cho mock demo. Team RAG có thể bật riêng bằng `docke
 - [Internal NodeJS–Python contract](docs/api/internal-rag-contract.md)
 - [NodeJS/Core flows](docs/flows/README.md)
 - [Week 3 integration readiness](docs/status/week3-integration-readiness.md)
-- [Python service local setup](python-service/README.md)
+- [Python snapshot policy and observed capability](docs/architecture/python-rag.md)
+- [Refresh the Python snapshot](docs/setup/python-snapshot-refresh.md)
 - OpenAPI runtime: `/api-docs` và `/api-docs.json`
 
 ## Chạy NodeJS local

@@ -53,3 +53,5 @@ Smoke suite cần database đã bootstrap, Demo Admin và các env bắt buộc.
 - `RAG_DEFAULT_SUBJECT_ID=mvp-global` chỉ là compatibility shim, không phải public subject scope.
 
 Contract tests không gọi Python thật. Xem [internal contract v0.1](../api/internal-rag-contract.md) để biết các blocker Python trước remote E2E.
+
+`python-service/` chỉ là tracked integration snapshot; xem [refresh guide](python-snapshot-refresh.md). Kiểm tra upstream repository của team Python trước khi kết luận snapshot là bản mới nhất.

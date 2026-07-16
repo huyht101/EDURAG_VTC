@@ -1,67 +1,56 @@
-# Python RAG service
+# RAG Education Service (v3)
 
-FastAPI service sở hữu parsing, embeddings, retrieval/generation và Qdrant. NodeJS/Core sở hữu public API, authorization, MySQL và durable chat history.
+Microservice xử lý RAG (Retrieval-Augmented Generation) cho hệ thống Trợ lý Giáo dục.
+Được thiết kế để giao tiếp với Node.js Backend qua các REST API theo mô hình bất đồng bộ (Async + Callback).
 
-Canonical internal contract: [`../docs/api/internal-rag-contract.md`](../docs/api/internal-rag-contract.md).
+## Công nghệ sử dụng
+- **Framework**: FastAPI (Python 3.11)
+- **Vector Database**: Qdrant
+- **LLM & Embedding**: Google Gemini (gemini-2.0-flash, text-embedding-004)
+- **Document Parsing**: LlamaParse (PDF, DOCX) + Fallback (pypdf, python-docx)
+- **NLP**: Underthesea (Tách từ Tiếng Việt)
 
-## Runtime
+## Cài đặt và Chạy cục bộ (Local)
 
-- Entry point: `main.py::app`.
-- Python: 3.11.
-- Framework: FastAPI.
-- Qdrant client, LlamaIndex, Gemini.
-- Parsers: PDF, DOCX/DOC, TXT; optional LlamaParse.
+1. **Cài đặt môi trường:**
+   ```bash
+   python -m venv venv
+   source venv/bin/activate  # Linux/Mac
+   # hoặc venv\Scripts\activate trên Windows
+   pip install -r requirements.txt
+   ```
 
-Endpoints:
+2. **Cấu hình môi trường:**
+   Tạo file `.env` từ `.env.example` và điền các API keys:
+   ```env
+   GOOGLE_API_KEY=your_key_here
+   LLAMA_CLOUD_API_KEY=your_llama_key_here
+   INTERNAL_SECRET=your_secret_here
+   ```
 
-| Method/path | Purpose |
-|---|---|
-| `POST /api/ingest` | Async ingest and callback |
-| `POST /api/query` | Synchronous query |
-| `PATCH /api/docs/{doc_id}/visibility` | Async hide/unhide |
-| `DELETE /api/ingest/{doc_id}` | Async vector deletion |
-| `GET /api/health` | Health |
+3. **Khởi chạy Qdrant:**
+   ```bash
+   docker run -p 6333:6333 qdrant/qdrant
+   ```
 
-## Local setup
+4. **Khởi chạy service:**
+   ```bash
+   uvicorn main:app --reload --host 0.0.0.0 --port 8000
+   ```
 
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-Copy-Item .env.example .env
-python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000
+## Chạy với Docker Compose
+```bash
+docker-compose up -d --build
 ```
+Dịch vụ sẽ chạy ở `http://localhost:8000` và Qdrant ở `http://localhost:6333`.
 
-Required environment:
+## Tài liệu API
+- **Swagger UI**: `http://localhost:8000/docs`
+- **ReDoc**: `http://localhost:8000/redoc`
+- **API Contract (JSON)**: Xem file `docs/api_contract.md`
 
-- `GOOGLE_API_KEY`
-- optional `LLAMA_CLOUD_API_KEY`
-- `QDRANT_URL`
-- `QDRANT_COLLECTION_NAME`
-- `INTERNAL_SECRET`: same value as Node `RAG_INTERNAL_TOKEN`, at least 32 characters
-
-Never commit `.env`.
-
-## Tests
-
-```powershell
-python -m compileall .
-python -m pytest tests -q
+## Testing
+Chạy test bằng pytest:
+```bash
+pytest tests/ -v
 ```
-
-Tests mock Qdrant/LlamaIndex-heavy imports. They do not prove live Gemini, Qdrant or remote Node integration.
-
-## Docker
-
-The service-local Compose is development-only and owns its Qdrant. It does not currently mount the Node upload volume.
-
-For Node/Python integration, select a topology and shared-volume mapping from [`03_deployment-and-env.md`](../docs/handoffs/python-rag-v0.1/03_deployment-and-env.md). Do not use `localhost` between containers.
-
-## Known contract blockers
-
-- Processing `attempt_count` is overwritten by callback delivery retry.
-- Ingest callback has preview-only chunks.
-- Citation lacks Qdrant point ID.
-- Inbound routes do not verify internal Bearer.
-
-Current release gate: [`week3-integration-readiness.md`](../docs/status/week3-integration-readiness.md).

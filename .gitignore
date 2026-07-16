@@ -34,6 +34,9 @@ __pycache__/
 /python-service/qdrant_data/
 /python-service/uploads/
 /python-service/.cache/
+/python-service/model_cache/
+/python-service/models_cache/
+/python-service/downloads/
 
 # Editors and OS metadata
 .vscode/
@@ -44,6 +47,6 @@ Thumbs.db
 # Local, read-only implementation references
 week2_nodejs_core_ref/
 
-# Generated handoff packages and original source import archive
+# Keep python-service source trackable; ignore only generated packages/import archives.
 /artifacts/
 /python-service/*.zip
