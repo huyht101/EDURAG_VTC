@@ -7,7 +7,7 @@ Stack chính: Node.js 20+, Express, JavaScript CommonJS, `mysql2/promise`, MySQL
 ```text
 src/             NodeJS/Core runtime
 python-service/  Tracked integration snapshot from the Python team's upstream repository
-docs/            Canonical architecture, contract, status and handoff docs
+docs/            Canonical architecture, contract, status and setup docs
 tests/           NodeJS contract fixtures
 ```
 
@@ -65,6 +65,7 @@ Qdrant không cần cho mock demo. Team RAG có thể bật riêng bằng `docke
 - [NodeJS/Core flows](docs/flows/README.md)
 - [Week 3 integration readiness](docs/status/week3-integration-readiness.md)
 - [Python snapshot policy and observed capability](docs/architecture/python-rag.md)
+- [Python snapshot provenance](docs/status/python-snapshot-source.md)
 - [Refresh the Python snapshot](docs/setup/python-snapshot-refresh.md)
 - OpenAPI runtime: `/api-docs` và `/api-docs.json`
 

@@ -171,7 +171,7 @@ NodeJS không expose raw internal token hoặc multiline upstream stack ra publi
 - Callback normalization: [`src/middlewares/rag-callback-normalization-middleware.js`](../../src/middlewares/rag-callback-normalization-middleware.js).
 - Fixtures: [`tests/fixtures/rag-contract/v0.1/`](../../tests/fixtures/rag-contract/v0.1/).
 - Tests: [`scripts/rag-contract-test.js`](../../scripts/rag-contract-test.js).
-- Snapshot upstream reference: [`python-service/Link.txt`](../../python-service/Link.txt).
+- Snapshot upstream reference: [Python snapshot provenance](../status/python-snapshot-source.md).
 - Integration readiness: [`docs/status/week3-integration-readiness.md`](../status/week3-integration-readiness.md).
 
 Fixtures mô tả target v0.1. Các field Python chưa hỗ trợ vẫn được ghi rõ là required change, không phải runtime capability hiện tại.

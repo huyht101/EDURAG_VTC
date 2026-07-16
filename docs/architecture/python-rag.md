@@ -1,6 +1,6 @@
 # Python RAG integration snapshot
 
-Team Python/Data-RAG duy trì source of truth trong repository upstream riêng, hiện được tham chiếu bởi [`python-service/Link.txt`](../../python-service/Link.txt).
+Team Python/Data-RAG duy trì source of truth trong repository upstream riêng. URL và metadata của lần import hiện tại được ghi tại [Python snapshot provenance](../status/python-snapshot-source.md).
 
 [`python-service/`](../../python-service/) là tracked snapshot được refresh định kỳ để NodeJS team audit compatibility, chạy checks và hỗ trợ integration/debug. Snapshot có thể chậm hơn upstream và mọi local patch có thể bị overwrite ở lần refresh sau.
 

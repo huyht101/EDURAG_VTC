@@ -31,13 +31,10 @@ Tài liệu hiện hành được tổ chức theo nguồn sự thật, không p
 
 - [Mermaid flow index](flows/README.md)
 
-## Status và handoff
+## Status và snapshot
 
 - [Week 3 integration readiness](status/week3-integration-readiness.md)
+- [Python snapshot provenance](status/python-snapshot-source.md)
 - [Python snapshot refresh guide](setup/python-snapshot-refresh.md)
-
-## Internal records
-
-- [Historical Python RAG v0.1 handoff notes](handoffs/python-rag-v0.1/00_README_FIRST.md)
 
 `src/database/schema.sql` là executable database source of truth. OpenAPI là danh mục public endpoint chi tiết. [`api/internal-rag-contract.md`](api/internal-rag-contract.md) là contract nội bộ canonical duy nhất.
