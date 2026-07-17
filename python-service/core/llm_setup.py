@@ -38,6 +38,7 @@ def get_embedding_model() -> GoogleGenAIEmbedding:
     embed_model = GoogleGenAIEmbedding(
         model_name=settings.GEMINI_EMBEDDING_MODEL,
         api_key=settings.GOOGLE_API_KEY,
+        embedding_config={"output_dimensionality": settings.EMBEDDING_DIMENSION},
     )
 
     logger.info("Gemini Embedding model sẵn sàng ✓")

@@ -5,6 +5,7 @@ node_modules
 .env
 .env.*
 !.env.example
+/PythonSevice.env
 week2_nodejs_core_ref
 /python-service
 /artifacts

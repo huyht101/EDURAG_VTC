@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     GOOGLE_API_KEY: str
 
     # === LlamaParse (LlamaIndex Cloud) ===
-    LLAMA_CLOUD_API_KEY: str
+    LLAMA_CLOUD_API_KEY: str = os.getenv("LLAMA_CLOUD_API_KEY")
 
     # === Tên model Gemini ===
     GEMINI_LLM_MODEL: str = "models/gemini-3.5-flash"

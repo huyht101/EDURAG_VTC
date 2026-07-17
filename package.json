@@ -8,7 +8,9 @@
     "dev": "node --watch src/server.js",
     "check": "node scripts/check-syntax.js",
     "test:contract": "node scripts/rag-contract-test.js",
-    "test:part2": "node scripts/part2-smoke.js"
+    "test:part2": "node scripts/part2-smoke.js",
+    "preflight:remote": "node scripts/remote-preflight.js",
+    "test:remote": "node scripts/remote-e2e-smoke.js"
   },
   "dependencies": {
     "bcrypt": "^5.1.1",

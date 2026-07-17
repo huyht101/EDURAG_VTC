@@ -13,7 +13,7 @@ Status terms:
 - **Not yet integration-tested:** chưa được chứng minh với hai service thật.
 - **E2E verified:** chỉ dùng sau khi NodeJS, Python và Qdrant thật đã chạy qua flow tương ứng.
 
-Trạng thái hiện tại: NodeJS adapter và contract tests đã triển khai. Uncommitted Python snapshot refresh ngày `2026-07-17` đã triển khai target boundary chính; remote end-to-end chưa chạy.
+Trạng thái hiện tại: NodeJS adapter, contract tests, isolated remote Compose và repeatable live runner đã triển khai. Snapshot tại repository HEAD `95660f902a8f996a4e36f56e8375cf40632b0522` có target boundary chính. Live provider E2E đã PASS ngày 2026-07-17 cho ingest/callback/manifest, retrieval, chat/citation/usage và hide/unhide/delete.
 
 ## Ownership và authentication
 
@@ -121,6 +121,8 @@ NodeJS khóa job/document rows trong transaction, so processing attempt, ACK dup
 
 Current snapshot hiện tạo UUID một lần cho cả Qdrant point ID và `chunk_id`, gửi full `chunk_text`, SHA-256 lowercase `content_hash`, optional page/heading và giữ nguyên processing `attempt_count` khi callback HTTP retry. `source_locator` chưa được Python tạo nhưng vẫn optional.
 
+`gemini-embedding-001` trả 3072 chiều theo SDK mặc định. Snapshot integration overlay cấu hình `embedding_config.output_dimensionality=EMBEDDING_DIMENSION` để giữ agreed dimension `768`; Qdrant đã từ chối upsert trước patch và live ingest đã PASS sau patch. Thay đổi này cần upstream về Python repository.
+
 ## Query
 
 NodeJS gửi:
@@ -171,6 +173,8 @@ NodeJS không expose raw internal token hoặc multiline upstream stack ra publi
 
 Fixtures mô tả target v0.1 hiện đã quan sát được trong snapshot refresh mới. Chúng vẫn là mocked contract evidence, không phải bằng chứng remote E2E.
 
+Remote topology và runner: [`docker-compose.remote.yml`](../../docker-compose.remote.yml), [`scripts/remote-preflight.js`](../../scripts/remote-preflight.js) và [`scripts/remote-e2e-smoke.js`](../../scripts/remote-e2e-smoke.js). Xem [remote setup](../setup/remote-rag-e2e.md). `REMOTE_E2E_SMOKE_OK` là live evidence; preflight hoặc mocked transport riêng lẻ không đủ.
+
 ## Out of scope
 
-Remote E2E, OCR, PPTX, public reprocess, durable queue/retry worker, object storage, combined production Compose và RAG quality changes không thuộc v0.1.
+OCR, PPTX, public reprocess, durable queue/retry worker, object storage, production infrastructure và RAG quality changes không thuộc v0.1. Remote E2E là release verification của Week 3, không thay đổi contract semantics.

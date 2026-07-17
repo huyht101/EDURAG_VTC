@@ -66,8 +66,8 @@ Smoke suite cần database đã bootstrap, Demo Admin và các env bắt buộc.
 - `RAG_CALLBACK_URL=http://app:5000/api/internal/rag/processing-callback`.
 - Dùng một explicit shared volume: Node mount read-write tại `UPLOAD_DIR`; Python mount read-only tại `/shared/uploads`; Node đặt `RAG_SHARED_UPLOAD_DIR=/shared/uploads`.
 - Nếu dùng hai Compose project, network và volume phải được khai báo external ở cả hai. Không dùng `localhost` giữa containers.
-- Chỉ Python sở hữu Qdrant. Root Compose chưa triển khai combined topology.
+- Chỉ Python sở hữu Qdrant. Root override [`docker-compose.remote.yml`](../../docker-compose.remote.yml) triển khai topology cô lập này; xem [remote E2E setup](remote-rag-e2e.md).
 
-Contract tests không gọi Python thật. Xem [internal contract v0.1](../api/internal-rag-contract.md) để biết các blocker Python trước remote E2E.
+Contract tests không gọi Python thật. `npm run preflight:remote` chỉ chứng minh topology; `npm run test:remote` mới chạy lifecycle live. Xem [internal contract v0.1](../api/internal-rag-contract.md) và [independent test plan](../testing/week3-remote-test-plan.md).
 
 `python-service/` chỉ là tracked integration snapshot; xem [refresh guide](python-snapshot-refresh.md). Kiểm tra upstream repository của team Python trước khi kết luận snapshot là bản mới nhất.

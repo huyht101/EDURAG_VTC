@@ -51,7 +51,7 @@ Qdrant không cần cho mock demo. Team RAG có thể bật riêng bằng `docke
 - Document/upload/jobs/internal callback: implemented.
 - Chat/history/citation/usage/dashboard: implemented.
 - RAG mock mode: implemented và dùng mặc định.
-- Remote Python RAG: contract v0.1 và mocked HTTP contract tests đã có; chưa integration-test với service thật.
+- Remote Python RAG: contract v0.1, mocked HTTP tests và isolated Compose topology đã có; live Node → Python → LlamaParse/Gemini → Qdrant → callback E2E đã PASS ngày 2026-07-17.
 - PDF, DOCX, TXT: hỗ trợ; PPTX/OCR để sau.
 - Local storage và offset/limit pagination: MVP only.
 
@@ -64,6 +64,8 @@ Qdrant không cần cho mock demo. Team RAG có thể bật riêng bằng `docke
 - [Internal NodeJS–Python contract](docs/api/internal-rag-contract.md)
 - [NodeJS/Core flows](docs/flows/README.md)
 - [Week 3 integration readiness](docs/status/week3-integration-readiness.md)
+- [Remote RAG E2E setup](docs/setup/remote-rag-e2e.md)
+- [Week 3 independent remote test plan](docs/testing/week3-remote-test-plan.md)
 - [Python snapshot policy and observed capability](docs/architecture/python-rag.md)
 - [Python snapshot provenance](docs/status/python-snapshot-source.md)
 - [Refresh the Python snapshot](docs/setup/python-snapshot-refresh.md)
@@ -81,4 +83,4 @@ npm start
 
 Với local NodeJS, dùng MySQL demo trên `127.0.0.1:3306`. Xem [local development](docs/setup/local-development.md) và [Docker demo](docs/setup/docker-demo.md) để biết reset, test và giới hạn bảo mật.
 
-`RAG_MODE=mock` vẫn là mặc định. Remote mode cần shared upload path nhìn thấy từ Python, callback URL và internal token đồng nhất; xem [contract v0.1](docs/api/internal-rag-contract.md). Snapshot mới đã triển khai target payload chính, nhưng remote E2E vẫn chưa được xác nhận và còn gate về Python tests/security, provenance và deployment topology.
+`RAG_MODE=mock` vẫn là mặc định. Remote mode dùng override [`docker-compose.remote.yml`](docker-compose.remote.yml), provider credential từ ignored `PythonSevice.env`, shared upload volume và root `RAG_INTERNAL_TOKEN`; xem [remote setup](docs/setup/remote-rag-e2e.md) và [contract v0.1](docs/api/internal-rag-contract.md). Live evidence hiện chỉ áp dụng cho isolated development topology, không phải production readiness.

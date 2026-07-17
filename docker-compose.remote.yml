@@ -1,0 +1,58 @@
+services:
+  db:
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}
+
+  app:
+    environment:
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      RAG_MODE: remote
+      RAG_SERVICE_URL: http://rag-service:8000
+      RAG_INTERNAL_TOKEN: ${RAG_INTERNAL_TOKEN:?RAG_INTERNAL_TOKEN is required}
+      RAG_REQUEST_TIMEOUT_MS: ${RAG_REQUEST_TIMEOUT_MS:-15000}
+      RAG_QUERY_TIMEOUT_MS: ${RAG_QUERY_TIMEOUT_MS:-180000}
+      RAG_CALLBACK_URL: http://app:5000/api/internal/rag/processing-callback
+      RAG_SHARED_UPLOAD_DIR: /shared/uploads
+    volumes:
+      - uploads_data:/shared/uploads
+    depends_on:
+      rag-service:
+        condition: service_healthy
+
+  rag-service:
+    build:
+      context: ./python-service
+    restart: unless-stopped
+    environment:
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:?GOOGLE_API_KEY is required}
+      LLAMA_CLOUD_API_KEY: ${LLAMA_CLOUD_API_KEY:?LLAMA_CLOUD_API_KEY is required}
+      # Deployment auth is owned by the root topology. A possibly stale/weak
+      # snapshot INTERNAL_SECRET is deliberately overridden for both services.
+      INTERNAL_SECRET: ${RAG_INTERNAL_TOKEN:?RAG_INTERNAL_TOKEN is required}
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_COLLECTION_NAME: ${QDRANT_COLLECTION_NAME:-education_docs}
+      GEMINI_LLM_MODEL: ${GEMINI_LLM_MODEL:-models/gemini-3.5-flash}
+      GEMINI_EMBEDDING_MODEL: ${GEMINI_EMBEDDING_MODEL:-models/gemini-embedding-001}
+      EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-768}
+      CALLBACK_TIMEOUT: ${RAG_CALLBACK_TIMEOUT_SECONDS:-30}
+      CALLBACK_MAX_RETRIES: ${RAG_CALLBACK_MAX_RETRIES:-3}
+      NODE_CALLBACK_URL: http://app:5000/api/internal/rag/processing-callback
+      PYTHON_SHARED_UPLOAD_DIR: /shared/uploads
+    ports:
+      - "127.0.0.1:${PYTHON_HOST_PORT:-8000}:8000"
+    volumes:
+      - uploads_data:/shared/uploads:ro
+    depends_on:
+      - qdrant
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=3)"
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    networks:
+      - edurag_network

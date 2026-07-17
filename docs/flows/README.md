@@ -8,7 +8,7 @@ These diagrams describe the implemented NodeJS/Core MVP behavior and its remaini
 - NodeJS/Python calls use the separate `RAG_INTERNAL_TOKEN` Bearer token.
 - NodeJS owns MySQL transactions and business/history persistence.
 - Python is a black-box RAG service and owns Qdrant interaction.
-- Remote contract v0.1 is implemented and tested at the NodeJS HTTP boundary. The current Python snapshot implements the required payload fields; Python test/security hardening, deployment topology and remote E2E are still outstanding.
+- Remote contract v0.1 is implemented and tested at the NodeJS HTTP boundary. The current Python snapshot implements the required payload fields; isolated live ingest/chat/document-operation E2E passed on 2026-07-17. Python test/security and dependency-version debt remain.
 - Docker demo uses RAG mock mode by default; remote mode is optional.
 - No Draw.io source or export is produced in this review.
 

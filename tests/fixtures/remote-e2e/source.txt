@@ -1,0 +1,6 @@
+EDURAG WEEK 3 REMOTE INTEGRATION FIXTURE
+
+The Week 3 validation beacon color is ultramarine.
+The verification code name is ORCHID-7429.
+This synthetic document exists only to verify ingest, retrieval, citation and immutable source snapshots.
+

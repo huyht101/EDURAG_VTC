@@ -10,10 +10,10 @@
 | Upstream branch/tag | `Unknown` |
 | Upstream commit | `Unknown` |
 | Snapshot refreshed | `2026-07-17` |
-| Import source | Uncommitted working-tree refresh; exact upstream export metadata was not recorded |
+| Import source | Source copy committed in the Node repository; exact upstream export metadata was not recorded |
 | Snapshot directory | `python-service/` |
-| Git baseline | `65e089a8a8e63505f9cf56d8fa972fdcc189a17d` plus uncommitted snapshot changes |
-| Node-authored Python runtime patches | `None` |
+| Git baseline | repository HEAD `95660f902a8f996a4e36f56e8375cf40632b0522` before the current Node integration changes |
+| Node-authored Python runtime patches | `requirements.txt`: align packages with `google_genai` imports; `core/llm_setup.py`: request agreed 768-dimensional embeddings. Both must be upstreamed |
 | Latest compatibility audit | `2026-07-17` |
 
 The Git baseline identifies the repository copy, not an upstream Python commit. The refresh must record its exact upstream commit before it can be treated as reproducible provenance.
@@ -40,11 +40,11 @@ Remaining Python/deployment work:
 
 1. Replace the weak `INTERNAL_SECRET` fallback and use constant-time comparison; verify missing/malformed Bearer returns the agreed `401`.
 2. Update Python route/schema tests for Bearer and required `attempt_count`; current tracked tests still use the old unauthenticated DTOs.
-3. Reconcile the `google_genai` imports in `core/llm_setup.py` with declared requirements and restore an upstream-safe environment template.
+3. Upstream the minimal `google_genai` requirements alignment and `output_dimensionality=768` configuration; restore an upstream-safe environment template.
 4. Record the exact upstream commit and run Python tests without paid-provider calls.
-5. Select and verify the shared upload volume/network topology.
+5. Align the pinned Python Qdrant client and deployed Qdrant server versions. Isolated live E2E passed despite the current compatibility warning.
 
-These are observations from the uncommitted local snapshot, not claims about the latest upstream state. See [Week 3 integration readiness](week3-integration-readiness.md) for release gates.
+These are observations from the tracked local snapshot plus the explicitly listed requirements overlay, not claims about the latest upstream state. See [Week 3 integration readiness](week3-integration-readiness.md) for release gates.
 
 ## After each refresh
 

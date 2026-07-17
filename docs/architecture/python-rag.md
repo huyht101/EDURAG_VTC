@@ -25,11 +25,12 @@ Snapshot-local README/API docs phản ánh upstream tại thời điểm import 
 ## Observed limitations
 
 - `BackgroundTasks` không durable.
-- Service Compose chưa mount shared Node upload volume.
+- Snapshot-local Compose remains standalone; root `docker-compose.remote.yml` supplies the verified shared network/volume topology for integration.
 - Current tracked Python tests have not been updated for required Bearer/`attempt_count`.
 - `INTERNAL_SECRET` still has a weak fallback and inbound comparison is not constant-time.
-- Exact upstream commit for the uncommitted refresh is unknown.
-- Python dependency/environment packaging for the current `google_genai` imports remains to be verified.
+- Exact upstream commit for the tracked refresh is unknown.
+- The Python 3.11 image imports the `google_genai` adapters after a minimal local requirements alignment and explicitly requests 768-dimensional embeddings; both integration overlays must be upstreamed.
+- Qdrant client `1.14.2` warns against the current `1.18.2` server; live E2E passed, but deployment versions should be aligned instead of relying on `latest` indefinitely.
 
 Các mismatch cần được chuyển/upstream cho team Python. NodeJS team không sở hữu retrieval quality, prompt/model tuning hoặc Python production releases.
 
