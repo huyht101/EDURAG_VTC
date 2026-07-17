@@ -1,30 +1,26 @@
 'use strict';
 
 const { spawnSync } = require('child_process');
-const fs = require('fs');
 const path = require('path');
 
 const root = path.resolve(__dirname, '..');
 const rootEnvFile = path.join(root, '.env');
-const pythonEnvFile = path.resolve(root, process.env.PYTHON_ENV_FILE || 'PythonSevice.env');
 require('dotenv').config({ path: rootEnvFile });
-const pythonEnvironment = require('dotenv').config({ path: pythonEnvFile }).parsed || {};
-for (const name of ['GOOGLE_API_KEY', 'LLAMA_CLOUD_API_KEY', 'INTERNAL_SECRET']) {
-  if (!process.env[name] && pythonEnvironment[name]) process.env[name] = pythonEnvironment[name];
-}
-if (!process.env.RAG_INTERNAL_TOKEN && process.env.INTERNAL_SECRET) {
-  process.env.RAG_INTERNAL_TOKEN = process.env.INTERNAL_SECRET;
-}
 
 const composeProject = process.env.REMOTE_COMPOSE_PROJECT || 'edurag_remote_e2e';
-const composeEnvFiles = [rootEnvFile, pythonEnvFile]
-  .filter((file) => fs.existsSync(file))
-  .flatMap((file) => ['--env-file', file]);
 const composePrefix = [
-  'compose', ...composeEnvFiles, '--profile', 'rag', '-p', composeProject,
+  'compose', '--profile', 'rag', '-p', composeProject,
   '-f', path.join(root, 'docker-compose.yml'),
   '-f', path.join(root, 'docker-compose.remote.yml')
 ];
+
+const REMOTE_REQUIRED_ENVIRONMENT = Object.freeze([
+  'GOOGLE_API_KEY',
+  'LLAMA_CLOUD_API_KEY',
+  'RAG_INTERNAL_TOKEN',
+  'DB_PASSWORD',
+  'MYSQL_ROOT_PASSWORD'
+]);
 
 function redacted(value) {
   let text = String(value || '');
@@ -69,8 +65,25 @@ function composePort(service, containerPort) {
   return Number(match[1]);
 }
 
-function requiredEnvironment(names) {
-  return names.filter((name) => !process.env[name]);
+function assertRemoteEnvironment() {
+  const missing = REMOTE_REQUIRED_ENVIRONMENT.filter((name) => !process.env[name]);
+  if (missing.length) {
+    const error = new Error(`Missing required environment variables: ${missing.join(', ')}`);
+    error.code = 'REMOTE_PREFLIGHT_ENV_MISSING';
+    throw error;
+  }
+  if (process.env.RAG_INTERNAL_TOKEN.length < 32) {
+    const error = new Error('RAG_INTERNAL_TOKEN must contain at least 32 characters.');
+    error.code = 'REMOTE_PREFLIGHT_TOKEN_INVALID';
+    throw error;
+  }
+  if (process.env.DB_PASSWORD !== process.env.MYSQL_ROOT_PASSWORD) {
+    const error = new Error(
+      'Remote demo uses the MySQL root user, so DB_PASSWORD and MYSQL_ROOT_PASSWORD must match.'
+    );
+    error.code = 'REMOTE_PREFLIGHT_DATABASE_CONFIG_INVALID';
+    throw error;
+  }
 }
 
 function delay(milliseconds) {
@@ -89,7 +102,8 @@ module.exports = {
   compose,
   composeExec,
   composePort,
-  requiredEnvironment,
+  REMOTE_REQUIRED_ENVIRONMENT,
+  assertRemoteEnvironment,
   delay,
   fetchWithTimeout
 };

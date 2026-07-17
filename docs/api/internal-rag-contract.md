@@ -13,7 +13,7 @@ Status terms:
 - **Not yet integration-tested:** chưa được chứng minh với hai service thật.
 - **E2E verified:** chỉ dùng sau khi NodeJS, Python và Qdrant thật đã chạy qua flow tương ứng.
 
-Trạng thái hiện tại: NodeJS adapter, contract tests, isolated remote Compose và repeatable live runner đã triển khai. Snapshot tại repository HEAD `95660f902a8f996a4e36f56e8375cf40632b0522` có target boundary chính. Live provider E2E đã PASS ngày 2026-07-17 cho ingest/callback/manifest, retrieval, chat/citation/usage và hide/unhide/delete.
+Trạng thái hiện tại: NodeJS adapter, contract tests, isolated remote Compose và repeatable live runner đã triển khai. Snapshot tại repository baseline `b348728c55bd42be35ec23c352dd379749adfbe2` có target boundary chính. Live provider E2E đã PASS ngày 2026-07-17 cho ingest/callback/manifest, retrieval, chat/citation/usage và hide/unhide/delete.
 
 ## Ownership và authentication
 
@@ -23,7 +23,7 @@ Trạng thái hiện tại: NodeJS adapter, contract tests, isolated remote Comp
 - Hai giá trị phải giống nhau và có ít nhất 32 ký tự.
 - NodeJS là thành phần duy nhất ghi MySQL.
 - Python sở hữu parsing, embedding, RAG và Qdrant; NodeJS không gọi Qdrant.
-- Current snapshot callback sender gửi Bearer và `api/dependencies.py::verify_internal_token` bảo vệ ingest/query/visibility/delete. Health vẫn public. Missing-token status, constant-time comparison và weak secret fallback vẫn cần Python security hardening trước production.
+- Current snapshot callback sender gửi Bearer và `api/dependencies.py::verify_internal_token` bảo vệ ingest/query/visibility/delete bằng explicit secret, `secrets.compare_digest` và thống nhất `401` cho missing/malformed/incorrect Bearer. Health vẫn public. Patch này cần được upstream cho team Python.
 
 Boundary JSON dùng `snake_case`; internal NodeJS code giữ `camelCase`.
 

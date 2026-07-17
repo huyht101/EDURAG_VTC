@@ -14,7 +14,7 @@ npm run test:contract
 npm start
 ```
 
-`.env.example` chứa credential demo local. Thay secret khi làm ngoài demo và không commit `.env`.
+`.env.example` chứa credential demo local. Thay secret khi làm ngoài demo và không commit `.env`. Integrated stack chỉ đọc root `.env`; `python-service/.env` chỉ dành cho Python standalone và không được root Compose đọc.
 
 Nếu chỉ cần MySQL:
 

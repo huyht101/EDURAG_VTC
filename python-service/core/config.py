@@ -13,7 +13,6 @@ Phiên bản v3:
 from functools import lru_cache
 # pyrefly: ignore [missing-import]
 from pydantic_settings import BaseSettings, SettingsConfigDict
-import os
 
 class Settings(BaseSettings):
     """
@@ -31,7 +30,7 @@ class Settings(BaseSettings):
     GOOGLE_API_KEY: str
 
     # === LlamaParse (LlamaIndex Cloud) ===
-    LLAMA_CLOUD_API_KEY: str = os.getenv("LLAMA_CLOUD_API_KEY")
+    LLAMA_CLOUD_API_KEY: str
 
     # === Tên model Gemini ===
     GEMINI_LLM_MODEL: str = "models/gemini-3.5-flash"
@@ -55,7 +54,7 @@ class Settings(BaseSettings):
     EMBEDDING_DIMENSION: int = 768
 
     # === Callback — gọi ngược Node.js sau khi xử lý xong ===
-    INTERNAL_SECRET: str = "change-me-in-production"
+    INTERNAL_SECRET: str
     CALLBACK_TIMEOUT: int = 30      # seconds
     CALLBACK_MAX_RETRIES: int = 3
 

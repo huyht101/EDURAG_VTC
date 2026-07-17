@@ -20,14 +20,13 @@ Snapshot-local README/API docs phản ánh upstream tại thời điểm import 
 - Processing-attempt propagation, full-text/hash manifest and UUID Qdrant point IDs.
 - Query history/correlation fields, citation point ID, snippet, confidence string và Gemini usage metadata.
 - Internal Bearer dependency for all business routes; health remains public.
-- Python tests for route acceptance and Pydantic schemas.
+- Python tests for public health, authenticated route acceptance/rejection and Pydantic schemas.
 
 ## Observed limitations
 
 - `BackgroundTasks` không durable.
 - Snapshot-local Compose remains standalone; root `docker-compose.remote.yml` supplies the verified shared network/volume topology for integration.
-- Current tracked Python tests have not been updated for required Bearer/`attempt_count`.
-- `INTERNAL_SECRET` still has a weak fallback and inbound comparison is not constant-time.
+- Explicit `INTERNAL_SECRET`, constant-time Bearer comparison and aligned auth/DTO tests are local integration patches that must be upstreamed.
 - Exact upstream commit for the tracked refresh is unknown.
 - The Python 3.11 image imports the `google_genai` adapters after a minimal local requirements alignment and explicitly requests 768-dimensional embeddings; both integration overlays must be upstreamed.
 - Qdrant client `1.14.2` warns against the current `1.18.2` server; live E2E passed, but deployment versions should be aligned instead of relying on `latest` indefinitely.

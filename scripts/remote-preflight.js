@@ -7,7 +7,7 @@ const {
   compose,
   composeExec,
   composePort,
-  requiredEnvironment,
+  assertRemoteEnvironment,
   fetchWithTimeout
 } = require('./remote-test-utils');
 
@@ -19,18 +19,7 @@ function resolvedModels() {
 }
 
 async function main() {
-  const missing = requiredEnvironment([
-    'GOOGLE_API_KEY', 'LLAMA_CLOUD_API_KEY', 'RAG_INTERNAL_TOKEN',
-    'DB_PASSWORD', 'MYSQL_ROOT_PASSWORD'
-  ]);
-  if (missing.length) {
-    const error = new Error(`Missing required environment variables: ${missing.join(', ')}`);
-    error.code = 'REMOTE_PREFLIGHT_ENV_MISSING';
-    throw error;
-  }
-  assert(process.env.RAG_INTERNAL_TOKEN.length >= 32, 'RAG_INTERNAL_TOKEN must contain at least 32 characters.');
-  assert.equal(process.env.DB_PASSWORD, process.env.MYSQL_ROOT_PASSWORD,
-    'Remote demo uses the MySQL root user, so DB_PASSWORD and MYSQL_ROOT_PASSWORD must match.');
+  assertRemoteEnvironment();
 
   const models = resolvedModels();
   assert.equal(models.embedding.replace(/^models\//, ''), 'gemini-embedding-001');

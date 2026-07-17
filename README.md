@@ -83,4 +83,4 @@ npm start
 
 Với local NodeJS, dùng MySQL demo trên `127.0.0.1:3306`. Xem [local development](docs/setup/local-development.md) và [Docker demo](docs/setup/docker-demo.md) để biết reset, test và giới hạn bảo mật.
 
-`RAG_MODE=mock` vẫn là mặc định. Remote mode dùng override [`docker-compose.remote.yml`](docker-compose.remote.yml), provider credential từ ignored `PythonSevice.env`, shared upload volume và root `RAG_INTERNAL_TOKEN`; xem [remote setup](docs/setup/remote-rag-e2e.md) và [contract v0.1](docs/api/internal-rag-contract.md). Live evidence hiện chỉ áp dụng cho isolated development topology, không phải production readiness.
+`RAG_MODE=mock` vẫn là mặc định. Integrated remote mode dùng override [`docker-compose.remote.yml`](docker-compose.remote.yml) và chỉ đọc ignored root `.env`; Compose chỉ inject provider credentials và root `RAG_INTERNAL_TOKEN` vào Python. Xem [remote setup](docs/setup/remote-rag-e2e.md) và [contract v0.1](docs/api/internal-rag-contract.md). Live evidence hiện chỉ áp dụng cho isolated development topology, không phải production readiness.

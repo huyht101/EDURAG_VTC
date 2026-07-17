@@ -6,8 +6,8 @@ venv/
 # Local environment files (keep the documented template)
 .env
 .env.*
+*.env
 !.env.example
-/PythonSevice.env
 
 # Logs and test/build output
 logs/

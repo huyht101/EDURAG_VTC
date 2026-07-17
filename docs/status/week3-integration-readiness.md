@@ -1,12 +1,12 @@
 # Week 3 integration readiness
 
-Repository baseline: `95660f902a8f996a4e36f56e8375cf40632b0522` on `main`. Python source of truth remains the Python team's upstream repository; `python-service/` is the tracked integration snapshot audited and tested here.
+Repository baseline: `b348728c55bd42be35ec23c352dd379749adfbe2` on `main`. Python source of truth remains the Python team's upstream repository; `python-service/` is the tracked integration snapshot audited and tested here.
 
 Current assessment: **REMOTE E2E READY** for the documented isolated development topology. This is integration evidence, not production readiness.
 
 ## Runtime configuration verified
 
-- Provider configuration loaded from ignored `PythonSevice.env`; the file was not mounted or copied into images.
+- Integrated provider configuration is loaded only from ignored root `.env`; it is not mounted or copied into images.
 - Root `RAG_INTERNAL_TOKEN` was injected into Python as `INTERNAL_SECRET` and passed both auth directions.
 - Generation: `models/gemini-3.5-flash`.
 - Embedding: `models/gemini-embedding-001`, explicitly reduced to agreed dimension `768`.
@@ -17,8 +17,10 @@ Current assessment: **REMOTE E2E READY** for the documented isolated development
 `npm run test:remote` returned:
 
 ```text
-REMOTE_E2E_SMOKE_OK documentId=6 ingestJobId=10 chunks=1 citations=3 usageRows=1
+REMOTE_E2E_SMOKE_OK documentId=4 ingestJobId=8 chunks=1 citations=1 usageRows=1
 ```
+
+This rerun used only the ignored root `.env`. The live workflow completed before the runner exposed a cleanup return-type false negative; that tooling bug was fixed, the exact isolated project was removed with `down -v`, and the cleanup path was verified separately without another provider call.
 
 Verified through public/internal HTTP plus persistence assertions:
 
@@ -52,16 +54,16 @@ Live `no_answer` remains intentionally non-deterministic; its semantics stay cov
 | Mock and remote Compose config | PASS |
 | Python 3.11 image import/compile | PASS |
 | Remote preflight | PASS |
-| Live remote smoke | PASS |
-| Python snapshot pytest | FAIL — stale upstream mocks/payload fixtures |
+| Live remote workflow | PASS — root `.env` only |
+| Isolated cleanup path | PASS — `REMOTE_CLEANUP_PATH_OK` |
+| Python snapshot pytest | PASS — 12 tests, no provider calls |
 
 ## Required upstream/deployment follow-up
 
 1. Upstream `llama-index-llms-google-genai` and `llama-index-embeddings-google-genai` requirements.
 2. Upstream `embedding_config.output_dimensionality=768` in `core/llm_setup.py`.
-3. Update Python tests for `google_genai`, Bearer auth and required `attempt_count`.
-4. Replace weak snapshot `INTERNAL_SECRET` fallback and use constant-time comparison.
-5. Align Qdrant client `1.14.2` and server `1.18.2`; live passed but emitted a compatibility warning.
-6. Record the exact Python upstream commit, currently `UNKNOWN`.
+3. Upstream the Python Bearer hardening and aligned route/schema tests maintained by this integration snapshot.
+4. Align Qdrant client `1.14.2` and server `1.18.2`; live passed but emitted a compatibility warning.
+5. Record the exact Python upstream commit, currently `UNKNOWN`.
 
 The second Node member should repeat the [independent test plan](../testing/week3-remote-test-plan.md) from a fresh clone.

@@ -374,7 +374,23 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(`REMOTE_E2E_SMOKE_FAILED: ${error.message}`);
-  process.exit(1);
-});
+async function run() {
+  try {
+    await main();
+  } catch (error) {
+    console.error(`REMOTE_E2E_SMOKE_FAILED: ${error.message}`);
+    process.exitCode = 1;
+  } finally {
+    const isolated = process.env.REMOTE_E2E_CONFIRM_ISOLATED === 'true';
+    const cleanupEnabled = process.env.REMOTE_E2E_CLEANUP !== 'false';
+    if (isolated && cleanupEnabled) {
+      const result = compose(['down', '-v', '--remove-orphans'], { allowFailure: true });
+      if (typeof result !== 'string' && result.status !== 0) {
+        console.error('REMOTE_E2E_CLEANUP_FAILED: unable to remove the isolated Compose project.');
+        process.exitCode = 1;
+      }
+    }
+  }
+}
+
+run();

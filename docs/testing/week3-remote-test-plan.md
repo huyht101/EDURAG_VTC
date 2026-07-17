@@ -6,9 +6,10 @@ This checklist is for the second NodeJS/Core member to verify a fresh clone inde
 
 - Confirm the expected branch/commit and a reviewed worktree.
 - Use Node.js 20+, Docker and the tracked `python-service/` snapshot.
-- Copy `.env.example` to ignored `.env` for Node/MySQL settings and set a 32+ character `RAG_INTERNAL_TOKEN`. Keep `GOOGLE_API_KEY` and `LLAMA_CLOUD_API_KEY` in ignored `PythonSevice.env`; remote Compose injects the root token into Python as `INTERNAL_SECRET` so stale snapshot secrets cannot weaken the topology.
+- Copy `.env.example` to the single ignored root `.env`. Add `GOOGLE_API_KEY`, `LLAMA_CLOUD_API_KEY` and a 32+ character `RAG_INTERNAL_TOKEN` through the approved secret channel. Do not create a second integrated credential file; remote Compose injects the root token into Python as `INTERNAL_SECRET`.
 - Confirm `GEMINI_EMBEDDING_MODEL=models/gemini-embedding-001` and record the resolved Flash generation model name without recording keys.
 - Select a unique `REMOTE_COMPOSE_PROJECT` and unused host ports.
+- Leave `REMOTE_E2E_CLEANUP=true` so the runner removes only that confirmed isolated project in `finally`.
 
 ## Static and mock baseline
 
@@ -45,4 +46,4 @@ Live `no_answer` is not deterministic; rely on the contract test unless the prov
 
 ## Completion record
 
-Record command, timestamp, commit, provider/model names (never credentials), PASS/FAIL/BLOCKED status and the first safe error code. `REMOTE E2E READY` requires all real-service lifecycle and persistence checks to pass; mocked HTTP tests are not sufficient.
+Record command, timestamp, commit, provider/model names (never credentials), PASS/FAIL/BLOCKED status and the first safe error code. For a bug, include expected/actual behavior, the redacted request/response shape and redacted logs. Run the documented isolated cleanup and confirm no upload/log/database dump or secret artifact appears in Git status. `REMOTE E2E READY` requires all real-service lifecycle and persistence checks to pass; mocked HTTP tests are not sufficient.

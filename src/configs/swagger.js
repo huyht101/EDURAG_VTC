@@ -15,7 +15,7 @@ const definition = {
   info: {
     title: 'EduRAG NodeJS/Core API',
     version: '1.0.0-week3-contract-v0.1',
-    description: 'Foundation, Part 1 và Week 2 Part 2 APIs. RAG mock mode đã triển khai; remote contract v0.1 đã có NodeJS contract tests nhưng chưa chạy end-to-end với Python thật.'
+    description: 'Foundation, Part 1 và Week 2 Part 2 APIs. RAG mock mode và remote contract v0.1 đã được kiểm thử; live E2E chỉ áp dụng cho topology development được tài liệu hóa.'
   },
   servers: [{ url: 'http://localhost:5001', description: 'Docker demo default' }],
   components: {
