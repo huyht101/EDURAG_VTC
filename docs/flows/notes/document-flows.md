@@ -13,4 +13,4 @@
 
 Public reprocess, batching, durable scheduling and parallel generations remain outside MVP.
 
-Visibility uses `action=hide|unhide`; delete uses methods/paths observed in the current snapshot. Remaining Python test/security and deployment gates are tracked in the Week 3 readiness document.
+Visibility uses `action=hide|unhide`; delete uses methods/paths verified against the current snapshot. Release evidence and remaining upstream debt are tracked in the Week 3 readiness document.

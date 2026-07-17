@@ -168,7 +168,7 @@ NodeJS không expose raw internal token hoặc multiline upstream stack ra publi
 - Callback normalization: [`src/middlewares/rag-callback-normalization-middleware.js`](../../src/middlewares/rag-callback-normalization-middleware.js).
 - Fixtures: [`tests/fixtures/rag-contract/v0.1/`](../../tests/fixtures/rag-contract/v0.1/).
 - Tests: [`scripts/rag-contract-test.js`](../../scripts/rag-contract-test.js).
-- Snapshot upstream reference: [Python snapshot provenance](../status/python-snapshot-source.md).
+- Snapshot upstream reference: [Python RAG snapshot](../architecture/python-rag.md).
 - Integration readiness: [`docs/status/week3-integration-readiness.md`](../status/week3-integration-readiness.md).
 
 Fixtures mô tả target v0.1 hiện đã quan sát được trong snapshot refresh mới. Chúng vẫn là mocked contract evidence, không phải bằng chứng remote E2E.

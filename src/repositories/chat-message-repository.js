@@ -31,7 +31,7 @@ async function insertMessage(data, executor) {
 async function findRequestPair(clientRequestId, executor) {
   const [rows] = await db(executor).execute(
     `SELECT u.id AS user_message_id, u.session_id, u.message_order AS user_message_order,
-            u.content AS question, a.id AS assistant_message_id, a.content AS answer,
+            u.content AS question, u.client_request_id, a.id AS assistant_message_id, a.content AS answer,
             a.status AS assistant_status, a.no_answer, a.error_code
      FROM chat_messages u
      LEFT JOIN chat_messages a

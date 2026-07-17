@@ -1,36 +1,45 @@
 # Python RAG integration snapshot
 
-Team Python/Data-RAG duy trì source of truth trong repository upstream riêng. URL và metadata của lần import hiện tại được ghi tại [Python snapshot provenance](../status/python-snapshot-source.md).
+## Ownership và provenance
 
-[`python-service/`](../../python-service/) là tracked snapshot được refresh định kỳ để NodeJS team audit compatibility, chạy checks và hỗ trợ integration/debug. Snapshot có thể chậm hơn upstream và mọi local patch có thể bị overwrite ở lần refresh sau.
+Team Python/Data-RAG sở hữu production source trong upstream repository riêng. [`python-service/`](../../python-service/) là tracked integration snapshot để Node team audit contract/debug; snapshot có thể stale hoặc bị overwrite khi refresh.
 
-Snapshot-local README/API docs phản ánh upstream tại thời điểm import nhưng không phải canonical contract của project này. Contract phía Node được duy trì tại [`docs/api/internal-rag-contract.md`](../api/internal-rag-contract.md).
+| Metadata | Current value |
+|---|---|
+| Upstream repository | <https://github.com/manh2905/RAG_service> |
+| Branch/tag | `Unknown` |
+| Upstream commit | `Unknown` |
+| Snapshot refreshed/audited | `2026-07-17` |
+| Import source | Source copy; exact upstream export metadata chưa được ghi |
+| Local Python runtime patch status | Có integration overlays cần upstream, liệt kê bên dưới |
 
-## Observed in the current snapshot
+Snapshot-local README/docs là upstream evidence tại thời điểm import, không phải canonical NodeJS-Python contract. Contract duy nhất phía Node: [internal RAG contract](../api/internal-rag-contract.md).
 
-- FastAPI entry point `main.py::app`.
+## Observed capability
+
+- FastAPI `main.py::app`.
 - `POST /api/ingest`, `POST /api/query`.
-- `PATCH /api/docs/{doc_id}/visibility`.
-- `DELETE /api/ingest/{doc_id}`.
-- `GET /api/health`.
-- PDF/DOCX/DOC/TXT parsing, local fallback và optional LlamaParse.
-- Random UUID Qdrant point IDs.
-- Qdrant payload `doc_id`, `subject_id`, page/heading, chunk index và `is_hidden`.
-- Async `BackgroundTasks` ingest/visibility/delete and callback sender.
-- Processing-attempt propagation, full-text/hash manifest and UUID Qdrant point IDs.
-- Query history/correlation fields, citation point ID, snippet, confidence string và Gemini usage metadata.
-- Internal Bearer dependency for all business routes; health remains public.
-- Python tests for public health, authenticated route acceptance/rejection and Pydantic schemas.
+- `PATCH /api/docs/{doc_id}/visibility`, `DELETE /api/ingest/{doc_id}`.
+- Public `GET /api/health`; business routes dùng internal Bearer.
+- Shared-file ingest, background processing và authenticated callback.
+- Complete chunk manifest gồm UUID point ID, full text và SHA-256 hash.
+- Qdrant point ID được trả làm citation `vector_node_id`.
+- Query nhận bounded history/correlation fields và trả answer/no-answer/citations/usage.
 
-## Observed limitations
+Khả năng trên đã được contract tests và isolated remote E2E kiểm chứng cho snapshot hiện tại. Python upstream mới hơn vẫn phải được audit lại.
 
-- `BackgroundTasks` không durable.
-- Snapshot-local Compose remains standalone; root `docker-compose.remote.yml` supplies the verified shared network/volume topology for integration.
-- Explicit `INTERNAL_SECRET`, constant-time Bearer comparison and aligned auth/DTO tests are local integration patches that must be upstreamed.
-- Exact upstream commit for the tracked refresh is unknown.
-- The Python 3.11 image imports the `google_genai` adapters after a minimal local requirements alignment and explicitly requests 768-dimensional embeddings; both integration overlays must be upstreamed.
-- Qdrant client `1.14.2` warns against the current `1.18.2` server; live E2E passed, but deployment versions should be aligned instead of relying on `latest` indefinitely.
+## Integration overlays cần upstream
 
-Các mismatch cần được chuyển/upstream cho team Python. NodeJS team không sở hữu retrieval quality, prompt/model tuning hoặc Python production releases.
+- Explicit `INTERNAL_SECRET`, constant-time Bearer verification và auth/schema tests.
+- `llama-index-llms-google-genai` và `llama-index-embeddings-google-genai` requirements alignment.
+- `embedding_config.output_dimensionality=768` cho `gemini-embedding-001`.
+- Safe standalone environment template.
 
-Refresh process: [`docs/setup/python-snapshot-refresh.md`](../setup/python-snapshot-refresh.md).
+## Limitations
+
+- FastAPI `BackgroundTasks` không phải durable queue.
+- Python snapshot Compose là standalone; root `docker-compose.remote.yml` mới là integration topology đã verify.
+- Qdrant client `1.14.2` cảnh báo với server `1.18.2`; live integration PASS nhưng version support cần được team Python chốt.
+- Node team không sở hữu retrieval quality, prompt/model tuning hoặc Python release.
+
+Sau mỗi import, cập nhật metadata/capability tại file này và làm theo [snapshot refresh guide](../setup/python-snapshot-refresh.md). Current gate nằm tại [Week 3 readiness](../status/week3-integration-readiness.md).

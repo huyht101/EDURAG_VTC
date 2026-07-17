@@ -1,388 +1,149 @@
-# Full Docker RAG setup và kiểm thử Swagger
+# Remote Docker RAG
 
-Đây là hướng dẫn chuẩn để chạy toàn bộ development stack:
+Hướng dẫn canonical để chạy NodeJS, MySQL 8.4, Python RAG và Qdrant trên cùng Docker network. Không cần `PythonSevice.env`, `$env:...`, `-f` hoặc `-p` cho workflow thông thường.
 
-- NodeJS/Core và MySQL 8.4;
-- Python RAG snapshot;
-- Qdrant do Python sở hữu;
-- Gemini và LlamaParse;
-- shared upload volume: Node đọc/ghi, Python chỉ đọc.
+## 1. Chuẩn bị
 
-Integrated stack chỉ đọc cấu hình từ root `.env`. Không tạo credential env file thứ hai, không truyền credential qua command line và không mount `.env` vào container.
-
-## 1. Yêu cầu
-
-- Docker Desktop đang chạy;
-- Node.js 20+ và npm;
-- Gemini API key;
-- LlamaParse/LlamaCloud API key;
-- chạy lệnh tại repository root.
+- Node.js 20+
+- Docker Desktop đang chạy
+- Root `.env` tạo từ `.env.example`
+- Gemini và LlamaParse credentials hợp lệ
 
 ```powershell
-docker info
-node --version
-npm --version
 npm ci
+Copy-Item .env.example .env
 ```
 
-## 2. Tạo cấu hình local một lần
+Điền trong root `.env`:
 
-Nếu root `.env` chưa tồn tại:
+- `GOOGLE_API_KEY`, `LLAMA_CLOUD_API_KEY`;
+- `RAG_INTERNAL_TOKEN` tối thiểu 32 ký tự;
+- `JWT_SECRET`, `TOKEN_HMAC_PEPPER`;
+- `DB_PASSWORD` và `MYSQL_ROOT_PASSWORD` giống nhau trong local topology;
+- `REMOTE_COMPOSE_PROJECT` và các host port nếu default đang bận.
 
-```powershell
-if (!(Test-Path .env)) { Copy-Item .env.example .env }
-```
-
-Mở `.env` bằng editor và điền các biến sau. Không commit file này.
+Giữ contract đã kiểm thử:
 
 ```dotenv
-# Hai password phải giống nhau trong development topology hiện tại.
-DB_PASSWORD=<local database password>
-MYSQL_ROOT_PASSWORD=<same local database password>
-
-# User JWT/HMAC và internal service auth phải được thay ngoài demo.
-JWT_SECRET=<local JWT secret, tối thiểu 32 ký tự>
-TOKEN_HMAC_PEPPER=<local HMAC pepper, tối thiểu 32 ký tự>
-RAG_INTERNAL_TOKEN=<local internal token, tối thiểu 32 ký tự>
-
-# Provider credentials.
-GOOGLE_API_KEY=<Gemini API key>
-LLAMA_CLOUD_API_KEY=<LlamaParse API key>
-
-# Contract model đã kiểm thử.
 GEMINI_LLM_MODEL=models/gemini-3.5-flash
 GEMINI_EMBEDDING_MODEL=models/gemini-embedding-001
 EMBEDDING_DIMENSION=768
-
-# Timeout phù hợp live provider; đơn vị milliseconds.
-RAG_REQUEST_TIMEOUT_MS=15000
-RAG_QUERY_TIMEOUT_MS=180000
-
-# Compose đọc trực tiếp tên project này; không cần nhập `-p` trong terminal.
-REMOTE_COMPOSE_PROJECT=edurag_remote_e2e
-
-# Giữ false khi test thủ công bằng Swagger để tránh automated cleanup.
-REMOTE_E2E_CONFIRM_ISOLATED=false
-REMOTE_E2E_CLEANUP=true
+CORPUS_BOOTSTRAP=auto
 ```
 
-Các URL nội bộ giữa container đã được khai báo trong `docker-compose.remote.yml`:
+Root Compose inject `RAG_INTERNAL_TOKEN` sang Python dưới tên `INTERNAL_SECRET`. Provider keys chỉ được inject vào Python. Không commit `.env`.
 
-- Node gọi Python: `http://rag-service:8000`;
-- Python callback Node: `http://app:5000/api/internal/rag/processing-callback`;
-- Python gọi Qdrant: `http://qdrant:6333`;
-- shared file path phía Python: `/shared/uploads`.
-
-Không thay các URL này thành `localhost` khi cả hai service chạy trong Docker.
-
-## 3. Validate và khởi động
-
-Các npm script đã chứa đầy đủ Compose file/profile. Không cần đặt biến PowerShell hoặc lặp lại `-f`/`-p`.
+## 2. Start foreground
 
 ```powershell
 npm run docker:remote:config
-npm run docker:remote:up
-npm run docker:remote:ps
+npm run docker:remote:dev
 ```
 
-Phải thấy bốn service:
+`docker:remote:dev` thực hiện:
 
-- `db` healthy;
-- `app` healthy;
-- `rag-service` healthy;
-- `qdrant` running.
+1. validate root environment và Compose;
+2. start MySQL + Qdrant;
+3. auto-bootstrap corpus theo `CORPUS_BOOTSTRAP`;
+4. build/start Node + Python;
+5. chạy remote preflight;
+6. follow log `app` và `rag-service`.
 
-Chạy preflight:
-
-```powershell
-npm run preflight:remote
-```
-
-Kết quả mong đợi:
+Kết quả preflight mong đợi:
 
 ```text
 REMOTE_PREFLIGHT_OK generation=models/gemini-3.5-flash embedding=models/gemini-embedding-001
 ```
 
-Preflight kiểm tra Docker, bốn health endpoint, Bearer hai chiều, Node → Python, Python → Node/Qdrant và shared-volume write/read probe. Nó chỉ báo tên biến bị thiếu, không in giá trị secret.
+Node gọi `http://rag-service:8000`; Python callback `http://app:5000`; Python gọi `http://qdrant:6333`. Không dùng `localhost` giữa containers. Node mount upload read/write, Python mount cùng volume read-only.
 
-## 4. URL sử dụng
+## 3. URL và login Swagger
 
-Với port mặc định trong `.env`:
+Với port mặc định:
 
-| Thành phần | URL |
+| Service | URL |
 |---|---|
-| Swagger NodeJS | `http://localhost:5001/api-docs` |
-| OpenAPI JSON | `http://localhost:5001/api-docs.json` |
+| Swagger | `http://localhost:5001/api-docs` |
+| OpenAPI | `http://localhost:5001/api-docs.json` |
 | Node health | `http://localhost:5001/health` |
 | Python health | `http://localhost:8000/api/health` |
 | Qdrant health | `http://localhost:6333/healthz` |
 
-Nếu port bận, sửa `APP_HOST_PORT`, `MYSQL_HOST_PORT`, `PYTHON_HOST_PORT`, `QDRANT_HTTP_HOST_PORT` hoặc `QDRANT_GRPC_HOST_PORT` trong root `.env`, sau đó chạy lại `npm run docker:remote:up`.
+Demo Admin local only: `admin@example.com / 123456`.
 
-## 5. Lấy JWT Admin trong Swagger
+1. Gọi `POST /api/auth/login`.
+2. Đọc `[DEV-ONLY ADMIN OTP]` ngay trong terminal đang attach log; hoặc dùng `npm run docker:remote:logs:app`.
+3. Gọi `POST /api/auth/admin/verify-otp`.
+4. Copy `data.token`, nhấn **Authorize** trong Swagger và dán user JWT.
 
-Fresh development volume có Demo Admin:
+Không dán internal token vào Swagger public routes.
 
-```text
-email: admin@example.com
-password: 123456
-```
+## 4. Workflow kiểm tra
 
-Credential này chỉ dành cho local demo.
+### Corpus đã restore
 
-### 5.1 Login
+Với fresh volumes và `CORPUS_BOOTSTRAP=auto`, canonical corpus được restore trước khi app start. Có thể tạo chat session và hỏi ngay mà không upload/parse/embed lại document. Citation/source hoạt động; original-file có thể unavailable vì bundle không chứa upload files.
 
-Trong Swagger, chạy `POST /api/auth/login`:
+### Upload document mới
 
-```json
-{
-  "email": "admin@example.com",
-  "password": "123456"
-}
-```
+1. `POST /api/documents` với PDF/DOCX/TXT.
+2. Lưu `data.document.id` và `data.job.id` từ response `202`.
+3. Poll `GET /api/documents/jobs/{jobId}` đến `SUCCEEDED`.
+4. Xác nhận document `READY + VISIBLE`.
+5. Tạo session bằng `POST /api/chat/sessions`.
+6. Gửi question qua `POST /api/chat/sessions/{id}/messages`.
+7. Đọc citation qua `/api/citations/{id}` hoặc `/source`.
 
-Admin login thành công sẽ trả `requireOtp=true`.
+Simple chat request chỉ cần `content`; server tự sinh `clientRequestId`. Chỉ gửi UUID ổn định khi retry cùng logical request. Không assert chính xác wording của LLM.
 
-### 5.2 Đọc OTP development-only
+Endpoint-level payload/status/error nằm trong Swagger. Role/workflow tổng quan: [Public API](../api/public-api.md).
 
-```powershell
-npm run docker:remote:logs:app
-```
+## 5. Corpus bootstrap modes
 
-Tìm dòng mới nhất có `[DEV-ONLY ADMIN OTP]`. Không gửi log/OTP chưa redact cho người khác.
-
-### 5.3 Verify OTP
-
-Chạy `POST /api/auth/admin/verify-otp`:
-
-```json
-{
-  "email": "admin@example.com",
-  "otpCode": "<OTP 6 chữ số>"
-}
-```
-
-Copy `data.token`, nhấn `Authorize` ở đầu Swagger và dán JWT. Swagger tự tạo `Authorization: Bearer <JWT>`; không dùng `RAG_INTERNAL_TOKEN` cho public API.
-
-## 6. Upload và theo dõi xử lý
-
-Chạy `POST /api/documents`:
-
-- chọn `file`: PDF, DOCX hoặc TXT;
-- nhập `title` nếu cần;
-- mặc định tối đa 20 MiB.
-
-Response đúng là `202`, chứa:
-
-- `data.document.id`;
-- `data.job.id`;
-- document `processingStatus=PROCESSING`;
-- job `status=RUNNING`.
-
-Lưu `documentId` và `jobId`, sau đó gọi lặp lại:
-
-```text
-GET /api/documents/jobs/{jobId}
-```
-
-Kết quả hoàn tất:
-
-```text
-job.status = SUCCEEDED
-job.currentStage = COMPLETED
-document.processingStatus = READY
-document.visibilityStatus = VISIBLE
-```
-
-Kiểm tra document bằng `GET /api/documents/{documentId}`.
-
-Luồng thực tế:
-
-1. Node validate extension, MIME, signature và size.
-2. Node lưu file bằng generated storage key.
-3. Node transaction tạo `documents` và `document_processing_jobs`.
-4. Sau commit, Node dispatch ingest cho Python bằng internal Bearer.
-5. Python đọc shared file, parse/chunk/embed và upsert Qdrant.
-6. Python callback complete manifest cho Node.
-7. Node transaction lưu `document_chunks`, hoàn tất job và chuyển document sang `READY`.
-
-Theo dõi Python log khi cần:
-
-```powershell
-npm run docker:remote:logs:rag
-```
-
-## 7. Xác minh shared file
-
-Node nhìn thấy file tại `/usr/src/app/uploads`, Python nhìn thấy cùng named volume tại `/shared/uploads` ở chế độ read-only.
-
-```powershell
-npm run docker:remote:files:node
-npm run docker:remote:files:rag
-```
-
-Hai lệnh phải liệt kê cùng storage key dưới `documents/YYYY/MM/`. Public API không trả storage key/path nội bộ.
-
-Mở file qua quyền nghiệp vụ:
-
-```text
-GET /api/documents/{documentId}/file
-```
-
-## 8. Tạo chat và hỏi tài liệu
-
-### 8.1 Tạo session
-
-Chạy `POST /api/chat/sessions`:
-
-```json
-{
-  "title": "Kiểm thử tài liệu vừa upload"
-}
-```
-
-Lưu `data.id` làm `sessionId`.
-
-### 8.2 Gửi câu hỏi
-
-Tạo UUID mới bằng Swagger-compatible UUID generator bất kỳ; với PowerShell có thể dùng lệnh ngắn sau khi thật sự cần một request ID:
-
-```powershell
-[guid]::NewGuid().ToString()
-```
-
-Chạy `POST /api/chat/sessions/{sessionId}/messages`:
-
-```json
-{
-  "content": "Câu hỏi có cụm từ đặc trưng trong tài liệu vừa upload",
-  "clientRequestId": "<UUID mới>"
-}
-```
-
-Response thành công có:
-
-```text
-data.assistantMessage.status = COMPLETED
-data.assistantMessage.content = câu trả lời
-data.assistantMessage.noAnswer = false hoặc true
-data.assistantMessage.citations = structured citation snapshots
-```
-
-Không assert chính xác câu chữ LLM. Kiểm tra status, response shape, citation mapping và source snapshot.
-
-### 8.3 Xem history và citation
-
-```text
-GET /api/chat/sessions/{sessionId}/messages?offset=0&limit=20
-GET /api/citations/{citationId}
-GET /api/citations/{citationId}/source
-GET /api/citations/{citationId}/file
-```
-
-`citationId` nằm trong `data.assistantMessage.citations[].id`. Citation snapshot vẫn đọc được sau hide/delete; file gốc chỉ mở được nếu authorization và trạng thái cho phép.
-
-## 9. Hide, unhide và delete
-
-Mỗi operation trả `202` kèm job. Sau mỗi lệnh, poll `GET /api/documents/jobs/{jobId}` đến `SUCCEEDED`.
-
-```text
-POST   /api/documents/{documentId}/hide
-POST   /api/documents/{documentId}/unhide
-DELETE /api/documents/{documentId}
-```
-
-- Hide: document thành `HIDDEN`, không còn retrieval nhưng vector không bị xóa.
-- Unhide: document trở lại `READY + VISIBLE` và có thể retrieval.
-- Delete: Python xóa/deactivate vector, MySQL soft-delete document; chat/citation/usage không bị hard-delete.
-
-Khi hỏi lại để kiểm tra retrieval, dùng `clientRequestId` mới và câu hỏi có nội dung độc nhất trong tài liệu.
-
-## 10. Xem dữ liệu MySQL
-
-Lệnh sau mở MySQL CLI và hỏi password tương tác; password không nằm trong command history:
-
-```powershell
-npm run docker:remote:mysql
-```
-
-Một số query kiểm tra:
-
-```sql
-SELECT id, title, processing_status, visibility_status
-FROM documents ORDER BY id DESC LIMIT 10;
-
-SELECT id, document_id, job_type, status, current_stage,
-       attempt_count, total_chunks, error_code
-FROM document_processing_jobs ORDER BY id DESC LIMIT 20;
-
-SELECT document_id, chunk_index, vector_node_id,
-       CHAR_LENGTH(chunk_text) AS text_length
-FROM document_chunks ORDER BY id DESC LIMIT 20;
-
-SELECT id, session_id, sender_type, message_order, status, no_answer
-FROM chat_messages ORDER BY id DESC LIMIT 20;
-
-SELECT id, message_id, document_id, chunk_id, document_title_snapshot
-FROM citations ORDER BY id DESC LIMIT 20;
-
-SELECT message_id, provider, model, operation_type,
-       prompt_tokens, completion_tokens, status
-FROM llm_usage_logs ORDER BY id DESC LIMIT 20;
-```
-
-## 11. Automated live smoke
-
-Không chạy smoke trên project có dữ liệu cần giữ. Dành một project/volume test riêng bằng cách sửa trong root `.env`:
-
-```dotenv
-REMOTE_COMPOSE_PROJECT=edurag_remote_e2e
-REMOTE_E2E_CONFIRM_ISOLATED=true
-REMOTE_E2E_CLEANUP=true
-```
-
-Sau đó:
-
-```powershell
-npm run docker:remote:up
-npm run preflight:remote
-npm run test:remote
-```
-
-`test:remote` gọi public/internal HTTP thật, kiểm tra ingest/callback/manifest/chat/citation/usage/hide/unhide/delete/failure cases và tự `down -v` project đã xác nhận isolated trong `finally`.
-
-Để quay lại test Swagger thủ công, đặt `REMOTE_E2E_CONFIRM_ISOLATED=false` và chạy `npm run docker:remote:up`.
-
-## 12. Dừng và reset
-
-Dừng nhưng giữ MySQL/uploads/Qdrant volumes:
-
-```powershell
-npm run docker:remote:down
-```
-
-Reset toàn bộ development project hiện được đặt trong `REMOTE_COMPOSE_PROJECT`:
-
-```powershell
-npm run docker:remote:reset
-```
-
-`docker:remote:reset` xóa database, upload và Qdrant volumes. Chỉ chạy khi đã xác nhận project trong root `.env` là project test và không chứa dữ liệu cần giữ.
-
-## 13. Lỗi thường gặp
-
-| Hiện tượng | Kiểm tra |
+| `CORPUS_BOOTSTRAP` | Hành vi |
 |---|---|
-| `401` public API | Swagger đã Authorize bằng user JWT, không phải internal token |
-| Admin không có JWT | Hoàn tất bước OTP development-only |
-| Teacher `403` | Teacher còn `PENDING`, Admin cần chuyển sang `ACTIVE` |
-| `INVALID_FILE_SIGNATURE` | Extension, MIME và nội dung file không khớp |
-| `FILE_TOO_LARGE` | Kiểm tra `FILE_MAX_SIZE_BYTES` trong root `.env` |
-| `RAG_SERVICE_UNAVAILABLE` | `npm run docker:remote:ps`, preflight và Python logs |
-| Job `FAILED` | Xem `errorCode`, `errorMessage`, app/Python logs |
-| Chat không có citation | Chờ document `READY + VISIBLE`, hỏi nội dung có trong tài liệu |
-| Chat timeout | Tăng `RAG_QUERY_TIMEOUT_MS` trong `.env`, recreate app |
-| Port đã được dùng | Đổi host port trong `.env`, không truyền `$env:` tạm thời |
+| `off` | Không xét bundle. |
+| `auto` | Restore bundle valid khi cả MySQL và Qdrant bootstrap-empty; skip khi đã có data. |
+| `required` | Fail startup nếu bundle thiếu, tampered hoặc incompatible. |
 
-Contract nội bộ canonical: [Internal NodeJS–Python RAG contract](../api/internal-rag-contract.md). Checklist kiểm thử độc lập: [Week 3 remote test plan](../testing/week3-remote-test-plan.md).
+Partial/non-empty stores không bị overwrite. Restore không gọi document ingest, LlamaParse hoặc document embedding. Query vẫn dùng query embedding và LLM.
+
+Các command quản trị bundle:
+
+```powershell
+npm run corpus:inspect
+npm run corpus:verify
+npm run corpus:restore
+```
+
+`corpus:restore` chỉ dùng với bootstrap-empty target. Quy trình export và exact approval nằm tại [Corpus portability](../architecture/corpus-portability.md).
+
+## 6. Lifecycle và logs
+
+Nhấn `Ctrl+C` để best-effort stop containers và giữ MySQL/Qdrant/upload named volumes. Abrupt process kill, Docker Desktop crash hoặc mất điện không bảo đảm signal cleanup; chạy `npm run docker:remote:stop` trước khi start lại nếu cần.
+
+| Command | Mục đích |
+|---|---|
+| `npm run docker:remote:ps` | Xem service state. |
+| `npm run docker:remote:logs:app` | App log và development OTP. |
+| `npm run docker:remote:logs:rag` | Python processing/callback log. |
+| `npm run preflight:remote` | Health/auth/network/shared-volume checks. |
+| `npm run docker:remote:stop` | Stop containers, giữ volumes. |
+| `npm run docker:remote:down` | Xóa containers/network, giữ named volumes. |
+| `npm run docker:remote:reset` | **Destructive:** xóa volumes của remote project. |
+
+Mặc định chỉ app/Python logs được attach. Đặt `REMOTE_DEV_ALL_LOGS=true` trong `.env` nếu cần xem cả MySQL/Qdrant.
+
+## 7. Lỗi thường gặp
+
+| Lỗi | Kiểm tra |
+|---|---|
+| Port in use | Đổi host port trong root `.env`, không dùng biến terminal tạm. |
+| `401` public API | Dùng user JWT, không dùng internal token. |
+| Admin chưa có JWT | Hoàn tất OTP step. |
+| Job `FAILED` | Xem job detail và app/Python logs. |
+| Chat timeout | Kiểm tra `RAG_QUERY_TIMEOUT_MS`, Python health và provider. |
+| Original unavailable | Portable corpus không chứa original files; dùng citation/source snapshot. |
+| `CORPUS_PARTIAL_STATE` | Không overwrite; kiểm tra/reset đúng isolated target rồi restore lại. |
+
+Kiểm thử tự động và cleanup project cô lập: [Independent test plan](../testing/week3-remote-test-plan.md).

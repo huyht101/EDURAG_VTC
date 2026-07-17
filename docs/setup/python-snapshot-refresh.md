@@ -25,7 +25,7 @@
 
    Do not install large dependencies or call live Gemini/Qdrant merely to refresh the snapshot.
 
-10. Update [`week3-integration-readiness.md`](../status/week3-integration-readiness.md) and the canonical [internal contract](../api/internal-rag-contract.md) when observed capability changes.
+10. Update [Python snapshot metadata](../architecture/python-rag.md), [`week3-integration-readiness.md`](../status/week3-integration-readiness.md) and the canonical [internal contract](../api/internal-rag-contract.md) when observed capability changes.
 11. Check Markdown links, ignored artifacts, nested `.git` and `git diff --check`.
 12. When possible, commit a snapshot refresh separately from Node feature changes and record the imported upstream commit in the commit message/status document.
 

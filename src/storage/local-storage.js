@@ -59,4 +59,15 @@ async function open(storageKey) {
   }
 }
 
-module.exports = { save, remove, open, resolveStorageKey };
+async function exists(storageKey) {
+  const target = resolveStorageKey(storageKey);
+  try {
+    const stat = await fs.stat(target);
+    return stat.isFile();
+  } catch (error) {
+    if (error.code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
+module.exports = { save, remove, open, exists, resolveStorageKey };

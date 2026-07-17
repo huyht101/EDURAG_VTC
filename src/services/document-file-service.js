@@ -63,4 +63,10 @@ async function persist(file) {
   return { ...metadata, storageType: 'LOCAL', storageKey };
 }
 
-module.exports = { validate, persist, remove: localStorage.remove, open: localStorage.open };
+module.exports = {
+  validate,
+  persist,
+  remove: localStorage.remove,
+  open: localStorage.open,
+  exists: localStorage.exists
+};

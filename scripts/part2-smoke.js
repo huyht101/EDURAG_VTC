@@ -11,6 +11,7 @@ const jwt = require('jsonwebtoken');
 
 const DEMO_ADMIN_EMAIL = 'admin@example.com';
 const DEMO_ADMIN_PASSWORD = '123456';
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 process.env.NODE_ENV = 'development';
 process.env.AUTH_DEV_DELIVERY_LOG_SECRETS = 'true';
 process.env.RAG_MODE = 'mock';
@@ -29,6 +30,7 @@ const withTransaction = require('../src/database/transaction');
 const userRepo = require('../src/repositories/user-repository');
 const documentRepo = require('../src/repositories/document-repository');
 const documentService = require('../src/services/document-service');
+const documentFileService = require('../src/services/document-file-service');
 
 function accessToken(user) {
   return jwt.sign(
@@ -75,6 +77,24 @@ async function recursiveFileCount(directory) {
   }
 }
 
+async function listenOnSafePort(application) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const port = crypto.randomInt(20_000, 40_000);
+    const server = application.listen(port, '127.0.0.1');
+    try {
+      await new Promise((resolve, reject) => {
+        server.once('listening', resolve);
+        server.once('error', reject);
+      });
+      return server;
+    } catch (error) {
+      if (server.listening) await new Promise((resolve) => server.close(resolve));
+      if (error.code !== 'EADDRINUSE') throw error;
+    }
+  }
+  throw new Error('Could not allocate a safe local smoke-test port.');
+}
+
 async function main() {
   const suffix = `${Date.now()}-${crypto.randomInt(1000, 9999)}`;
   const teacher1 = await createActiveUser('TEACHER', `one-${suffix}`);
@@ -82,8 +102,7 @@ async function main() {
   const admin = await userRepo.findUserByEmail(DEMO_ADMIN_EMAIL);
   assert(admin, 'Seeded Admin is required.');
 
-  const server = app.listen(0);
-  await new Promise((resolve) => server.once('listening', resolve));
+  const server = await listenOnSafePort(app);
   const base = `http://127.0.0.1:${server.address().port}`;
 
   async function request(path, options = {}, expectedStatus = 200) {
@@ -324,6 +343,7 @@ async function main() {
       method: 'POST', headers: auth(studentToken, { 'content-type': 'application/json' }),
       body: JSON.stringify({ content: 'Câu hỏi smoke', clientRequestId })
     })).payload.data;
+    assert.equal(chat.clientRequestId, clientRequestId);
     assert.equal(chat.assistantMessage.citations.length, 1);
     const citationId = chat.assistantMessage.citations[0].id;
     const duplicateChat = (await request(`/api/chat/sessions/${session.id}/messages`, {
@@ -331,6 +351,24 @@ async function main() {
       body: JSON.stringify({ content: 'Câu hỏi smoke', clientRequestId })
     })).payload.data;
     assert.equal(duplicateChat.duplicate, true);
+    assert.equal(duplicateChat.clientRequestId, clientRequestId);
+
+    const optionalRequestCases = [
+      { label: 'omitted', body: { content: 'Generated request id: omitted' } },
+      { label: 'null', body: { content: 'Generated request id: null', clientRequestId: null } },
+      { label: 'empty', body: { content: 'Generated request id: empty', clientRequestId: '' } },
+      { label: 'whitespace', body: { content: 'Generated request id: whitespace', clientRequestId: '   ' } }
+    ];
+    const generatedRequestIds = new Set();
+    for (const item of optionalRequestCases) {
+      const result = (await request(`/api/chat/sessions/${session.id}/messages`, {
+        method: 'POST', headers: auth(studentToken, { 'content-type': 'application/json' }),
+        body: JSON.stringify(item.body)
+      })).payload.data;
+      assert(UUID.test(result.clientRequestId), `${item.label} must return a generated UUID.`);
+      assert(!generatedRequestIds.has(result.clientRequestId), `${item.label} reused a generated UUID.`);
+      generatedRequestIds.add(result.clientRequestId);
+    }
 
     const concurrentSession = (await request('/api/chat/sessions', {
       method: 'POST', headers: auth(studentToken, { 'content-type': 'application/json' }),
@@ -352,6 +390,7 @@ async function main() {
       [false, true],
       'Concurrent retry must create exactly one USER message.'
     );
+    assert(concurrentResults.every((item) => item.payload.data.clientRequestId === concurrentId));
     const concurrentHistory = (await request(
       `/api/chat/sessions/${concurrentSession.id}/messages`,
       { headers: auth(studentToken) }
@@ -366,7 +405,18 @@ async function main() {
       body: JSON.stringify({ content: 'Cross-session conflict', clientRequestId })
     }, 409);
     await request(`/api/chat/sessions/${session.id}/messages`, { headers: auth(studentToken) });
-    await request(`/api/citations/${citationId}`, { headers: auth(studentToken) });
+    const availableCitation = (await request(`/api/citations/${citationId}`, {
+      headers: auth(studentToken)
+    })).payload.data;
+    assert.equal(availableCitation.originalAvailable, true);
+
+    const storedDocument = await documentRepo.findById(documentId);
+    await documentFileService.remove(storedDocument.storage_key);
+    const missingOriginalCitation = (await request(`/api/citations/${citationId}/source`, {
+      headers: auth(studentToken)
+    })).payload.data;
+    assert.equal(missingOriginalCitation.originalAvailable, false);
+    await request(`/api/documents/${documentId}/file`, { headers: auth(teacher1Token) }, 404);
 
     await request(`/api/documents/${documentId}/hide`, { method: 'POST', headers: auth(teacher1Token) }, 202);
     const hiddenCitation = (await request(`/api/citations/${citationId}/source`, {

@@ -1,6 +1,6 @@
 'use strict';
 
-const { spawnSync } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const path = require('path');
 
 const root = path.resolve(__dirname, '..');
@@ -44,7 +44,7 @@ function docker(args, options = {}) {
   if (result.error || result.status !== 0) {
     if (options.allowFailure) return result;
     const detail = redacted(result.stderr || result.stdout || result.error?.message)
-      .split(/\r?\n/).filter(Boolean).slice(0, 3).join(' | ');
+      .split(/\r?\n/).filter(Boolean).slice(-5).join(' | ');
     throw new Error(`Docker command failed: ${detail || `exit ${result.status}`}`);
   }
   return String(result.stdout || '').trim();
@@ -52,6 +52,19 @@ function docker(args, options = {}) {
 
 function compose(args, options) {
   return docker([...composePrefix, ...args], options);
+}
+
+function composeCommandArgs(args = []) {
+  return [...composePrefix, ...args];
+}
+
+function spawnCompose(args, options = {}) {
+  return spawn('docker', composeCommandArgs(args), {
+    cwd: root,
+    stdio: options.stdio || 'inherit',
+    windowsHide: options.windowsHide ?? false,
+    env: options.env || process.env
+  });
 }
 
 function composeExec(service, command) {
@@ -100,6 +113,8 @@ module.exports = {
   redacted,
   docker,
   compose,
+  composeCommandArgs,
+  spawnCompose,
   composeExec,
   composePort,
   REMOTE_REQUIRED_ENVIRONMENT,

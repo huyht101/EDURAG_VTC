@@ -15,10 +15,12 @@ function authorize(user, context) {
   }
 }
 
-function canOpenOriginal(user, context) {
+async function canOpenOriginal(user, context) {
   if (!context.storage_key) return false;
-  if (user.role === ROLES.ADMIN || Number(context.uploaded_by) === Number(user.id)) return true;
-  return context.processing_status === 'READY' && context.visibility_status === 'VISIBLE';
+  const authorized = user.role === ROLES.ADMIN
+    || Number(context.uploaded_by) === Number(user.id)
+    || (context.processing_status === 'READY' && context.visibility_status === 'VISIBLE');
+  return authorized && fileService.exists(context.storage_key);
 }
 
 function snapshot(context) {
@@ -42,14 +44,14 @@ async function getCitation(user, idValue) {
   const context = await citationRepo.findContextById(parseId(idValue));
   if (!context) throw appError(404, 'CITATION_NOT_FOUND', 'Không tìm thấy citation.');
   authorize(user, context);
-  return { ...snapshot(context), originalAvailable: canOpenOriginal(user, context) };
+  return { ...snapshot(context), originalAvailable: await canOpenOriginal(user, context) };
 }
 
 async function openOriginal(user, idValue) {
   const context = await citationRepo.findContextById(parseId(idValue));
   if (!context) throw appError(404, 'CITATION_NOT_FOUND', 'Không tìm thấy citation.');
   authorize(user, context);
-  if (!canOpenOriginal(user, context)) {
+  if (!(await canOpenOriginal(user, context))) {
     throw appError(409, 'ORIGINAL_SOURCE_UNAVAILABLE', 'File gốc hiện không khả dụng; citation snapshot vẫn được giữ.');
   }
   return {

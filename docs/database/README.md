@@ -1,29 +1,20 @@
-# Database
+# Database documentation
 
-## Nguồn sự thật
+## Source of truth
 
-- [`src/database/schema.sql`](../../src/database/schema.sql): executable DDL, schema version 1.0.0, 12 bảng, constraints, indexes và ba role.
-- [`src/database/demo_seed.sql`](../../src/database/demo_seed.sql): dữ liệu **DEMO ONLY**, không phải business schema.
-- [Design](design.md): quan hệ, ownership và lifecycle.
-- [Data dictionary](data-dictionary.md): kiểu cột, key, index và allowed values.
+- [`src/database/schema.sql`](../../src/database/schema.sql): executable schema 1.0.0, 12 tables, constraints/indexes và role seed.
+- [`src/database/demo_seed.sql`](../../src/database/demo_seed.sql): local Demo Admin; không phải business schema.
+- [Design](design.md): ownership, relationships và lifecycle.
+- [Data dictionary](data-dictionary.md): column/key/status theo domain.
 
-Nếu Markdown và SQL mâu thuẫn, kiểm tra DDL/runtime repository trước và sửa tài liệu. Không có bản DDL thứ hai trong `docs/`.
+Khi Markdown lệch DDL/runtime repository, ưu tiên `schema.sql` và sửa tài liệu. Không có DDL copy thứ hai trong `docs/`.
 
-## Docker bootstrap
+## Bootstrap
 
-```powershell
-docker compose down -v
-docker compose up --build
-```
+MySQL 8.4 container chạy schema rồi demo seed trên fresh volume. Setup command và reset safety nằm tại [Local/mock development](../setup/local-development.md) và [Remote Docker RAG](../setup/remote-rag-e2e.md); không chạy raw destructive Compose command từ tài liệu database.
 
-MySQL image tự chạy schema rồi demo seed trên fresh volume. Demo MySQL dùng `root / 123456`; Demo Admin dùng `admin@example.com / 123456`. Đây là credential local/demo không an toàn cho production.
-
-Chạy seed lại thủ công không tạo duplicate và không overwrite Admin hiện có:
-
-```powershell
-docker compose exec -T db mysql -uroot -p123456 edurag -e "source /docker-entrypoint-initdb.d/02_demo_seed.sql"
-```
+Demo Admin `admin@example.com / 123456` chỉ dành cho local. Seed idempotent theo email và không overwrite user đã tồn tại.
 
 ## Migration limitation
 
-`CREATE TABLE IF NOT EXISTS` giúp bootstrap không phá bảng hiện có nhưng không phải migration. Sau khi có dữ liệu cần giữ, mọi thay đổi schema phải dùng migration versioned; không chỉnh DDL rồi kỳ vọng nó ALTER database cũ.
+`CREATE TABLE IF NOT EXISTS` hỗ trợ bootstrap lặp nhưng không phải migration. Khi có dữ liệu cần giữ, thay đổi schema phải dùng migration versioned; chỉnh DDL không tự ALTER database cũ.

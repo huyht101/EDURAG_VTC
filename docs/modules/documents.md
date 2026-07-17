@@ -10,6 +10,6 @@ Transaction đầu tạo `documents` và `document_processing_jobs`; dispatch Py
 
 Callback complete manifest dùng internal Bearer, job/attempt stale guard và transaction. Hide không xóa vectors; unhide chỉ cho `READY + HIDDEN`; delete soft-delete và giữ file/chunks/jobs/chat/citation/usage.
 
-Mock mode vẫn giữ upload ở `PROCESSING` cho tới callback, nhưng hoàn tất hide/unhide/delete synchronously để test orchestration. Remote integration chưa được xác minh với Python thật.
+Mock mode vẫn giữ upload ở `PROCESSING` cho tới callback, nhưng hoàn tất hide/unhide/delete synchronously để test orchestration. Remote upload/callback/hide/unhide/delete đã PASS trên isolated development topology; đây không phải production-readiness claim.
 
 Flows: [document flow notes](../flows/notes/document-flows.md).

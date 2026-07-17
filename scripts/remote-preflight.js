@@ -8,8 +8,25 @@ const {
   composeExec,
   composePort,
   assertRemoteEnvironment,
+  delay,
   fetchWithTimeout
 } = require('./remote-test-utils');
+
+async function waitForHttp(url, label, timeoutMs = 30000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetchWithTimeout(url, {}, 5000);
+      if (response.status === 200) return response;
+      lastError = new Error(`${label} returned HTTP ${response.status}.`);
+    } catch (error) {
+      lastError = error;
+    }
+    await delay(500);
+  }
+  throw new Error(`${label} did not become reachable: ${lastError?.message || 'timeout'}`);
+}
 
 function resolvedModels() {
   return {
@@ -35,9 +52,9 @@ async function main() {
   const pythonPort = composePort('rag-service', 8000);
   const qdrantPort = composePort('qdrant', 6333);
   const [nodeHealth, pythonHealth, qdrantHealth] = await Promise.all([
-    fetchWithTimeout(`http://127.0.0.1:${nodePort}/health`),
-    fetchWithTimeout(`http://127.0.0.1:${pythonPort}/api/health`),
-    fetchWithTimeout(`http://127.0.0.1:${qdrantPort}/healthz`)
+    waitForHttp(`http://127.0.0.1:${nodePort}/health`, 'Node health'),
+    waitForHttp(`http://127.0.0.1:${pythonPort}/api/health`, 'Python health'),
+    waitForHttp(`http://127.0.0.1:${qdrantPort}/healthz`, 'Qdrant health')
   ]);
   assert.equal(nodeHealth.status, 200, 'Node health failed.');
   assert.equal(pythonHealth.status, 200, 'Python health failed.');

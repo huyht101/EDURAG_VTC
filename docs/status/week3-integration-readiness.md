@@ -1,69 +1,50 @@
 # Week 3 integration readiness
 
-Repository baseline: `b348728c55bd42be35ec23c352dd379749adfbe2` on `main`. Python source of truth remains the Python team's upstream repository; `python-service/` is the tracked integration snapshot audited and tested here.
+## Current status
 
-Current assessment: **REMOTE E2E READY** for the documented isolated development topology. This is integration evidence, not production readiness.
+**WEEK 3 NODEJS/CORE READY FOR INDEPENDENT TEST WITH PORTABLE CORPUS**
 
-## Runtime configuration verified
+Áp dụng cho isolated development topology tại baseline `61ed29b458e39352504210a41d68512896cccd14` cùng worktree changes hiện tại. Đây không phải production readiness.
 
-- Integrated provider configuration is loaded only from ignored root `.env`; it is not mounted or copied into images.
-- Root `RAG_INTERNAL_TOKEN` was injected into Python as `INTERNAL_SECRET` and passed both auth directions.
-- Generation: `models/gemini-3.5-flash`.
-- Embedding: `models/gemini-embedding-001`, explicitly reduced to agreed dimension `768`.
-- Python 3.11, MySQL 8.4 and one Python-owned Qdrant.
+## Implemented
 
-## Live evidence — 2026-07-17
+- Public Auth/Profile/Admin, Document, Chat, Citation và basic Dashboard APIs.
+- RAG `mock|remote` adapter; internal Bearer hai chiều.
+- Upload/shared storage, processing jobs, complete-manifest callback và stale/duplicate guard.
+- Chat idempotency với optional `clientRequestId`, immutable citation snapshot và multi-row usage.
+- Foreground Docker lifecycle qua `docker:remote:dev`.
+- Portable sanitized MySQL + Qdrant corpus, exact-checksum approval, verify/restore/auto-bootstrap.
+- Canonical corpus: schema/bundle `1.0.0`, 1 document, 2 chunks, 2 Qdrant points, `gemini-embedding-001` dimension 768, không có original files.
 
-`npm run test:remote` returned:
+## Verification evidence
 
-```text
-REMOTE_E2E_SMOKE_OK documentId=4 ingestJobId=8 chunks=1 citations=1 usageRows=1
-```
-
-This rerun used only the ignored root `.env`. The live workflow completed before the runner exposed a cleanup return-type false negative; that tooling bug was fixed, the exact isolated project was removed with `down -v`, and the cleanup path was verified separately without another provider call.
-
-Verified through public/internal HTTP plus persistence assertions:
-
-- Node upload and shared Python-visible file path.
-- LlamaParse returned one page.
-- Gemini embedding and Qdrant upsert/retrieval.
-- Authenticated progress/terminal callbacks and complete manifest persistence.
-- Duplicate/stale/mismatched/unauthorized/invalid callbacks and MySQL rollback.
-- Chat answer, structured citation mapping, immutable source snapshot and usage persistence.
-- Hide removed retrieval; unhide restored it; delete removed retrieval while history/snapshot remained readable.
-- Python-unavailable dispatch failed closed instead of reporting false success.
-
-Database evidence for the final document:
-
-- final document state `READY/DELETED`;
-- `INGEST`, two `SET_RETRIEVAL` and `DELETE_VECTORS` jobs succeeded;
-- one persisted chunk with UUID-shaped vector ID and matching SHA-256;
-- target citations mapped to `document_chunks`, snapshots were non-empty and usage rows were `SUCCEEDED` with model/tokens.
-
-Live `no_answer` remains intentionally non-deterministic; its semantics stay covered by contract/mock tests.
-
-## Verification matrix
-
-| Check | Result |
+| Gate | Result |
 |---|---|
-| `npm run check` | PASS |
-| `npm run test:contract` | PASS — `RAG_CONTRACT_TESTS_OK` |
-| `npm run test:part2` | PASS — `PART2_SMOKE_OK` |
-| OpenAPI 3.0.3 load/serialize | PASS — 26 paths |
-| Contract fixtures JSON | PASS |
-| Mock and remote Compose config | PASS |
-| Python 3.11 image import/compile | PASS |
-| Remote preflight | PASS |
-| Live remote workflow | PASS — root `.env` only |
-| Isolated cleanup path | PASS — `REMOTE_CLEANUP_PATH_OK` |
-| Python snapshot pytest | PASS — 12 tests, no provider calls |
+| Syntax/OpenAPI/contract | PASS |
+| Part 2 mock regression | PASS |
+| Remote preflight and live upload/callback/chat/hide/unhide/delete | PASS, 2026-07-17 |
+| Python 3.11 compile/tests without provider calls | PASS |
+| Corpus PII/secret/path scan and checksums | PASS |
+| Isolated MySQL + Qdrant restore/reconciliation | PASS |
+| One restored live query with mapped citation and usage | PASS; no ingest/chunk/point increase |
+| Auto-bootstrap empty/existing/partial/required behavior | PASS |
+| Foreground controlled shutdown and volume retention | PASS |
 
-## Required upstream/deployment follow-up
+## Known limitations
 
-1. Upstream `llama-index-llms-google-genai` and `llama-index-embeddings-google-genai` requirements.
-2. Upstream `embedding_config.output_dimensionality=768` in `core/llm_setup.py`.
-3. Upstream the Python Bearer hardening and aligned route/schema tests maintained by this integration snapshot.
-4. Align Qdrant client `1.14.2` and server `1.18.2`; live passed but emitted a compatibility warning.
-5. Record the exact Python upstream commit, currently `UNKNOWN`.
+- Local shared-volume storage; no object storage or bidirectional corpus sync.
+- Portable corpus excludes original files; file download may be unavailable và reprocess cần upload mới.
+- Failed jobs không có durable queue/scheduler hoặc public retry API.
+- Query vẫn dùng provider; live `no_answer` không deterministic.
+- Qdrant client `1.14.2` emits compatibility warning với server `1.18.2`; verified integration vẫn PASS.
+- Current Python upstream commit chưa được ghi nhận chính xác.
 
-The second Node member should repeat the [independent test plan](../testing/week3-remote-test-plan.md) from a fresh clone.
+## Python upstream debt
+
+- Upstream explicit internal-secret/Bearer tests và constant-time verification overlay.
+- Upstream `google_genai` adapter requirements và embedding output dimension 768.
+- Record exact upstream commit và align supported Qdrant client/server versions.
+
+## Next gate
+
+Thành viên NodeJS thứ hai chạy [independent test plan](../testing/week3-remote-test-plan.md) từ fresh clone và ghi evidence đã redact. Setup canonical: [Remote Docker RAG](../setup/remote-rag-e2e.md).

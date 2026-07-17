@@ -1,3 +1,5 @@
+const crypto = require('crypto');
+
 const ragConfig = require('../configs/rag');
 const withTransaction = require('../database/transaction');
 const sessionRepo = require('../repositories/chat-session-repository');
@@ -116,6 +118,7 @@ async function duplicateResult(pair) {
     ? await citationRepo.listByMessageIds([pair.assistant_message_id]) : [];
   return {
     duplicate: true,
+    clientRequestId: pair.client_request_id,
     userMessageId: pair.user_message_id,
     assistantMessage: pair.assistant_message_id ? {
       id: pair.assistant_message_id,
@@ -126,6 +129,15 @@ async function duplicateResult(pair) {
       citations: citations.map(publicCitation)
     } : null
   };
+}
+
+function resolveClientRequestId(value) {
+  if (value === undefined || value === null) return crypto.randomUUID();
+  if (typeof value !== 'string') {
+    throw appError(400, 'VALIDATION_ERROR', 'clientRequestId phải là UUID.');
+  }
+  const normalized = value.trim();
+  return normalized || crypto.randomUUID();
 }
 
 function normalizeSourceLocator(value) {
@@ -242,7 +254,7 @@ async function markAssistantFailed(assistantMessageId, errorCode) {
 async function sendMessage(user, idValue, body) {
   const sessionId = parseId(idValue, 'session id');
   const question = body.content.trim();
-  const requestId = body.clientRequestId;
+  const requestId = resolveClientRequestId(body.clientRequestId);
   let prepared;
   try {
     prepared = await withTransaction(async (connection) => {
@@ -336,6 +348,7 @@ async function sendMessage(user, idValue, body) {
     const persistedCitations = await citationRepo.listByMessageIds([prepared.assistantMessageId]);
     return {
       duplicate: false,
+      clientRequestId: requestId,
       userMessageId: prepared.userMessageId,
       assistantMessage: {
         id: prepared.assistantMessageId,

@@ -1,6 +1,6 @@
 # Assumptions and open questions
 
-Contract blockers and Phase 2 release gates are maintained in:
+Current release status and external deployment debt are maintained in:
 
 [`docs/status/week3-integration-readiness.md`](../../status/week3-integration-readiness.md)
 

@@ -1,0 +1,20 @@
+{
+  "generatedAtUtc": "2026-07-17T15:49:31.828Z",
+  "activeDocuments": [
+    "1"
+  ],
+  "chunks": [
+    {
+      "documentId": "1",
+      "vectorNodeId": "9589059b-c74b-40b8-896a-47aa77ed4601",
+      "contentHash": "e7600f3da27237e68019ee627b32f0e059824b52f2d38f2bbe01ad9388ad1cf0",
+      "hidden": false
+    },
+    {
+      "documentId": "1",
+      "vectorNodeId": "f0f711be-2edc-4d99-96f5-c6c7f533fd81",
+      "contentHash": "1f43e91674b62e74dc68a525eb44e58a768ccc42056bbe51b570163612431804",
+      "hidden": false
+    }
+  ]
+}

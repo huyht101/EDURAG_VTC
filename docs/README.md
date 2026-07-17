@@ -1,44 +1,35 @@
 # EDURAG documentation
 
-Tài liệu hiện hành được tổ chức theo nguồn sự thật, không phụ thuộc thư mục tham chiếu local hoặc đường dẫn máy cá nhân.
+Tài liệu hiện hành của NodeJS/Core. Khi tài liệu lệch runtime, ưu tiên code, [`schema.sql`](../src/database/schema.sql), automated tests và OpenAPI.
 
-## Bắt đầu
+## Đọc file nào?
 
-- [System overview](architecture/system-overview.md)
-- [Local development](setup/local-development.md)
-- [Docker demo](setup/docker-demo.md)
-- [Full Docker RAG setup và kiểm thử Swagger](setup/remote-rag-e2e.md)
-- [Database bootstrap](database/README.md)
-- OpenAPI runtime: `/api-docs` và `/api-docs.json`
+| Mục đích | Tài liệu canonical |
+|---|---|
+| Chạy nhanh project | [Root README](../README.md) |
+| Chạy mock hoặc Node local | [Local/mock development](setup/local-development.md) |
+| Chạy Docker Node + Python + Qdrant, Swagger và lifecycle | [Remote Docker RAG](setup/remote-rag-e2e.md) |
+| Hiểu ownership và data flow | [System overview](architecture/system-overview.md) |
+| Tra public role/workflow/conventions | [Public API](api/public-api.md); endpoint detail nằm trong Swagger |
+| Tích hợp NodeJS-Python | [Internal RAG contract](api/internal-rag-contract.md) |
+| Hiểu/export/restore corpus | [Corpus portability](architecture/corpus-portability.md) |
+| Review schema | [Database index](database/README.md) |
+| Kiểm thử độc lập | [Independent test plan](testing/week3-remote-test-plan.md) |
+| Xem trạng thái hiện tại | [Week 3 readiness](status/week3-integration-readiness.md) |
+| Refresh Python snapshot | [Python snapshot](architecture/python-rag.md) và [refresh guide](setup/python-snapshot-refresh.md) |
 
-## Kiến trúc
+## Kiến trúc và module
 
-- [NodeJS/Core architecture](architecture/nodejs-core.md)
-- [Python RAG integration snapshot](architecture/python-rag.md)
-- [NodeJS–Python RAG boundary](architecture/rag-boundary.md)
-- [Database design](database/design.md)
-- [Database data dictionary](database/data-dictionary.md)
-
-## API và module
-
-- [Public API conventions](api/public-api.md)
-- [Internal RAG contract](api/internal-rag-contract.md)
-- [Account/Auth](modules/account-auth.md)
-- [Documents](modules/documents.md)
-- [Chat/Citations](modules/chat-citations.md)
-- [Usage/Dashboard](modules/usage-dashboard.md)
-
-## Flow
-
+- [NodeJS/Core layering](architecture/nodejs-core.md)
+- [NodeJS-Python boundary](architecture/rag-boundary.md)
+- [Python integration snapshot](architecture/python-rag.md)
+- Modules: [Account/Auth](modules/account-auth.md), [Documents](modules/documents.md), [Chat/Citations](modules/chat-citations.md), [Usage/Dashboard](modules/usage-dashboard.md)
 - [Mermaid flow index](flows/README.md)
 
-## Status và snapshot
+## Nguồn chi tiết
 
-- [Week 3 integration readiness](status/week3-integration-readiness.md)
-- [Python snapshot provenance](status/python-snapshot-source.md)
-- [Python snapshot refresh guide](setup/python-snapshot-refresh.md)
-- [Week 3 independent remote test plan](testing/week3-remote-test-plan.md)
-
-`src/database/schema.sql` là executable database source of truth. OpenAPI là danh mục public endpoint chi tiết. [`api/internal-rag-contract.md`](api/internal-rag-contract.md) là contract nội bộ canonical duy nhất.
-
-Luồng Docker chuẩn chỉ cần chỉnh root `.env` một lần, sau đó dùng các npm script `docker:mock:*` hoặc `docker:remote:*`; không cần truyền project name/credential bằng terminal.
+- Public endpoints/request/response/error: Swagger `/api-docs` và OpenAPI `/api-docs.json`.
+- Database constraints/status/indexes: [`src/database/schema.sql`](../src/database/schema.sql).
+- NodeJS-Python JSON boundary: [contract v0.1](api/internal-rag-contract.md).
+- Corpus files/count/checksum: [`bootstrap/corpus/manifest.json`](../bootstrap/corpus/manifest.json).
+- Python production source: upstream repository của team Python; `python-service/` chỉ là tracked snapshot.

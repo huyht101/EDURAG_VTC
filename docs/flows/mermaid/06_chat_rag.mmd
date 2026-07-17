@@ -5,8 +5,8 @@ sequenceDiagram
   participant DB as MySQL
   participant RAG as Python RAG Service
 
-  Client->>Node: Send question with user JWT and clientRequestId
-  Node->>Node: Require ACTIVE account and validate question
+  Client->>Node: Send question with user JWT; clientRequestId optional
+  Node->>Node: Require ACTIVE account, validate question, generate UUID when blank
   Node->>DB: Check session ownership and client_request_id
   alt clientRequestId already exists in the same session
     DB-->>Node: Existing USER and ASSISTANT pair

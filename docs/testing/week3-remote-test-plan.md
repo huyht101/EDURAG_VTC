@@ -1,62 +1,112 @@
-# Week 3 remote independent test plan
+# Independent test plan
 
-This checklist is for the second NodeJS/Core member to verify a fresh clone independently. It does not authorize production credentials, shared-volume deletion or Python runtime changes.
+Checklist cho thành viên thứ hai kiểm tra fresh clone. Không sửa Python runtime/schema và không ghi credential vào evidence.
 
-## Prepare
-
-- Confirm the expected branch/commit and a reviewed worktree.
-- Use Node.js 20+, Docker and the tracked `python-service/` snapshot.
-- Copy `.env.example` to the single ignored root `.env`. Add `GOOGLE_API_KEY`, `LLAMA_CLOUD_API_KEY` and a 32+ character `RAG_INTERNAL_TOKEN` through the approved secret channel. Do not create a second integrated credential file; remote Compose injects the root token into Python as `INTERNAL_SECRET`.
-- Confirm `GEMINI_EMBEDDING_MODEL=models/gemini-embedding-001` and record the resolved Flash generation model name without recording keys.
-- Set a unique `REMOTE_COMPOSE_PROJECT` and unused host ports directly in the ignored root `.env`; do not rely on temporary shell variables.
-- Set `REMOTE_E2E_CONFIRM_ISOLATED=true` only after confirming that project is disposable; the live runner refuses destructive cleanup otherwise.
-- Leave `REMOTE_E2E_CLEANUP=true` so the runner removes only that confirmed isolated project in `finally`.
-
-## Static and mock baseline
+## 1. Chuẩn bị
 
 ```powershell
 npm ci
+Copy-Item .env.example .env
+```
+
+Điền provider credentials và secrets trong root `.env` qua kênh an toàn. Chọn `REMOTE_COMPOSE_PROJECT` riêng. Không tạo `PythonSevice.env` và không commit `.env`.
+
+## 2. Automated baseline
+
+```powershell
 npm run check
+npm run test:openapi
 npm run test:contract
+npm run test:corpus
+npm run test:docs
 npm run docker:mock:config
 npm run docker:remote:config
+```
+
+Expected: syntax, OpenAPI, contract, corpus checksum/tamper và Markdown links đều PASS. Các test này không gọi paid provider.
+
+Part 2 mock regression cần MySQL development:
+
+```powershell
 npm run docker:mock:up
 npm run test:part2
 npm run docker:mock:down
 ```
 
-`test:part2` loads the root `.env` and forces `RAG_MODE=mock`; it does not call Python or a paid provider. Run it only against a disposable, bootstrapped MySQL 8.4 database. Preserve the console output and remove only resources created for that run; `docker:mock:down` keeps volumes, while `docker:mock:reset` is destructive.
+Đảm bảo `RAG_MODE=mock` khi chạy mock stack. `docker:mock:down` giữ volumes; chỉ dùng `docker:mock:reset` với project disposable.
 
-## Live topology
+## 3. Remote foreground và corpus restore
 
-Follow [Full Docker RAG setup](../setup/remote-rag-e2e.md). Start and verify using:
+Giữ `CORPUS_BOOTSTRAP=auto`:
 
 ```powershell
-npm run docker:remote:up
-npm run docker:remote:ps
-npm run preflight:remote
-npm run test:remote
+npm run docker:remote:dev
 ```
 
-Then record results for:
+Trên fresh volumes, xác nhận:
 
-- preflight health, Bearer in both directions and shared-volume probe;
-- TXT ingest accepted, callback succeeded, document `READY`, complete chunk manifest persisted;
-- chunk UUID, full text and matching SHA-256 hash;
-- duplicate/stale/mismatched/unauthorized/invalid callbacks and rollback;
-- chat answer with `vector_node_id` citation mapping and at least one usage row;
-- hide prevents retrieval, unhide restores retrieval, delete prevents retrieval;
-- existing citation/history snapshot remains readable after delete;
-- Python unavailable and upstream failure do not leave MySQL in a false-success state.
+- `CORPUS_RESTORE_OK` với 1 document, 2 chunks, 2 Qdrant points;
+- `REMOTE_PREFLIGHT_OK`;
+- app/Python logs được attach;
+- không có document ingest/LlamaParse trong bootstrap log.
 
-Live `no_answer` is not deterministic; rely on the contract test unless the provider returns it naturally.
+Nếu volumes đã có data, expected là `CORPUS_BOOTSTRAP_SKIPPED` với `DATA_EXISTS`.
 
-## Python snapshot checks
+## 4. Manual Swagger checks
 
-- Build/import with the Python 3.11 Docker target and run `compileall`.
-- Run snapshot pytest without provider calls. Report stale tests as upstream debt; do not weaken the Node contract or patch Python merely to make old tests green.
-- Confirm no secret, `.env`, upload, Qdrant data, database dump or generated log is staged.
+Mở `http://localhost:5001/api-docs`.
 
-## Completion record
+1. Login Demo Admin `admin@example.com / 123456`.
+2. Lấy `[DEV-ONLY ADMIN OTP]` từ terminal.
+3. Verify OTP và Authorize bằng user JWT.
+4. Tạo chat session.
+5. Gửi question chỉ có `content`, không gửi `clientRequestId`.
+6. Xác nhận response trả UUID được server sinh.
+7. Xác nhận assistant `COMPLETED`, citation tồn tại và `/api/citations/{id}/source` có snapshot.
+8. Xác nhận original-file endpoint báo unavailable với restored corpus.
+9. Nếu kiểm tra retry, gửi lại cùng UUID trong cùng session và xác nhận không duplicate; dùng UUID đó ở session khác phải trả `409`.
 
-Record command, timestamp, commit, provider/model names (never credentials), PASS/FAIL/BLOCKED status and the first safe error code. For a bug, include expected/actual behavior, the redacted request/response shape and redacted logs. Run the documented isolated cleanup and confirm no upload/log/database dump or secret artifact appears in Git status. `REMOTE E2E READY` requires all real-service lifecycle and persistence checks to pass; mocked HTTP tests are not sufficient.
+ADMIN chỉ đọc chat của chính mình. `no_answer=true` là success hợp lệ và không được có citation giả.
+
+## 5. Optional paid live automation
+
+Chỉ chạy khi project đã được xác nhận isolated và team cho phép provider call:
+
+```powershell
+npm run test:corpus:live
+```
+
+Expected: citation map restored chunk, usage được persist, còn ingest-job/chunk/Qdrant-point counts không tăng. Không chạy lại nếu một query đã đủ evidence. Full `npm run test:remote` có upload/ingest/hide/unhide/delete và chỉ dùng cho một disposable E2E project, không dùng trên corpus cần giữ.
+
+Live wording và `no_answer` không deterministic; contract/mock tests chịu trách nhiệm cho các nhánh này.
+
+## 6. Lifecycle và restart
+
+Nhấn `Ctrl+C`:
+
+- containers dừng;
+- named volumes còn;
+- không có orphan child process trong normal shutdown.
+
+Chạy lại `npm run docker:remote:dev`; expected `DATA_EXISTS`, không restore lần hai và không duplicate counts. Abrupt kill/Docker crash không bảo đảm signal cleanup; dùng `npm run docker:remote:stop` nếu cần.
+
+## 7. Cleanup
+
+- Không xóa project/volume không do test tạo.
+- `docker:remote:stop` hoặc `down` giữ volumes.
+- `reset` chỉ dùng với project disposable đã xác nhận vì xóa MySQL/Qdrant/upload data.
+- Xác nhận `git status --short` không có `.env`, upload, log, Qdrant data hoặc temp artifact.
+
+## 8. Evidence và bug report
+
+Ghi:
+
+- branch/commit và timestamp;
+- command + PASS/FAIL/BLOCKED;
+- lifecycle/status/counts, không ghi content hoặc secret;
+- expected/actual;
+- endpoint, HTTP status và `errorCode`;
+- request/response shape và logs đã redact;
+- model name, không ghi API key.
+
+Setup chi tiết nằm duy nhất tại [Remote Docker RAG](../setup/remote-rag-e2e.md); endpoint behavior nằm trong Swagger và [Public API](../api/public-api.md).

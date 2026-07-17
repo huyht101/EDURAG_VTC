@@ -5,9 +5,14 @@ const jsonBody = (schema) => ({
   content: { 'application/json': { schema } }
 });
 
-const response = (description, schemaRef = 'SuccessResponse') => ({
+const response = (description, schemaRef = 'SuccessResponse', example) => ({
   description,
-  content: { 'application/json': { schema: { $ref: `#/components/schemas/${schemaRef}` } } }
+  content: {
+    'application/json': {
+      schema: { $ref: `#/components/schemas/${schemaRef}` },
+      ...(example === undefined ? {} : { example })
+    }
+  }
 });
 
 const definition = {
@@ -18,6 +23,19 @@ const definition = {
     description: 'Foundation, Part 1 và Week 2 Part 2 APIs. RAG mock mode và remote contract v0.1 đã được kiểm thử; live E2E chỉ áp dụng cho topology development được tài liệu hóa.'
   },
   servers: [{ url: 'http://localhost:5001', description: 'Docker demo default' }],
+  tags: [
+    { name: 'Authentication', description: 'Đăng ký, đăng nhập, Admin OTP, logout và password recovery.' },
+    { name: 'Profile', description: 'ACTIVE user đọc/cập nhật profile và đổi password của chính mình.' },
+    { name: 'Admin - Users', description: 'ADMIN quản lý trạng thái và tra cứu tài khoản.' },
+    { name: 'Documents', description: 'TEACHER quản lý tài liệu mình upload; ADMIN quản lý toàn bộ.' },
+    { name: 'Document Processing', description: 'Theo dõi processing job bất đồng bộ sau upload/hide/unhide/delete.' },
+    { name: 'Chat Sessions', description: 'ACTIVE user quản lý các chat session thuộc chính mình.' },
+    { name: 'Chat Messages', description: 'ACTIVE user đọc history và gửi câu hỏi trong session của chính mình.' },
+    { name: 'Citations', description: 'Đọc immutable citation snapshot và original source khi còn khả dụng.' },
+    { name: 'Admin Dashboard', description: 'ADMIN đọc thống kê cơ bản; usage chỉ phản ánh llm_usage_logs.' },
+    { name: 'Internal RAG', description: 'Service-to-service only. Dùng internal Bearer, không dùng user JWT và không dành cho Web/Mobile/Swagger tester thông thường.' },
+    { name: 'System', description: 'Runtime health endpoint.' }
+  ],
   components: {
     securitySchemes: {
       bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
@@ -123,11 +141,15 @@ const definition = {
         type: 'object', properties: { title: { type: 'string', minLength: 1, maxLength: 255 } }
       },
       ChatMessageBody: {
-        type: 'object', required: ['content', 'clientRequestId'],
+        type: 'object', required: ['content'],
         properties: {
-          content: { type: 'string', minLength: 1, maxLength: 10000 },
-          clientRequestId: { type: 'string', format: 'uuid' }
-        }
+          content: { type: 'string', minLength: 1, maxLength: 10000, example: 'Tài liệu mô tả nội dung chính nào?' },
+          clientRequestId: {
+            type: 'string', format: 'uuid', nullable: true,
+            description: 'Optional idempotency key. Omit/null/blank để server sinh UUID; tái sử dụng cùng UUID khi retry an toàn.'
+          }
+        },
+        example: { content: 'Tài liệu mô tả nội dung chính nào?' }
       },
       ProcessingChunkManifestItem: {
         type: 'object',
@@ -202,7 +224,7 @@ const definition = {
     },
     '/api/auth/register': {
       post: {
-        tags: ['Auth'],
+        tags: ['Authentication'],
         summary: 'Đăng ký Student hoặc Teacher',
         description: 'Student được ACTIVE; Teacher được PENDING.',
         requestBody: jsonBody({ $ref: '#/components/schemas/RegisterBody' }),
@@ -211,25 +233,25 @@ const definition = {
     },
     '/api/auth/login': {
       post: {
-        tags: ['Auth'], summary: 'Đăng nhập ACTIVE user',
+        tags: ['Authentication'], summary: 'Đăng nhập ACTIVE user',
         requestBody: jsonBody({ $ref: '#/components/schemas/LoginBody' }),
         responses: { 200: response('Authenticated or Admin OTP required.'), 401: response('Invalid credentials.', 'ErrorResponse'), 403: response('Account not ACTIVE.', 'ErrorResponse') }
       }
     },
     '/api/auth/admin/verify-otp': {
       post: {
-        tags: ['Auth'], summary: 'Xác minh Admin OTP',
+        tags: ['Authentication'], summary: 'Xác minh Admin OTP',
         description: 'Email provider chưa tích hợp; development delivery phải bật rõ bằng env.',
         requestBody: jsonBody({ $ref: '#/components/schemas/VerifyOtpBody' }),
         responses: { 200: response('JWT issued.'), 400: response('OTP invalid/expired/revoked.', 'ErrorResponse') }
       }
     },
     '/api/auth/logout': {
-      post: { tags: ['Auth'], summary: 'Stateless client-side logout', security: [{ bearerAuth: [] }], responses: { 200: response('Logged out.'), 401: response('Unauthorized.', 'ErrorResponse') } }
+      post: { tags: ['Authentication'], summary: 'Stateless client-side logout', security: [{ bearerAuth: [] }], responses: { 200: response('Logged out.'), 401: response('Unauthorized.', 'ErrorResponse') } }
     },
     '/api/auth/forgot-password': {
       post: {
-        tags: ['Auth'], summary: 'Yêu cầu password reset',
+        tags: ['Authentication'], summary: 'Yêu cầu password reset',
         description: 'Luôn trả response chung; email provider chưa tích hợp.',
         requestBody: jsonBody({ $ref: '#/components/schemas/ForgotPasswordBody' }),
         responses: { 200: response('Request accepted.'), 400: response('Invalid input.', 'ErrorResponse') }
@@ -237,7 +259,7 @@ const definition = {
     },
     '/api/auth/reset-password': {
       post: {
-        tags: ['Auth'], summary: 'Reset password và tăng auth_version',
+        tags: ['Authentication'], summary: 'Reset password và tăng auth_version',
         requestBody: jsonBody({ $ref: '#/components/schemas/ResetPasswordBody' }),
         responses: { 200: response('Password reset.'), 400: response('Token invalid/expired/revoked.', 'ErrorResponse') }
       }
@@ -251,7 +273,7 @@ const definition = {
     },
     '/api/admin/users': {
       get: {
-        tags: ['Admin'], summary: 'List users (ADMIN)', security: [{ bearerAuth: [] }],
+        tags: ['Admin - Users'], summary: 'List users (ADMIN)', security: [{ bearerAuth: [] }],
         parameters: [
           { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1 } },
           { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100 } },
@@ -263,11 +285,11 @@ const definition = {
       }
     },
     '/api/admin/users/{id}': {
-      get: { tags: ['Admin'], summary: 'User detail (ADMIN)', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 200: response('User.'), 404: response('Not found.', 'ErrorResponse') } }
+      get: { tags: ['Admin - Users'], summary: 'User detail (ADMIN)', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 200: response('User.'), 404: response('Not found.', 'ErrorResponse') } }
     },
     '/api/admin/users/{id}/status': {
       put: {
-        tags: ['Admin'], summary: 'Approve/reject/reopen/lock/unlock (ADMIN)', security: [{ bearerAuth: [] }],
+        tags: ['Admin - Users'], summary: 'Approve/reject/reopen/lock/unlock (ADMIN)', security: [{ bearerAuth: [] }],
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
         requestBody: jsonBody({ $ref: '#/components/schemas/UpdateStatusBody' }),
         responses: { 200: response('Status updated.'), 400: response('Invalid payload.', 'ErrorResponse'), 409: response('Invalid transition.', 'ErrorResponse') }
@@ -294,7 +316,19 @@ const definition = {
             properties: { file: { type: 'string', format: 'binary' }, title: { type: 'string', maxLength: 255 } }
           } } }
         },
-        responses: { 202: response('Document/job accepted.'), 400: response('Invalid file.', 'ErrorResponse'), 413: response('File too large.', 'ErrorResponse'), 503: response('Remote RAG dispatch failed.', 'ErrorResponse') }
+        responses: {
+          202: response('Document/job accepted; processing is not complete yet.', 'SuccessResponse', {
+            success: true,
+            message: 'Document đã được tiếp nhận để xử lý.',
+            data: {
+              document: { id: 12, processingStatus: 'PROCESSING', visibilityStatus: 'VISIBLE' },
+              job: { id: 34, jobType: 'INGEST', status: 'RUNNING', attemptCount: 1 }
+            }
+          }),
+          400: response('Invalid file.', 'ErrorResponse'),
+          413: response('File too large.', 'ErrorResponse'),
+          503: response('Remote RAG dispatch failed; document/job are marked FAILED.', 'ErrorResponse')
+        }
       }
     },
     '/api/documents/{id}': {
@@ -306,7 +340,7 @@ const definition = {
       get: { tags: ['Documents'], summary: 'Stream original file for owner/Admin', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 200: { description: 'File stream.' }, 404: response('Unavailable.', 'ErrorResponse') } }
     },
     '/api/documents/jobs/{jobId}': {
-      get: { tags: ['Documents'], summary: 'Processing job status for owner/Admin', security: [{ bearerAuth: [] }], parameters: [{ name: 'jobId', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 200: response('Processing job.'), 404: response('Not found.', 'ErrorResponse') } }
+      get: { tags: ['Document Processing'], summary: 'Processing job status for owner/Admin', security: [{ bearerAuth: [] }], parameters: [{ name: 'jobId', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 200: response('Processing job.', 'SuccessResponse', { success: true, message: 'OK', data: { id: 34, documentId: 12, jobType: 'INGEST', status: 'SUCCEEDED', currentStage: 'COMPLETED', attemptCount: 1, totalChunks: 8 } }), 404: response('Not found.', 'ErrorResponse') } }
     },
     '/api/documents/{id}/hide': {
       post: { tags: ['Documents'], summary: 'Disable retrieval without deleting vectors', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 202: response('Hide operation accepted.'), 409: response('Invalid transition.', 'ErrorResponse') } }
@@ -318,16 +352,16 @@ const definition = {
       post: { tags: ['Internal RAG'], summary: 'Complete-manifest processing callback', security: [{ internalBearer: [] }], requestBody: jsonBody({ $ref: '#/components/schemas/ProcessingCallbackBody' }), responses: { 200: response('ACK, duplicate or stale ignored.'), 400: response('Invalid callback.', 'ErrorResponse'), 401: response('Invalid internal token.', 'ErrorResponse') } }
     },
     '/api/chat/sessions': {
-      get: { tags: ['Chat'], summary: 'List own chat sessions', security: [{ bearerAuth: [] }], responses: { 200: response('Session page.') } },
-      post: { tags: ['Chat'], summary: 'Create chat session', security: [{ bearerAuth: [] }], requestBody: jsonBody({ $ref: '#/components/schemas/ChatSessionBody' }), responses: { 201: response('Created.') } }
+      get: { tags: ['Chat Sessions'], summary: 'List own chat sessions', security: [{ bearerAuth: [] }], parameters: [{ name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0, default: 0 } }, { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } }], responses: { 200: response('Session page.') } },
+      post: { tags: ['Chat Sessions'], summary: 'Create chat session', security: [{ bearerAuth: [] }], requestBody: jsonBody({ $ref: '#/components/schemas/ChatSessionBody' }), responses: { 201: response('Created.') } }
     },
     '/api/chat/sessions/{id}': {
-      get: { tags: ['Chat'], summary: 'Own session and history', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 200: response('History.'), 404: response('Not found.', 'ErrorResponse') } },
-      delete: { tags: ['Chat'], summary: 'Soft-delete own session', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 204: { description: 'Deleted.' } } }
+      get: { tags: ['Chat Sessions'], summary: 'Own session detail with history', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }, { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0, default: 0 } }, { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 50 } }], responses: { 200: response('History.'), 404: response('Not found.', 'ErrorResponse') } },
+      delete: { tags: ['Chat Sessions'], summary: 'Soft-delete own session', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 204: { description: 'Deleted.' } } }
     },
     '/api/chat/sessions/{id}/messages': {
-      get: { tags: ['Chat'], summary: 'Paginated history', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 200: response('History.') } },
-      post: { tags: ['Chat'], summary: 'Persist question and query mock/remote RAG', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], requestBody: jsonBody({ $ref: '#/components/schemas/ChatMessageBody' }), responses: { 200: response('Assistant result.'), 502: response('RAG response invalid/failed.', 'ErrorResponse'), 503: response('RAG unavailable.', 'ErrorResponse') } }
+      get: { tags: ['Chat Messages'], summary: 'List paginated session messages', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }, { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0, default: 0 } }, { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 50 } }], responses: { 200: response('History.') } },
+      post: { tags: ['Chat Messages'], summary: 'Send question and wait for RAG answer', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/ChatMessageBody' }, examples: { simple: { summary: 'Swagger/simple request; server generates clientRequestId', value: { content: 'Tài liệu mô tả nội dung chính nào?' } }, safeRetry: { summary: 'Advanced retry with client-controlled idempotency UUID', value: { content: 'Tài liệu mô tả nội dung chính nào?', clientRequestId: '35ad0d0e-a423-4b06-a643-9a8391a6a4da' } } } } } }, responses: { 200: response('Assistant result with the final clientRequestId.', 'SuccessResponse', { success: true, message: 'Chat response completed.', data: { duplicate: false, clientRequestId: '35ad0d0e-a423-4b06-a643-9a8391a6a4da', userMessageId: 41, assistantMessage: { id: 42, status: 'COMPLETED', content: 'Câu trả lời...', noAnswer: false, citations: [] } } }), 409: response('clientRequestId belongs to another session.', 'ErrorResponse'), 502: response('RAG response invalid/failed.', 'ErrorResponse'), 503: response('RAG unavailable or timed out.', 'ErrorResponse') } }
     },
     '/api/citations/{id}': {
       get: { tags: ['Citations'], summary: 'Authorized immutable citation snapshot', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 200: response('Citation.'), 404: response('Not found.', 'ErrorResponse') } }
@@ -343,5 +377,50 @@ const definition = {
     }
   }
 };
+
+const operationDescriptions = {
+  'GET /health': 'Actor: public monitoring. Kiểm tra NodeJS process đang phục vụ request; không kiểm tra toàn bộ MySQL/Python/Qdrant topology.',
+  'POST /api/auth/register': 'Actor: public. Tạo STUDENT ở trạng thái ACTIVE hoặc TEACHER ở trạng thái PENDING chờ ADMIN review; không cấp quyền quản lý document cho STUDENT.',
+  'POST /api/auth/login': 'Actor: public account owner. Chỉ ACTIVE user đăng nhập được; ADMIN phải hoàn tất OTP trước khi nhận user JWT.',
+  'POST /api/auth/admin/verify-otp': 'Actor: ADMIN đang đăng nhập. Xác minh OTP development/email delivery và trả user JWT; OTP expired/used/revoked không được dùng lại.',
+  'POST /api/auth/logout': 'Actor: authenticated user. Stateless client-side logout; client xóa JWT hiện tại, endpoint không phải logout-all và không tăng auth_version.',
+  'POST /api/auth/forgot-password': 'Actor: public. Tạo password-reset request với response chống account enumeration; development delivery không đồng nghĩa email production-ready.',
+  'POST /api/auth/reset-password': 'Actor: người giữ reset token. Đổi password, tăng auth_version và consume token trong transaction; JWT cũ mất hiệu lực.',
+  'GET /api/profile': 'Actor: ACTIVE authenticated user. Chỉ đọc profile và role/status hiện tại của chính mình.',
+  'PUT /api/profile': 'Actor: ACTIVE authenticated user. Chỉ mutate các profile field được role hiện tại cho phép; không đổi role/status.',
+  'PUT /api/profile/password': 'Actor: ACTIVE authenticated user. Kiểm tra password hiện tại, đổi password và tăng auth_version để vô hiệu JWT cũ.',
+  'GET /api/admin/users': 'Actor: ADMIN. Đọc danh sách user có pagination/filter; không dành cho TEACHER/STUDENT.',
+  'GET /api/admin/users/{id}': 'Actor: ADMIN. Đọc account/profile detail của user theo id; không trả password/token hash.',
+  'PUT /api/admin/users/{id}/status': 'Actor: ADMIN. Thực hiện approve/reject/reopen/lock/unlock theo transition hợp lệ; lock tăng auth_version.',
+  'GET /api/documents': 'Actor: TEACHER hoặc ADMIN. TEACHER chỉ thấy document mình upload, ADMIN thấy toàn bộ; mặc định không list DELETED.',
+  'POST /api/documents': 'Actor: TEACHER hoặc ADMIN. Validate và lưu PDF/DOCX/TXT, tạo document + INGEST job rồi dispatch Python. HTTP 202 chỉ là accepted; tiếp theo poll GET /api/documents/jobs/{jobId} đến SUCCEEDED và kiểm tra document READY.',
+  'GET /api/documents/{id}': 'Actor: document owner TEACHER hoặc ADMIN. Đọc metadata và latest job; storage_key không được public.',
+  'PATCH /api/documents/{id}': 'Actor: document owner TEACHER hoặc ADMIN. Chỉ đổi title; file gốc immutable và muốn thay nội dung phải upload document mới.',
+  'DELETE /api/documents/{id}': 'Actor: document owner TEACHER hoặc ADMIN. Tạo async DELETE_VECTORS job rồi soft-delete business document; poll job status. Chat/citation snapshot không bị xóa.',
+  'GET /api/documents/{id}/file': 'Actor: document owner TEACHER hoặc ADMIN. Stream original file khi local upload còn tồn tại; portable corpus restore không gồm original files nên có thể trả FILE_NOT_FOUND.',
+  'GET /api/documents/jobs/{jobId}': 'Actor: owner của document hoặc ADMIN. Poll trạng thái QUEUED/RUNNING/SUCCEEDED/FAILED/CANCELLED; document chỉ dùng cho retrieval sau khi INGEST SUCCEEDED và processingStatus READY.',
+  'POST /api/documents/{id}/hide': 'Actor: document owner TEACHER hoặc ADMIN. Tạo async SET_RETRIEVAL job để loại document khỏi retrieval nhưng giữ vectors và citation/history; poll job status.',
+  'POST /api/documents/{id}/unhide': 'Actor: document owner TEACHER hoặc ADMIN. Tạo async SET_RETRIEVAL job để bật lại READY document; poll job status trước khi chat.',
+  'POST /api/internal/rag/processing-callback': 'Service-to-service only: Python RAG gọi bằng internal Bearer. Không dùng user JWT, không dành cho Web/Mobile/Swagger tester. Node validate attempt/idempotency/manifest rồi persist MySQL.',
+  'GET /api/chat/sessions': 'Actor: ACTIVE authenticated user. Chỉ list session chưa soft-delete của chính user, theo offset/limit; ADMIN không tự động đọc chat người khác.',
+  'POST /api/chat/sessions': 'Actor: ACTIVE authenticated user. Tạo session thuộc chính user; title optional và chưa gọi Python/RAG.',
+  'GET /api/chat/sessions/{id}': 'Actor: session owner. Đọc session detail kèm paginated messages/citations; endpoint read-only và không mở quyền ADMIN đọc session người khác.',
+  'DELETE /api/chat/sessions/{id}': 'Actor: session owner. Soft-delete session; messages, citations và usage vẫn được giữ trong MySQL nhưng session không còn xuất hiện qua public history APIs.',
+  'GET /api/chat/sessions/{id}/messages': 'Actor: session owner. Đọc messages theo message_order với offset/limit; assistant message gồm citation snapshots, không bao gồm usage rows.',
+  'POST /api/chat/sessions/{id}/messages': 'Actor: session owner. Persist USER + ASSISTANT PENDING trước network call, chờ Python/LLM rồi persist answer/citations/usage. clientRequestId optional; no_answer=true là success hợp lệ. Timeout/upstream failure để assistant FAILED và có thể lâu hơn API thông thường.',
+  'GET /api/citations/{id}': 'Actor: owner của chat session chứa citation. Đọc immutable citation snapshot; không phụ thuộc document hiện còn visible hoặc original file còn tồn tại.',
+  'GET /api/citations/{id}/source': 'Actor: owner của chat session chứa citation. Đọc source-text snapshot và cờ originalAvailable; đây không phải stream file.',
+  'GET /api/citations/{id}/file': 'Actor: owner của chat session chứa citation và current source authorization hợp lệ. Stream original file; restored portable corpus có thể trả ORIGINAL_SOURCE_UNAVAILABLE trong khi snapshot vẫn đọc được.',
+  'GET /api/admin/dashboard/summary': 'Actor: ADMIN. Đọc document/chat/citation và LLM usage aggregates theo time range; không gọi đây là tổng OCR/embedding/Qdrant cost.'
+};
+
+for (const [path, pathItem] of Object.entries(definition.paths)) {
+  for (const method of ['get', 'post', 'put', 'patch', 'delete']) {
+    if (!pathItem[method]) continue;
+    const key = `${method.toUpperCase()} ${path}`;
+    if (!operationDescriptions[key]) throw new Error(`Missing OpenAPI operation description: ${key}`);
+    pathItem[method].description = operationDescriptions[key];
+  }
+}
 
 module.exports = swaggerJsdoc({ definition, apis: [] });

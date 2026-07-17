@@ -25,7 +25,13 @@ function validateSendMessage(body) {
     return { error: 'content là bắt buộc.' };
   }
   if (body.content.trim().length > 10000) return { error: 'content vượt quá 10000 ký tự.' };
-  if (!UUID.test(body.clientRequestId || '')) return { error: 'clientRequestId phải là UUID.' };
+  if (body.clientRequestId !== undefined && body.clientRequestId !== null) {
+    if (typeof body.clientRequestId !== 'string') {
+      return { error: 'clientRequestId phải là UUID.' };
+    }
+    const value = body.clientRequestId.trim();
+    if (value && !UUID.test(value)) return { error: 'clientRequestId phải là UUID.' };
+  }
   return null;
 }
 
