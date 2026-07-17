@@ -4,6 +4,7 @@ require('dotenv').config();
 const express = require('express');
 const swaggerUi = require('swagger-ui-express');
 const swaggerSpec = require('./configs/swagger');
+const ragConfig = require('./configs/rag');
 
 const responseMiddleware = require('./middlewares/response-middleware');
 const { notFound, errorHandler } = require('./middlewares/error-middleware');
@@ -22,7 +23,7 @@ const app = express();
 // Keep this route-specific so unauthenticated public endpoints retain Express's 100 KB default.
 app.use(
   '/api/internal/rag',
-  express.json({ limit: '10mb' }),
+  express.json({ limit: ragConfig.callbackBodyLimit }),
   responseMiddleware,
   internalRagRoutes
 );

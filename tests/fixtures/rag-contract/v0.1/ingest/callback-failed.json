@@ -1,11 +1,10 @@
 {
-  "job_id": 101,
-  "doc_id": 42,
+  "job_id": "101",
   "attempt_count": 2,
   "event_type": "FAILED",
-  "stage": "PARSING",
+  "stage": "parsing",
   "error": {
-    "error_code": "DOCUMENT_PARSE_FAILED",
+    "code": "DOCUMENT_PARSE_FAILED",
     "message": "The document could not be parsed."
   }
 }

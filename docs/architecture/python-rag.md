@@ -17,17 +17,19 @@ Snapshot-local README/API docs phản ánh upstream tại thời điểm import 
 - Random UUID Qdrant point IDs.
 - Qdrant payload `doc_id`, `subject_id`, page/heading, chunk index và `is_hidden`.
 - Async `BackgroundTasks` ingest/visibility/delete and callback sender.
-- Query history, citation snippet, confidence string và Gemini usage metadata.
+- Processing-attempt propagation, full-text/hash manifest and UUID Qdrant point IDs.
+- Query history/correlation fields, citation point ID, snippet, confidence string và Gemini usage metadata.
+- Internal Bearer dependency for all business routes; health remains public.
 - Python tests for route acceptance and Pydantic schemas.
 
 ## Observed limitations
 
 - `BackgroundTasks` không durable.
-- Inbound routes chưa verify internal Bearer.
-- Callback delivery retry ghi đè processing `attempt_count`.
-- Ingest manifest chỉ có `text_preview`, thiếu full text/hash.
-- Citation không có Qdrant point ID.
 - Service Compose chưa mount shared Node upload volume.
+- Current tracked Python tests have not been updated for required Bearer/`attempt_count`.
+- `INTERNAL_SECRET` still has a weak fallback and inbound comparison is not constant-time.
+- Exact upstream commit for the uncommitted refresh is unknown.
+- Python dependency/environment packaging for the current `google_genai` imports remains to be verified.
 
 Các mismatch cần được chuyển/upstream cho team Python. NodeJS team không sở hữu retrieval quality, prompt/model tuning hoặc Python production releases.
 

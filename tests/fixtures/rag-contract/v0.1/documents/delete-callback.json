@@ -1,7 +1,6 @@
 {
-  "job_id": 103,
-  "doc_id": 42,
+  "job_id": "103",
   "attempt_count": 1,
   "event_type": "SUCCEEDED",
-  "stage": "COMPLETED"
+  "deleted_count": 2
 }

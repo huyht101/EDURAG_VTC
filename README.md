@@ -81,4 +81,4 @@ npm start
 
 Với local NodeJS, dùng MySQL demo trên `127.0.0.1:3306`. Xem [local development](docs/setup/local-development.md) và [Docker demo](docs/setup/docker-demo.md) để biết reset, test và giới hạn bảo mật.
 
-`RAG_MODE=mock` vẫn là mặc định. Remote mode cần shared upload path nhìn thấy từ Python, callback URL và internal token đồng nhất; xem [contract v0.1](docs/api/internal-rag-contract.md). Python hiện còn blocker về callback attempt, complete manifest, citation vector ID và inbound Bearer auth, nên chưa được coi là remote-ready.
+`RAG_MODE=mock` vẫn là mặc định. Remote mode cần shared upload path nhìn thấy từ Python, callback URL và internal token đồng nhất; xem [contract v0.1](docs/api/internal-rag-contract.md). Snapshot mới đã triển khai target payload chính, nhưng remote E2E vẫn chưa được xác nhận và còn gate về Python tests/security, provenance và deployment topology.

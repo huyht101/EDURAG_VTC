@@ -160,8 +160,20 @@ const definition = {
         type: 'object', required: ['event_type', 'job_id', 'attempt_count'],
         properties: {
           event_type: { type: 'string', enum: ['PROGRESS', 'SUCCEEDED', 'FAILED', 'CANCELLED'] },
-          job_id: { type: 'integer' },
-          doc_id: { type: 'integer' },
+          job_id: {
+            oneOf: [
+              { type: 'integer', minimum: 1 },
+              { type: 'string', pattern: '^[1-9]\\d*$' }
+            ],
+            description: 'Python echoes the Node processing job ID as a string.'
+          },
+          doc_id: {
+            oneOf: [
+              { type: 'integer', minimum: 1 },
+              { type: 'string', pattern: '^[1-9]\\d*$' }
+            ],
+            description: 'Optional; Node resolves the document through the processing job when omitted.'
+          },
           attempt_count: {
             type: 'integer',
             minimum: 1,

@@ -6,8 +6,8 @@
 - Mock and remote RAG clients return the same normalized answer/source/usage structure. Remote HTTP uses `POST /api/query`, snake_case and lowercase history roles.
 - Python receives only the bounded current history window; MySQL remains durable history.
 - Assistant completion, verified citation fragments, usage rows and `last_message_at` persist in one transaction.
-- Citation fragments resolve through `document_chunks.vector_node_id`; bracket markers are never parsed.
-- Remote citations without `vector_node_id` are rejected; the current snapshot lacks that ID and the fix must be upstreamed by the Python team.
+- Citation fragments resolve through `document_chunks.vector_node_id`; NodeJS never parses bracket markers.
+- Remote citations without `vector_node_id` are rejected. The current snapshot now returns the Qdrant point ID in that field.
 - Citation snapshot access survives document hide/delete. Original file access follows current authorization/state.
 - Multiple usage calls per assistant message are supported. Dashboard scope is `LLM_CALLS_ONLY`.
 

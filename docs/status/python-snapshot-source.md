@@ -9,26 +9,42 @@
 | Upstream repository | <https://github.com/manh2905/RAG_service> |
 | Upstream branch/tag | `Unknown` |
 | Upstream commit | `Unknown` |
-| Snapshot refreshed | `2026-07-16` |
-| Import source | GitHub source archive `RAG_service-master.zip` |
+| Snapshot refreshed | `2026-07-17` |
+| Import source | Uncommitted working-tree refresh; exact upstream export metadata was not recorded |
 | Snapshot directory | `python-service/` |
-| Local Python runtime patches | `None` observed in the latest audit |
+| Git baseline | `65e089a8a8e63505f9cf56d8fa972fdcc189a17d` plus uncommitted snapshot changes |
+| Node-authored Python runtime patches | `None` |
 | Latest compatibility audit | `2026-07-17` |
 
-The archive is a local ignored import artifact, not a canonical source and not a file to commit.
+The Git baseline identifies the repository copy, not an upstream Python commit. The refresh must record its exact upstream commit before it can be treated as reproducible provenance.
 
-## Current compatibility blockers
+## Current refresh inventory
 
-The latest snapshot audit found:
+- Modified runtime: `api/routes.py`, `main.py`, `models/schemas.py`, `services/callback.py`, `services/doc_manager.py`, `services/ingestion.py`, `services/rag_engine.py`.
+- Modified ad-hoc scripts: `test_all.py`, `test_real.py`.
+- Added runtime dependency: `api/dependencies.py`.
+- Added snapshot-local contract/package: `API_CONTRACT.md` and `python-rag-integration-v0.1.1/`. These are audit evidence only; the root [internal contract](../api/internal-rag-contract.md) remains canonical for NodeJS.
 
-1. Ingest, visibility and delete request schemas do not accept the processing-job `attempt_count`.
-2. `services/callback.py::send_callback` replaces `attempt_count` with HTTP callback-delivery retry count.
-3. The successful ingest manifest contains `text_preview`, not complete `chunk_text` with matching SHA-256 `content_hash`.
-4. Query citations do not return the Qdrant point ID as `vector_node_id`.
-5. Python inbound routes do not verify the internal Bearer token.
-6. `core/config.py` has a weak development fallback for `INTERNAL_SECRET`; deployment must require an explicit strong secret.
+## Compatibility result
 
-These are observations from this imported snapshot, not claims about the latest upstream state. See the [canonical internal RAG contract](../api/internal-rag-contract.md) for the target boundary and [Week 3 integration readiness](week3-integration-readiness.md) for release gates.
+The refresh resolved the previous target-boundary blockers:
+
+1. Ingest, visibility and delete schemas now accept processing `attempt_count`.
+2. Callback HTTP retry no longer overwrites processing `attempt_count`.
+3. Successful ingest callbacks now return full `chunk_text` and matching SHA-256 `content_hash`.
+4. Query citations now return the Qdrant point ID as `vector_node_id`.
+5. Python inbound business routes now use Bearer verification; health remains public.
+6. Query schemas now retain optional `request_id` and `user_id` correlation fields.
+
+Remaining Python/deployment work:
+
+1. Replace the weak `INTERNAL_SECRET` fallback and use constant-time comparison; verify missing/malformed Bearer returns the agreed `401`.
+2. Update Python route/schema tests for Bearer and required `attempt_count`; current tracked tests still use the old unauthenticated DTOs.
+3. Reconcile the `google_genai` imports in `core/llm_setup.py` with declared requirements and restore an upstream-safe environment template.
+4. Record the exact upstream commit and run Python tests without paid-provider calls.
+5. Select and verify the shared upload volume/network topology.
+
+These are observations from the uncommitted local snapshot, not claims about the latest upstream state. See [Week 3 integration readiness](week3-integration-readiness.md) for release gates.
 
 ## After each refresh
 

@@ -101,8 +101,20 @@ async function testIngestContract() {
   });
 
   assert.throws(
-    () => normalizeAcceptedResponse({ accepted: true, job_id: '999' }, '101'),
+    () => normalizeAcceptedResponse({ status: 'accepted', job_id: '999' }, '101'),
     (error) => error.code === 'RAG_JOB_ID_MISMATCH' && error.status === 502
+  );
+  assert.throws(
+    () => normalizeAcceptedResponse({ status: 'accepted' }, '101'),
+    (error) => error.code === 'RAG_ACCEPTED_RESPONSE_INVALID' && error.status === 502
+  );
+  assert.throws(
+    () => normalizeAcceptedResponse({ job_id: '101' }, '101'),
+    (error) => error.code === 'RAG_ACCEPTED_RESPONSE_INVALID' && error.status === 502
+  );
+  assert.deepEqual(
+    normalizeAcceptedResponse({ status: 'rejected', job_id: '101' }, '101'),
+    { accepted: false, completed: false, mode: 'remote', jobId: '101' }
   );
 }
 
@@ -123,7 +135,7 @@ function testSharedPathSafety() {
 
 async function testDocumentOperations() {
   const visibility = await captureRemote(
-    jsonResponse({ accepted: true, job_id: '102' }),
+    jsonResponse({ status: 'accepted', job_id: '102' }),
     (client) => client.setRetrieval({
       documentId: '42',
       jobId: '102',
@@ -137,7 +149,7 @@ async function testDocumentOperations() {
   assert.deepEqual(parsedBody(visibility.call), fixture('documents/visibility-request.json'));
 
   const unhide = await captureRemote(
-    jsonResponse({ accepted: true, job_id: '104' }),
+    jsonResponse({ status: 'accepted', job_id: '104' }),
     (client) => client.setRetrieval({
       documentId: '42',
       jobId: '104',
@@ -153,7 +165,7 @@ async function testDocumentOperations() {
   });
 
   const deletion = await captureRemote(
-    jsonResponse({ accepted: true, job_id: '103' }),
+    jsonResponse({ status: 'accepted', job_id: '103' }),
     (client) => client.deleteVectors({
       documentId: '42',
       jobId: '103',
@@ -197,7 +209,7 @@ async function testChatContract() {
     callIndex: 1,
     operationType: 'ANSWER_GENERATION',
     provider: 'GOOGLE',
-    model: 'models/gemini-2.0-flash',
+    model: 'models/gemini-3.5-flash',
     promptTokens: 21,
     completionTokens: 8,
     estimatedCost: null,
@@ -222,6 +234,18 @@ async function testChatContract() {
       citations: [{ source_text: 'Missing vector ID.' }]
     }),
     (error) => error.code === 'RAG_CITATION_INVALID'
+  );
+  assert.throws(
+    () => normalizeQueryResult({ answer: 'Missing no-answer and citations fields.' }),
+    (error) => error.code === 'RAG_QUERY_RESPONSE_INVALID' && error.status === 502
+  );
+  assert.throws(
+    () => normalizeQueryResult({
+      answer: 'Wrong citations shape.',
+      no_answer: false,
+      citations: {}
+    }),
+    (error) => error.code === 'RAG_QUERY_RESPONSE_INVALID' && error.status === 502
   );
 }
 
@@ -295,7 +319,7 @@ function callbackDependencies(job, mutations) {
   return {
     withTransaction: async (callback) => callback({ transaction: true }),
     jobRepo: {
-      findByIdForUpdate: async () => ({ ...job }),
+      findByIdForUpdate: async () => job ? ({ ...job }) : null,
       markProgress: async () => mutations.push('job-progress'),
       markSucceeded: async () => mutations.push('job-succeeded'),
       markFailed: async () => mutations.push('job-failed'),
@@ -323,8 +347,8 @@ async function testCallbackContract() {
     delivery_retry_count: 99
   };
   const normalized = normalizeProcessingCallback(raw);
-  assert.equal(normalized.jobId, 101);
-  assert.equal(normalized.documentId, 42);
+  assert.equal(normalized.jobId, '101');
+  assert.equal(normalized.documentId, undefined);
   assert.equal(normalized.attemptCount, 2);
   assert.equal(normalized.chunks[0].vectorNodeId, raw.chunk_manifest[0].chunk_id);
   assert.equal(normalized.chunks[0].chunkText, 'Chunk one full text.');
@@ -417,6 +441,82 @@ async function testCallbackContract() {
   }, duplicateMutations));
   assert.deepEqual(duplicate, { acknowledged: true, duplicate: true, jobId: 101 });
   assert.deepEqual(duplicateMutations, []);
+
+  const mismatchMutations = [];
+  await assert.rejects(
+    () => handleCallback(
+      { ...normalized, documentId: 43 },
+      callbackDependencies({
+        id: 101,
+        document_id: 42,
+        attempt_count: 2,
+        status: 'RUNNING',
+        job_type: 'INGEST',
+        job_config: null
+      }, mismatchMutations)
+    ),
+    (error) => error.code === 'CALLBACK_DOCUMENT_MISMATCH' && error.status === 400
+  );
+  assert.deepEqual(mismatchMutations, []);
+
+  const missingJobMutations = [];
+  await assert.rejects(
+    () => handleCallback(normalized, callbackDependencies(null, missingJobMutations)),
+    (error) => error.code === 'PROCESSING_JOB_NOT_FOUND' && error.status === 404
+  );
+  assert.deepEqual(missingJobMutations, []);
+
+  const failed = normalizeProcessingCallback(fixture('ingest/callback-failed.json'));
+  const failedMutations = [];
+  assert.deepEqual(
+    await handleCallback(failed, callbackDependencies({
+      id: 101,
+      document_id: 42,
+      attempt_count: 2,
+      status: 'RUNNING',
+      job_type: 'INGEST',
+      job_config: null
+    }, failedMutations)),
+    { acknowledged: true, jobId: 101, status: 'FAILED' }
+  );
+  assert.deepEqual(failedMutations, ['job-failed', 'document-processing']);
+
+  const cancelledMutations = [];
+  assert.deepEqual(
+    await handleCallback(
+      { ...failed, eventType: 'CANCELLED' },
+      callbackDependencies({
+        id: 101,
+        document_id: 42,
+        attempt_count: 2,
+        status: 'RUNNING',
+        job_type: 'INGEST',
+        job_config: null
+      }, cancelledMutations)
+    ),
+    { acknowledged: true, jobId: 101, status: 'CANCELLED' }
+  );
+  assert.deepEqual(cancelledMutations, ['job-cancelled', 'document-processing']);
+
+  for (const [callbackFixture, jobType, targetVisibility] of [
+    ['documents/visibility-callback.json', 'SET_RETRIEVAL', 'HIDDEN'],
+    ['documents/delete-callback.json', 'DELETE_VECTORS', 'DELETED']
+  ]) {
+    const operationMutations = [];
+    const operation = normalizeProcessingCallback(fixture(callbackFixture));
+    assert.deepEqual(
+      await handleCallback(operation, callbackDependencies({
+        id: Number(operation.jobId),
+        document_id: 42,
+        attempt_count: 1,
+        status: 'RUNNING',
+        job_type: jobType,
+        job_config: JSON.stringify({ targetVisibility })
+      }, operationMutations)),
+      { acknowledged: true, jobId: Number(operation.jobId), status: 'SUCCEEDED' }
+    );
+    assert.deepEqual(operationMutations, ['job-succeeded', 'document-visibility']);
+  }
 
   for (const callbackFixture of [
     'ingest/callback-failed.json',

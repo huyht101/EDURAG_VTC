@@ -72,15 +72,31 @@ function responseData(payload) {
 
 function normalizeAcceptedResponse(payload, expectedJobId) {
   const result = responseData(payload);
+  if (!result || typeof result !== 'object' || Array.isArray(result)) {
+    throw appError(502, 'RAG_ACCEPTED_RESPONSE_INVALID', 'Python RAG accepted response must be an object.');
+  }
   const responseJobId = result.job_id ?? result.jobId;
+  if (responseJobId === undefined || responseJobId === null || String(responseJobId).trim() === '') {
+    throw appError(502, 'RAG_ACCEPTED_RESPONSE_INVALID', 'Python RAG accepted response must include job_id.');
+  }
   if (responseJobId !== undefined && String(responseJobId) !== String(expectedJobId)) {
     throw appError(502, 'RAG_JOB_ID_MISMATCH', 'Python RAG response job_id does not match the dispatched job.');
   }
+  const status = String(result.status || '').toLowerCase();
+  const accepted = result.accepted === true || status === 'accepted';
+  const rejected = result.accepted === false || status === 'rejected';
+  if (!accepted && !rejected) {
+    throw appError(
+      502,
+      'RAG_ACCEPTED_RESPONSE_INVALID',
+      'Python RAG accepted response must declare accepted or rejected status.'
+    );
+  }
   return {
-    accepted: result.accepted !== false && String(result.status || '').toLowerCase() !== 'rejected',
+    accepted: accepted && !rejected,
     completed: false,
     mode: 'remote',
-    jobId: responseJobId === undefined ? String(expectedJobId) : String(responseJobId)
+    jobId: String(responseJobId)
   };
 }
 
@@ -124,8 +140,19 @@ function normalizeUsageCall(call, index, defaults = {}) {
 
 function normalizeQueryResult(payload) {
   const result = responseData(payload);
-  const noAnswer = Boolean(result.no_answer);
-  const citations = Array.isArray(result.citations) ? result.citations : [];
+  if (!result || typeof result !== 'object' || Array.isArray(result)
+    || typeof result.no_answer !== 'boolean'
+    || typeof result.answer !== 'string'
+    || !Array.isArray(result.citations)
+    || (result.confidence !== undefined && result.confidence !== null
+      && typeof result.confidence !== 'string')
+    || (result.usage_calls !== undefined && !Array.isArray(result.usage_calls))
+    || (result.usage !== undefined && result.usage !== null
+      && (typeof result.usage !== 'object' || Array.isArray(result.usage)))) {
+    throw appError(502, 'RAG_QUERY_RESPONSE_INVALID', 'Python RAG query response has an invalid shape.');
+  }
+  const noAnswer = result.no_answer;
+  const citations = result.citations;
   let usageCalls = [];
 
   if (Array.isArray(result.usage_calls)) {

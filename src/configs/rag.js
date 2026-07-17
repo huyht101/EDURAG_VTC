@@ -19,6 +19,13 @@ module.exports = {
     if (!Number.isSafeInteger(value) || value <= 0) throw new Error('RAG_QUERY_TIMEOUT_MS must be positive.');
     return value;
   },
+  get callbackBodyLimit() {
+    const value = String(process.env.RAG_CALLBACK_BODY_LIMIT || '25mb').trim().toLowerCase();
+    if (!/^[1-9]\d*(kb|mb)$/.test(value)) {
+      throw new Error('RAG_CALLBACK_BODY_LIMIT must be a positive kb or mb value.');
+    }
+    return value;
+  },
   get historyMessageLimit() {
     const value = Number(process.env.RAG_HISTORY_MESSAGE_LIMIT || 20);
     if (!Number.isSafeInteger(value) || value < 1 || value > 100) {

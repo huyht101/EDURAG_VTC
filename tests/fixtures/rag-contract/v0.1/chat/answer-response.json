@@ -9,15 +9,11 @@
       "snippet": "A verified source fragment.",
       "page_number": 1,
       "chapter": "Introduction",
-      "source_locator": {
-        "paragraph": 1
-      },
-      "retrieval_score": 0.88,
-      "rerank_score": 0.93
+      "section": "Overview"
     }
   ],
   "usage": {
-    "model": "models/gemini-2.0-flash",
+    "model": "models/gemini-3.5-flash",
     "prompt_tokens": 21,
     "completion_tokens": 8,
     "total_tokens": 29
