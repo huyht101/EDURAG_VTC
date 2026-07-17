@@ -7,7 +7,7 @@ Tài liệu hiện hành được tổ chức theo nguồn sự thật, không p
 - [System overview](architecture/system-overview.md)
 - [Local development](setup/local-development.md)
 - [Docker demo](setup/docker-demo.md)
-- [Remote RAG E2E setup](setup/remote-rag-e2e.md)
+- [Full Docker RAG setup và kiểm thử Swagger](setup/remote-rag-e2e.md)
 - [Database bootstrap](database/README.md)
 - OpenAPI runtime: `/api-docs` và `/api-docs.json`
 
@@ -40,3 +40,5 @@ Tài liệu hiện hành được tổ chức theo nguồn sự thật, không p
 - [Week 3 independent remote test plan](testing/week3-remote-test-plan.md)
 
 `src/database/schema.sql` là executable database source of truth. OpenAPI là danh mục public endpoint chi tiết. [`api/internal-rag-contract.md`](api/internal-rag-contract.md) là contract nội bộ canonical duy nhất.
+
+Luồng Docker chuẩn chỉ cần chỉnh root `.env` một lần, sau đó dùng các npm script `docker:mock:*` hoặc `docker:remote:*`; không cần truyền project name/credential bằng terminal.

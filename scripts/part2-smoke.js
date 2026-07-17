@@ -1,5 +1,8 @@
 'use strict';
 
+const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
+
 const assert = require('assert/strict');
 const bcrypt = require('bcrypt');
 const crypto = require('crypto');
@@ -10,6 +13,7 @@ const DEMO_ADMIN_EMAIL = 'admin@example.com';
 const DEMO_ADMIN_PASSWORD = '123456';
 process.env.NODE_ENV = 'development';
 process.env.AUTH_DEV_DELIVERY_LOG_SECRETS = 'true';
+process.env.RAG_MODE = 'mock';
 
 const required = [
   'DB_HOST', 'DB_NAME', 'DB_USER', 'DB_PASSWORD', 'JWT_SECRET',

@@ -8,7 +8,8 @@ This checklist is for the second NodeJS/Core member to verify a fresh clone inde
 - Use Node.js 20+, Docker and the tracked `python-service/` snapshot.
 - Copy `.env.example` to the single ignored root `.env`. Add `GOOGLE_API_KEY`, `LLAMA_CLOUD_API_KEY` and a 32+ character `RAG_INTERNAL_TOKEN` through the approved secret channel. Do not create a second integrated credential file; remote Compose injects the root token into Python as `INTERNAL_SECRET`.
 - Confirm `GEMINI_EMBEDDING_MODEL=models/gemini-embedding-001` and record the resolved Flash generation model name without recording keys.
-- Select a unique `REMOTE_COMPOSE_PROJECT` and unused host ports.
+- Set a unique `REMOTE_COMPOSE_PROJECT` and unused host ports directly in the ignored root `.env`; do not rely on temporary shell variables.
+- Set `REMOTE_E2E_CONFIRM_ISOLATED=true` only after confirming that project is disposable; the live runner refuses destructive cleanup otherwise.
 - Leave `REMOTE_E2E_CLEANUP=true` so the runner removes only that confirmed isolated project in `finally`.
 
 ## Static and mock baseline
@@ -17,15 +18,27 @@ This checklist is for the second NodeJS/Core member to verify a fresh clone inde
 npm ci
 npm run check
 npm run test:contract
-docker compose config --quiet
-docker compose --profile rag -f docker-compose.yml -f docker-compose.remote.yml config --quiet
+npm run docker:mock:config
+npm run docker:remote:config
+npm run docker:mock:up
+npm run test:part2
+npm run docker:mock:down
 ```
 
-Run `npm run test:part2` only against a disposable, bootstrapped MySQL 8.4 database. Preserve the console output and remove only resources created for that run.
+`test:part2` loads the root `.env` and forces `RAG_MODE=mock`; it does not call Python or a paid provider. Run it only against a disposable, bootstrapped MySQL 8.4 database. Preserve the console output and remove only resources created for that run; `docker:mock:down` keeps volumes, while `docker:mock:reset` is destructive.
 
 ## Live topology
 
-Follow [Remote RAG E2E setup](../setup/remote-rag-e2e.md), then record results for:
+Follow [Full Docker RAG setup](../setup/remote-rag-e2e.md). Start and verify using:
+
+```powershell
+npm run docker:remote:up
+npm run docker:remote:ps
+npm run preflight:remote
+npm run test:remote
+```
+
+Then record results for:
 
 - preflight health, Bearer in both directions and shared-volume probe;
 - TXT ingest accepted, callback succeeded, document `READY`, complete chunk manifest persisted;

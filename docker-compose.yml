@@ -1,11 +1,13 @@
+name: ${COMPOSE_PROJECT_NAME:-edurag_vtc}
+
 services:
   db:
     image: mysql:8.4
     restart: unless-stopped
     environment:
       # DEMO ONLY. Use dedicated credentials and secret management in production.
-      MYSQL_ROOT_PASSWORD: "123456"
-      MYSQL_DATABASE: edurag
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-123456}
+      MYSQL_DATABASE: ${DB_NAME:-edurag}
       TZ: UTC
     ports:
       - "127.0.0.1:${MYSQL_HOST_PORT:-3306}:3306"
@@ -31,14 +33,14 @@ services:
       PORT: 5000
       DB_HOST: db
       DB_PORT: 3306
-      DB_NAME: edurag
-      DB_USER: root
-      DB_PASSWORD: "123456"
+      DB_NAME: ${DB_NAME:-edurag}
+      DB_USER: ${DB_USER:-root}
+      DB_PASSWORD: ${DB_PASSWORD:-123456}
       JWT_SECRET: ${JWT_SECRET:-demo-only-jwt-secret-change-before-production-2026}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
       BCRYPT_ROUNDS: ${BCRYPT_ROUNDS:-12}
       TOKEN_HMAC_PEPPER: ${TOKEN_HMAC_PEPPER:-demo-only-token-hmac-pepper-change-production}
-      AUTH_DEV_DELIVERY_LOG_SECRETS: "true"
+      AUTH_DEV_DELIVERY_LOG_SECRETS: ${AUTH_DEV_DELIVERY_LOG_SECRETS:-true}
       UPLOAD_DIR: /usr/src/app/uploads
       FILE_MAX_SIZE_BYTES: ${FILE_MAX_SIZE_BYTES:-20971520}
       RAG_MODE: ${RAG_MODE:-mock}

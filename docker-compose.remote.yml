@@ -1,3 +1,5 @@
+name: ${REMOTE_COMPOSE_PROJECT:-edurag_remote_e2e}
+
 services:
   db:
     environment:

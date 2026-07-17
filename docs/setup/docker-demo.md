@@ -13,16 +13,18 @@ Không triển khai cấu hình này lên production. Production cần user MySQ
 ## Fresh bootstrap
 
 ```powershell
-docker compose down -v
-docker compose up --build
+if (!(Test-Path .env)) { Copy-Item .env.example .env }
+npm ci
+npm run docker:mock:config
+npm run docker:mock:up
 ```
 
-MySQL init tự chạy `01_schema.sql`, rồi `02_demo_seed.sql`. Không cần `.env` hoặc lệnh seed thủ công. App chờ MySQL healthy, chạy RAG `mock` mặc định và ghi upload vào named volume bằng non-root user.
+Compose đọc root `.env`; default trong `.env.example` chỉ dành cho local demo. MySQL init tự chạy `01_schema.sql`, rồi `02_demo_seed.sql`. Không cần lệnh seed thủ công. App chờ MySQL healthy, chạy RAG `mock` mặc định và ghi upload vào named volume bằng non-root user.
 
 ```powershell
-docker compose ps
+npm run docker:mock:ps
 Invoke-RestMethod http://localhost:5001/health
-docker compose logs app
+npm run docker:mock:logs:app
 ```
 
 Admin login là hai bước:
@@ -34,19 +36,20 @@ OTP chỉ được log vì Compose đặt `NODE_ENV=development` và bật devel
 
 ## Port và Qdrant
 
-Override host port mà không đổi cổng container:
+Đổi host port trong root `.env`, không cần đặt biến terminal:
 
-```powershell
-$env:APP_HOST_PORT=55001
-docker compose up --build
+```dotenv
+APP_HOST_PORT=55001
 ```
 
-Qdrant nằm trong optional profile cho team Python, không được NodeJS truy cập trực tiếp:
+Sau đó chạy lại:
 
 ```powershell
-docker compose --profile rag up
+npm run docker:mock:up
 ```
+
+Muốn chạy Python/Qdrant và xử lý thật, không bật Qdrant riêng trên mock stack; dùng [full Docker RAG setup](remote-rag-e2e.md).
 
 ## Reset và cleanup
 
-`docker compose down -v` xóa database/upload development volumes của project. Không dùng lệnh này nếu volume chứa dữ liệu cần giữ. Schema hiện tại là initial bootstrap, chưa phải migration framework.
+`npm run docker:mock:reset` xóa database/upload development volumes của project `COMPOSE_PROJECT_NAME` trong `.env`. Không dùng lệnh này nếu volume chứa dữ liệu cần giữ. Schema hiện tại là initial bootstrap, chưa phải migration framework.

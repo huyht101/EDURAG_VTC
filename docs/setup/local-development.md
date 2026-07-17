@@ -7,7 +7,7 @@
 - MySQL 8.4, có thể chạy bằng Docker
 
 ```powershell
-Copy-Item .env.example .env
+if (!(Test-Path .env)) { Copy-Item .env.example .env }
 npm ci
 npm run check
 npm run test:contract
@@ -15,6 +15,15 @@ npm start
 ```
 
 `.env.example` chứa credential demo local. Thay secret khi làm ngoài demo và không commit `.env`. Integrated stack chỉ đọc root `.env`; `python-service/.env` chỉ dành cho Python standalone và không được root Compose đọc.
+
+Nếu chạy toàn bộ bằng Docker, ưu tiên các script chuẩn thay vì tự ghép Compose flags hoặc đặt biến terminal:
+
+```powershell
+npm run docker:mock:up
+# hoặc
+npm run docker:remote:up
+npm run preflight:remote
+```
 
 Nếu chỉ cần MySQL:
 
@@ -37,10 +46,10 @@ Demo seed chỉ insert Admin khi email chưa tồn tại; không overwrite passw
 npm run check
 npm run test:contract
 npm run test:part2
-docker compose config --quiet
+npm run docker:mock:config
 ```
 
-Smoke suite cần database đã bootstrap, Demo Admin và các env bắt buộc. Nó tạo dữ liệu test có suffix ngẫu nhiên và dùng HTTP thật trên một cổng tạm; chỉ chạy trên development database.
+Smoke suite tự đọc root `.env` và cố định `RAG_MODE=mock`; không cần export biến trong terminal và không gọi Python/provider. Suite cần MySQL đã bootstrap và Demo Admin, tạo dữ liệu test có suffix ngẫu nhiên, rồi dùng HTTP thật trên một cổng tạm. Chỉ chạy trên development database; cách ít lỗi nhất là chạy `npm run docker:mock:up` trước.
 
 ## RAG modes
 
@@ -67,6 +76,8 @@ Smoke suite cần database đã bootstrap, Demo Admin và các env bắt buộc.
 - Dùng một explicit shared volume: Node mount read-write tại `UPLOAD_DIR`; Python mount read-only tại `/shared/uploads`; Node đặt `RAG_SHARED_UPLOAD_DIR=/shared/uploads`.
 - Nếu dùng hai Compose project, network và volume phải được khai báo external ở cả hai. Không dùng `localhost` giữa containers.
 - Chỉ Python sở hữu Qdrant. Root override [`docker-compose.remote.yml`](../../docker-compose.remote.yml) triển khai topology cô lập này; xem [remote E2E setup](remote-rag-e2e.md).
+
+Topology B là luồng chuẩn của repository. `REMOTE_COMPOSE_PROJECT`, host ports và provider/model settings đều nằm trong root `.env`; các npm script `docker:remote:*` đã chứa Compose files/profile nên không cần `$env:` hay `-p` ở terminal.
 
 Contract tests không gọi Python thật. `npm run preflight:remote` chỉ chứng minh topology; `npm run test:remote` mới chạy lifecycle live. Xem [internal contract v0.1](../api/internal-rag-contract.md) và [independent test plan](../testing/week3-remote-test-plan.md).
 
