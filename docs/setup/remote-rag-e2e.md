@@ -8,6 +8,7 @@ Hướng dẫn canonical để chạy NodeJS, MySQL 8.4, Python RAG và Qdrant t
 - Docker Desktop đang chạy
 - Root `.env` tạo từ `.env.example`
 - Gemini và LlamaParse credentials hợp lệ
+- Optional GCS reader/writer credential tại `secrets/gcs.json` nếu cần original files
 
 ```powershell
 npm ci
@@ -29,9 +30,22 @@ GEMINI_LLM_MODEL=models/gemini-3.5-flash
 GEMINI_EMBEDDING_MODEL=models/gemini-embedding-001
 EMBEDDING_DIMENSION=768
 CORPUS_BOOTSTRAP=auto
+CORPUS_FILES_BOOTSTRAP=auto
 ```
 
 Root Compose inject `RAG_INTERNAL_TOKEN` sang Python dưới tên `INTERNAL_SECRET`. Provider keys chỉ được inject vào Python. Không commit `.env`.
+
+GCS chỉ phân phối original files của portable corpus; Node/Python runtime không nhận GCS credential. Cấu hình host-side trong root `.env`:
+
+```dotenv
+GCS_PROJECT_ID=your-google-cloud-project-id
+GCS_BUCKET=your-private-corpus-bucket
+GCS_OBJECT_PREFIX=portable-corpus/v1
+GCS_CREDENTIALS_FILE=./secrets/gcs.json
+CORPUS_FILES_BOOTSTRAP=auto
+```
+
+Xem [credential placement](../../secrets/README.md). Reader key chỉ inspect/verify/restore; chỉ manager writer key được chạy publish.
 
 ## 2. Start foreground
 
@@ -43,11 +57,12 @@ npm run docker:remote:dev
 `docker:remote:dev` thực hiện:
 
 1. validate root environment và Compose;
-2. start MySQL + Qdrant;
-3. auto-bootstrap corpus theo `CORPUS_BOOTSTRAP`;
-4. build/start Node + Python;
-5. chạy remote preflight;
-6. follow log `app` và `rag-service`.
+2. build Node/Python image rồi start MySQL + Qdrant;
+3. auto-bootstrap MySQL/Qdrant theo `CORPUS_BOOTSTRAP`;
+4. tạo upload volume và restore/skip originals theo `CORPUS_FILES_BOOTSTRAP`;
+5. start Node + Python;
+6. chạy remote preflight;
+7. follow log `app` và `rag-service`.
 
 Kết quả preflight mong đợi:
 
@@ -82,7 +97,7 @@ Không dán internal token vào Swagger public routes.
 
 ### Corpus đã restore
 
-Với fresh volumes và `CORPUS_BOOTSTRAP=auto`, canonical corpus được restore trước khi app start. Có thể tạo chat session và hỏi ngay mà không upload/parse/embed lại document. Citation/source hoạt động; original-file có thể unavailable vì bundle không chứa upload files.
+Với fresh volumes và `CORPUS_BOOTSTRAP=auto`, canonical MySQL/Qdrant được restore trước khi app start. Có thể tạo chat session và hỏi ngay mà không upload/parse/embed lại document. `CORPUS_FILES_BOOTSTRAP=auto` cố restore approved originals từ private GCS; thiếu key/object thì log skip đã redact và Chat/RAG/citation snapshot vẫn hoạt động.
 
 ### Upload document mới
 
@@ -108,6 +123,14 @@ Endpoint-level payload/status/error nằm trong Swagger. Role/workflow tổng qu
 
 Partial/non-empty stores không bị overwrite. Restore không gọi document ingest, LlamaParse hoặc document embedding. Query vẫn dùng query embedding và LLM.
 
+Original-file bootstrap là gate độc lập:
+
+| `CORPUS_FILES_BOOTSTRAP` | Hành vi |
+|---|---|
+| `off` | Không truy cập GCS. |
+| `auto` | Restore khi manifest/config/key/object hợp lệ; thiếu key hoặc read permission thì cảnh báo và tiếp tục không có originals. |
+| `required` | Fail foreground startup nếu manifest/key/object/checksum không đạt. Không xóa volumes. |
+
 Các command quản trị bundle:
 
 ```powershell
@@ -117,6 +140,16 @@ npm run corpus:restore
 ```
 
 `corpus:restore` chỉ dùng với bootstrap-empty target. Quy trình export và exact approval nằm tại [Corpus portability](../architecture/corpus-portability.md).
+
+Original-file commands chạy trên host:
+
+```powershell
+npm run corpus:files:inspect
+npm run corpus:files:verify
+npm run corpus:files:restore
+```
+
+Chỉ manager đã review exact checksum mới chạy `npm run corpus:files:publish`. Publish dùng immutable object key và create-only precondition; không overwrite/delete. Restore ghi atomically vào local upload volume, không mutate MySQL/Qdrant và không ingest/embed.
 
 ## 6. Lifecycle và logs
 
@@ -143,7 +176,7 @@ Mặc định chỉ app/Python logs được attach. Đặt `REMOTE_DEV_ALL_LOGS
 | Admin chưa có JWT | Hoàn tất OTP step. |
 | Job `FAILED` | Xem job detail và app/Python logs. |
 | Chat timeout | Kiểm tra `RAG_QUERY_TIMEOUT_MS`, Python health và provider. |
-| Original unavailable | Portable corpus không chứa original files; dùng citation/source snapshot. |
+| Original unavailable | Kiểm tra `CORPUS_FILES_BOOTSTRAP`, manifest và reader credential; không key vẫn dùng citation/source snapshot. |
 | `CORPUS_PARTIAL_STATE` | Không overwrite; kiểm tra/reset đúng isolated target rồi restore lại. |
 
 Kiểm thử tự động và cleanup project cô lập: [Independent test plan](../testing/week3-remote-test-plan.md).

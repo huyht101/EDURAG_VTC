@@ -8,6 +8,7 @@ const {
 } = require('./remote-test-utils');
 const { main: runPreflight } = require('./remote-preflight');
 const { bootstrapCorpus } = require('./corpus-manager');
+const { bootstrapOriginalFiles } = require('./corpus-files-manager');
 
 let logProcess = null;
 let shuttingDown = false;
@@ -43,9 +44,12 @@ async function main() {
   assertRemoteEnvironment();
   compose(['config', '--quiet']);
 
+  compose(['build', 'app', 'rag-service']);
   compose(['up', '-d', '--wait', 'db', 'qdrant']);
   await bootstrapCorpus();
-  compose(['up', '-d', '--build', '--wait', 'app', 'rag-service']);
+  compose(['create', 'app']);
+  await bootstrapOriginalFiles();
+  compose(['up', '-d', '--wait', 'app', 'rag-service']);
   await runPreflight();
 
   if (process.env.REMOTE_DEV_EXIT_AFTER_PREFLIGHT === 'true') {

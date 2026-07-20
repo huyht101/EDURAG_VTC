@@ -6,6 +6,6 @@ Send question normalize `clientRequestId`: omit/null/empty/whitespace thì serve
 
 RAG timeout/failure chuyển assistant `FAILED`; không tự retry question. Client retry cùng request ID trả kết quả hiện có. `no_answer` không tạo citation giả.
 
-Citation source phải map `vectorNodeId` tới chunk `READY + VISIBLE` tại thời điểm trả lời. Snapshot fragment/title/page/section/locator/scores vẫn đọc được sau khi document hide/delete. Original file chỉ stream khi session ownership và current source authorization cho phép; `storage_key` không public. Portable corpus giữ snapshot nhưng không có upload volume nên original-file có thể unavailable.
+Citation source phải map `vectorNodeId` tới chunk `READY + VISIBLE` tại thời điểm trả lời. Snapshot fragment/title/page/section/locator/scores vẫn đọc được sau khi document hide/delete. Original file chỉ stream khi session ownership và current source authorization cho phép; `storage_key` không public. Portable Git bundle không chứa binary; sau optional GCS restore, file nằm lại trong local upload volume. Không key/file thì snapshot vẫn đọc được và original-file có thể unavailable.
 
 Flows: [chat/RAG notes](../flows/notes/chat-rag-flows.md).

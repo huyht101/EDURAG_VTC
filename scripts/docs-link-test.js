@@ -20,6 +20,9 @@ function main() {
   const packageScripts = new Set(Object.keys(packageJson.scripts || {}));
   const files = [
     path.join(root, 'README.md'),
+    ...(fs.existsSync(path.join(root, 'secrets', 'README.md'))
+      ? [path.join(root, 'secrets', 'README.md')]
+      : []),
     ...(fs.existsSync(bootstrapDirectory) ? markdownFiles(bootstrapDirectory) : []),
     ...markdownFiles(path.join(root, 'docs'))
   ];

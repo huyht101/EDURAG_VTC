@@ -6,7 +6,8 @@ Portable corpus là một bản export phối hợp của hai nguồn dữ liệ
 
 - MySQL giữ business state: document/job/chunk mapping, chat history, immutable citation snapshot và LLM usage.
 - Qdrant giữ vectors cùng retrieval payload do Python sở hữu.
-- Upload volume giữ PDF/DOCX/TXT gốc nhưng **không nằm trong bundle**.
+- Local upload volume giữ PDF/DOCX/TXT gốc cho runtime. Binary này **không nằm trong Git bundle**.
+- Private GCS chỉ phân phối/backup exact-approved originals; nó không phải runtime storage provider.
 
 Chỉ Qdrant snapshot là không đủ vì Node cần `documents`, `document_chunks.vector_node_id`, authorization, chat/citation/usage trong MySQL. Chỉ MySQL dump cũng không đủ vì retrieval cần vectors và payload tương ứng trong Qdrant.
 
@@ -21,9 +22,10 @@ checksums.sha256
 inventory.json
 mysql/edurag.sql
 qdrant/<collection>.snapshot
+original-files.json        # chỉ có sau khi publish GCS đã được verify
 ```
 
-`manifest.json` tách `bundleFormatVersion` (package/tooling format) và `databaseSchemaVersion` (MySQL business schema). Nó còn khóa MySQL/Qdrant version, collection, embedding model/dimension, counts, filenames và SHA-256. `inventory.json` là mapping kiểm tra chéo, không chứa vector float. Bundle chỉ được đánh dấu valid khi:
+`manifest.json` tách `bundleFormatVersion` (package/tooling format) và `databaseSchemaVersion` (MySQL business schema). Nó còn khóa MySQL/Qdrant version, collection, embedding model/dimension, counts, filenames và SHA-256. `inventory.json` là mapping kiểm tra chéo, không chứa vector float. Optional `original-files.json` chỉ chứa GCS/local mapping, size và exact SHA-256; không chứa credential, signed URL hoặc binary. Bundle chỉ được đánh dấu valid khi:
 
 - không có processing job `QUEUED`/`RUNNING`;
 - source qua policy demo/sanitization và secret/PII/path scan;
@@ -31,7 +33,7 @@ qdrant/<collection>.snapshot
 - `doc_id`, text hash, visibility, UUID, collection và vector dimension khớp;
 - Qdrant không có point thừa ngoài active MySQL chunks.
 
-Canonical bundle hiện tại đã được data owner duyệt riêng cho document `1` với exact checksum `5309194ee4c531b914258094fec5ba80c730dd423a56841dd4baf069eefd47b0`. Approval lưu tại `bootstrap/corpus-approved-documents.json` và không phải wildcard: content/checksum thay đổi hoặc document mới sẽ bắt buộc review lại. Bundle có 1 document, 1 job, 2 chunks, 2 Qdrant points; on-disk 445,838 bytes (checksummed file set 445,421 bytes), snapshot 411,136 bytes, không cần Git LFS.
+Canonical bundle hiện tại đã được data owner duyệt riêng cho document `1` với exact checksum `5309194ee4c531b914258094fec5ba80c730dd423a56841dd4baf069eefd47b0`. Approval lưu tại `bootstrap/corpus-approved-documents.json` và không phải wildcard: content/checksum thay đổi hoặc document mới sẽ bắt buộc review lại. Bundle có 1 document, 1 job, 2 chunks, 2 Qdrant points; on-disk 447,056 bytes (checksummed payload 444,267 bytes), snapshot 411,136 bytes và một original-file mapping, không cần Git LFS.
 
 MySQL dump là full schema 1.0.0 + sanitized data, nhưng không export dòng `auth_tokens`. Restore chỉ được phép trên bootstrap-empty stores; dump trở thành source của schema/data cho corpus đó. Qdrant dùng collection snapshot API chính thức, không copy live storage directory. Qdrant mô tả collection snapshots là bản chứa collection configuration và points; MySQL cũng khuyến nghị `mysqldump` cho logical backup/transfer ([Qdrant snapshots](https://qdrant.tech/documentation/operations/snapshots/), [MySQL 8.4 mysqldump](https://dev.mysql.com/doc/refman/8.4/en/mysqldump.html)).
 
@@ -48,6 +50,34 @@ npm run corpus:restore
 
 `corpus:restore` kiểm checksum/version, yêu cầu MySQL và Qdrant đều bootstrap-empty, restore cả hai store rồi reconcile lại counts/mapping. Nó không gọi ingest, LlamaParse hoặc document embedding.
 
+## Original files qua private GCS
+
+Đây là one-way distribution, không phải sync:
+
+```text
+manager approved local file -> private immutable GCS object
+member reader key -> checksum verify -> Docker local upload volume
+```
+
+- Object key: `{prefix}/documents/{documentId}/{sha256}/{safeFilename}`.
+- Publish dùng create-only `ifGenerationMatch=0`; object cũ không bị overwrite hoặc delete.
+- Reader/writer key chỉ được host-side `corpus:files:*` tooling đọc từ `secrets/gcs.json`.
+- Credential không vào image, Compose environment, Node/Python container, MySQL hoặc manifest.
+- `corpus:files:restore` download vào temp ngoài repository, verify SHA-256/size rồi atomically move vào đúng `documents.storage_key` trong upload volume.
+- Existing local file đúng checksum được skip; khác checksum thì fail closed.
+- Không có credential vẫn restore MySQL/Qdrant và dùng Chat/RAG/citation snapshot bình thường.
+
+Google Cloud khuyến nghị generation-match precondition để tránh race/overwrite và client-side checksum validation cho download ([request preconditions](https://cloud.google.com/storage/docs/request-preconditions), [data validation](https://cloud.google.com/storage/docs/data-validation)). Bucket phải giữ private; tooling không tạo signed URL hoặc ACL public.
+
+```powershell
+npm run corpus:files:inspect
+npm run corpus:files:publish   # manager writer only
+npm run corpus:files:restore   # reader hoặc writer
+npm run corpus:files:verify
+```
+
+`corpus:export` preserve mapping hợp lệ. Nếu document ID/checksum/storage key thay đổi, export fail thay vì giữ cloud mapping stale. Mapping metadata được main corpus checksum quản lý; original binary không được thêm vào `checksums.sha256`.
+
 Restore không phải distributed transaction. Nếu một store restore xong rồi store còn lại lỗi, tooling để trạng thái partial ở chế độ fail-closed và lần chạy sau sẽ từ chối overwrite; chỉ reset **isolated target volumes** sau khi điều tra rồi restore lại. Không dùng quy trình này trên source volumes cần giữ.
 
 `CORPUS_BOOTSTRAP` được dùng bởi `npm run docker:remote:dev`:
@@ -62,7 +92,7 @@ Các gate đã được chạy trên Docker project cô lập: empty stores đư
 
 ## Sau restore
 
-Chat/retrieval và citation snapshot có thể hoạt động mà không parse/embed lại document. Tuy vậy mỗi query vẫn cần query embedding và, khi trả lời, LLM generation. Endpoint original-file có thể báo unavailable; reprocess cần người dùng upload document mới. Không tạo file giả và không sửa schema để che việc file gốc vắng mặt.
+Chat/retrieval và citation snapshot có thể hoạt động mà không parse/embed lại document. Tuy vậy mỗi query vẫn cần query embedding và, khi trả lời, LLM generation. Sau GCS restore, runtime vẫn đọc file LOCAL và original endpoints có thể hoạt động; nếu không restore được thì endpoint báo unavailable. Reprocess vẫn cần upload theo business flow hiện tại. Không tạo file giả và không sửa schema.
 
 Đổi embedding model, dimension hoặc pipeline semantics không tương thích có thể buộc re-embed. Contract hiện khóa `gemini-embedding-001`, dimension `768`, collection được cấu hình bằng `QDRANT_COLLECTION_NAME`.
 

@@ -225,4 +225,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { main };
+module.exports = { adminToken, databaseCounts, httpRequest, main };

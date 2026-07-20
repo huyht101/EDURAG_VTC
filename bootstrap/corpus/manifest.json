@@ -15,13 +15,15 @@
   "files": {
     "mysqlDump": "mysql/edurag.sql",
     "qdrantSnapshot": "qdrant/education_docs.snapshot",
-    "inventory": "inventory.json"
+    "inventory": "inventory.json",
+    "originalFiles": "original-files.json"
   },
   "checksums": {
     "mysql/edurag.sql": "160469b21394c70ea565b39d950f4763e7edfee5ccfd7e93bb8714f636dd9369",
     "qdrant/education_docs.snapshot": "db0dead032ff877f277b3ea8bdc17a0a4de6bf9e0772af877c12046406c20be3",
     "inventory.json": "29c0ac0bcec162da07b0f5285928499e853cce01a92312a1cba4f47d871fa464",
-    "README.md": "a184b0d79a72589aeeba241faf35688259dad8b2d339773b253222915455ba68"
+    "README.md": "043c5b3eae64738d9bf4e67dbf8c8607b9332d6d134d76762f6692ffd2353a0c",
+    "original-files.json": "ba20513b3b8c41fce927f912f5524cecb02f9978f4abd894a6dff454703e22e6"
   },
   "sanitization": {
     "policy": "demo-admin-and-tracked-fixtures-or-explicit-reviewed-checksums",
@@ -40,12 +42,12 @@
     "authTokenRowsExcluded": 1,
     "secretAndPathScan": "passed"
   },
-  "bundlePayloadBytes": 443306,
+  "bundlePayloadBytes": 444267,
   "gitSuitability": "SUITABLE_UNDER_50_MIB_PER_FILE",
   "compatibilityNotes": [
     "Restore into MySQL 8.4 and the documented Qdrant server version.",
-    "Original uploads are excluded; original-file APIs may report unavailable.",
     "Document embedding is preserved, but each query still uses query embedding and may use the generation LLM.",
-    "Changing embedding model/dimension or incompatible pipeline semantics can require re-embedding."
+    "Changing embedding model/dimension or incompatible pipeline semantics can require re-embedding.",
+    "Original uploads are excluded from Git; exact-approved files may be restored separately from private GCS."
   ]
 }

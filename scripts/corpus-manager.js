@@ -13,6 +13,15 @@ const {
   composePort,
   redacted
 } = require('./remote-test-utils');
+const {
+  ORIGINAL_FILES_RELATIVE,
+  loadBundleDocuments,
+  normalizeObjectPrefix,
+  preserveOriginalFilesManifest,
+  readOptionalOriginalFilesManifest,
+  validateBucket,
+  validateOriginalFilesManifest
+} = require('./lib/corpus-original-files');
 
 const BUNDLE_FORMAT_VERSION = '1.0.0';
 const DATABASE_SCHEMA_VERSION = '1.0.0';
@@ -533,6 +542,7 @@ async function exportCorpus() {
   const initiallyRunning = runningServices();
   let previouslyRunning = [];
   const temporary = path.join(root, 'bootstrap', `.corpus-build-${crypto.randomUUID()}`);
+  let preservedOriginalFiles = null;
   try {
     await ensureDataServices();
     previouslyRunning = freezeWriters();
@@ -566,6 +576,20 @@ async function exportCorpus() {
     ]);
     await fsp.writeFile(path.join(temporary, MYSQL_DUMP_RELATIVE), dump);
 
+    {
+      const documents = await loadBundleDocuments(temporary, { files: { mysqlDump: MYSQL_DUMP_RELATIVE } });
+      const policy = await approvedDocumentPolicy();
+      preservedOriginalFiles = await preserveOriginalFilesManifest(BUNDLE_DIRECTORY, temporary, {
+        bundleFormatVersion: BUNDLE_FORMAT_VERSION,
+        documents,
+        approvals: policy.approvals,
+        expectedBucket: process.env.GCS_BUCKET ? validateBucket(process.env.GCS_BUCKET) : undefined,
+        expectedObjectPrefix: process.env.GCS_OBJECT_PREFIX
+          ? normalizeObjectPrefix(process.env.GCS_OBJECT_PREFIX)
+          : undefined
+      });
+    }
+
     const snapshot = await createQdrantSnapshot(temporary);
     const inventory = {
       generatedAtUtc: new Date().toISOString(),
@@ -579,7 +603,13 @@ async function exportCorpus() {
     };
     await fsp.writeFile(path.join(temporary, INVENTORY_RELATIVE), `${JSON.stringify(inventory, null, 2)}\n`, 'utf8');
     await fsp.writeFile(path.join(temporary, 'README.md'), bundleReadme(), 'utf8');
-    const payloadRelatives = [MYSQL_DUMP_RELATIVE, snapshot.relative, INVENTORY_RELATIVE, 'README.md'];
+    const payloadRelatives = [
+      MYSQL_DUMP_RELATIVE,
+      snapshot.relative,
+      INVENTORY_RELATIVE,
+      'README.md',
+      ...(preservedOriginalFiles ? [ORIGINAL_FILES_RELATIVE] : [])
+    ];
     const payloadSizes = Object.fromEntries(await Promise.all(payloadRelatives.map(async (relative) => [
       relative,
       (await fsp.stat(path.join(temporary, relative))).size
@@ -611,7 +641,8 @@ async function exportCorpus() {
       files: {
         mysqlDump: MYSQL_DUMP_RELATIVE,
         qdrantSnapshot: snapshot.relative,
-        inventory: INVENTORY_RELATIVE
+        inventory: INVENTORY_RELATIVE,
+        ...(preservedOriginalFiles ? { originalFiles: ORIGINAL_FILES_RELATIVE } : {})
       },
       checksums: {},
       sanitization,
@@ -619,7 +650,9 @@ async function exportCorpus() {
       gitSuitability,
       compatibilityNotes: [
         'Restore into MySQL 8.4 and the documented Qdrant server version.',
-        'Original uploads are excluded; original-file APIs may report unavailable.',
+        preservedOriginalFiles
+          ? 'Original uploads are excluded from Git; exact-approved files may be restored separately from private GCS.'
+          : 'Original uploads are excluded; original-file APIs may report unavailable.',
         'Document embedding is preserved, but each query still uses query embedding and may use the generation LLM.',
         'Changing embedding model/dimension or incompatible pipeline semantics can require re-embedding.'
       ]
@@ -699,7 +732,12 @@ async function verifyBundle(directory = BUNDLE_DIRECTORY) {
     if (!match) throw corpusError('CORPUS_CHECKSUM_INVALID', 'checksums.sha256 contains an invalid line.');
     return [match[2], match[1]];
   }));
-  for (const relative of [manifest.files?.mysqlDump, manifest.files?.qdrantSnapshot, manifest.files?.inventory]) {
+  for (const relative of [
+    manifest.files?.mysqlDump,
+    manifest.files?.qdrantSnapshot,
+    manifest.files?.inventory,
+    ...(manifest.files?.originalFiles ? [manifest.files.originalFiles] : [])
+  ]) {
     if (typeof relative !== 'string' || !SHA256.test(manifest.checksums?.[relative] || '')) {
       throw corpusError('CORPUS_MANIFEST_INVALID', 'Manifest is missing a required bundle file/checksum.');
     }
@@ -746,6 +784,27 @@ async function verifyBundle(directory = BUNDLE_DIRECTORY) {
       throw corpusError('CORPUS_INVENTORY_INVALID', 'Inventory contains invalid or duplicate chunk mappings.');
     }
     ids.add(chunk.vectorNodeId);
+  }
+  const originalFiles = await readOptionalOriginalFilesManifest(directory);
+  if (Boolean(manifest.files?.originalFiles) !== Boolean(originalFiles)
+    || (manifest.files?.originalFiles && manifest.files.originalFiles !== ORIGINAL_FILES_RELATIVE)) {
+    throw corpusError(
+      'CORPUS_FILES_MANIFEST_INVALID',
+      'original-files.json must be referenced and checksummed by the corpus manifest.'
+    );
+  }
+  if (originalFiles) {
+    const documents = await loadBundleDocuments(directory, manifest);
+    const policy = await approvedDocumentPolicy();
+    validateOriginalFilesManifest(originalFiles, {
+      bundleFormatVersion: manifest.bundleFormatVersion,
+      documents,
+      approvals: policy.approvals,
+      expectedBucket: process.env.GCS_BUCKET ? validateBucket(process.env.GCS_BUCKET) : undefined,
+      expectedObjectPrefix: process.env.GCS_OBJECT_PREFIX
+        ? normalizeObjectPrefix(process.env.GCS_OBJECT_PREFIX)
+        : undefined
+    });
   }
   console.log(JSON.stringify({
     status: 'CORPUS_VERIFY_OK',

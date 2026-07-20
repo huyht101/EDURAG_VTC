@@ -9,7 +9,7 @@ npm ci
 Copy-Item .env.example .env
 ```
 
-Điền provider credentials và secrets trong root `.env` qua kênh an toàn. Chọn `REMOTE_COMPOSE_PROJECT` riêng. Không tạo `PythonSevice.env` và không commit `.env`.
+Điền provider credentials và secrets trong root `.env` qua kênh an toàn. Chọn `REMOTE_COMPOSE_PROJECT` riêng. Nếu test original restore, đặt reader key tại `secrets/gcs.json`; writer key chỉ dành cho manager publish. Không tạo `PythonSevice.env` và không commit `.env`/credential.
 
 ## 2. Automated baseline
 
@@ -18,6 +18,7 @@ npm run check
 npm run test:openapi
 npm run test:contract
 npm run test:corpus
+npm run test:corpus:files
 npm run test:docs
 npm run docker:mock:config
 npm run docker:remote:config
@@ -49,6 +50,7 @@ Trên fresh volumes, xác nhận:
 - `REMOTE_PREFLIGHT_OK`;
 - app/Python logs được attach;
 - không có document ingest/LlamaParse trong bootstrap log.
+- `CORPUS_FILES_RESTORE_OK` nếu reader key/object hợp lệ; hoặc `CORPUS_FILES_SKIPPED` nếu mode `auto` không có key.
 
 Nếu volumes đã có data, expected là `CORPUS_BOOTSTRAP_SKIPPED` với `DATA_EXISTS`.
 
@@ -63,12 +65,35 @@ Mở `http://localhost:5001/api-docs`.
 5. Gửi question chỉ có `content`, không gửi `clientRequestId`.
 6. Xác nhận response trả UUID được server sinh.
 7. Xác nhận assistant `COMPLETED`, citation tồn tại và `/api/citations/{id}/source` có snapshot.
-8. Xác nhận original-file endpoint báo unavailable với restored corpus.
+8. Nếu original đã restore, xác nhận metadata `originalAvailable=true` và document/citation file endpoint stream được PDF. Nếu không key, xác nhận snapshot vẫn đọc được và original endpoint báo unavailable.
 9. Nếu kiểm tra retry, gửi lại cùng UUID trong cùng session và xác nhận không duplicate; dùng UUID đó ở session khác phải trả `409`.
 
 ADMIN chỉ đọc chat của chính mình. `no_answer=true` là success hợp lệ và không được có citation giả.
 
-## 5. Optional paid live automation
+## 5. Original-file acceptance không dùng paid provider
+
+### Không key
+
+- Trỏ `GCS_CREDENTIALS_FILE` tới explicit nonexistent test path; không rename/xóa key thật.
+- `CORPUS_FILES_BOOTSTRAP=auto`: expected skip, stack tiếp tục.
+- `CORPUS_FILES_BOOTSTRAP=required`: expected fail trước app startup, volumes được giữ.
+
+### Reader
+
+```powershell
+npm run corpus:files:inspect
+npm run corpus:files:verify
+npm run corpus:files:restore
+npm run corpus:files:restore
+```
+
+Lần đầu restore, lần hai idempotent skip. Kiểm file checksum/API nhưng không ingest/embed.
+
+### Writer manager
+
+Chỉ manager chạy `npm run corpus:files:publish` sau exact-checksum review. Chạy lần hai phải skip object đã verify; không overwrite/delete. Evidence chỉ ghi count/status, không ghi credential hoặc object content.
+
+## 6. Optional paid live automation
 
 Chỉ chạy khi project đã được xác nhận isolated và team cho phép provider call:
 
@@ -80,7 +105,7 @@ Expected: citation map restored chunk, usage được persist, còn ingest-job/c
 
 Live wording và `no_answer` không deterministic; contract/mock tests chịu trách nhiệm cho các nhánh này.
 
-## 6. Lifecycle và restart
+## 7. Lifecycle và restart
 
 Nhấn `Ctrl+C`:
 
@@ -90,14 +115,14 @@ Nhấn `Ctrl+C`:
 
 Chạy lại `npm run docker:remote:dev`; expected `DATA_EXISTS`, không restore lần hai và không duplicate counts. Abrupt kill/Docker crash không bảo đảm signal cleanup; dùng `npm run docker:remote:stop` nếu cần.
 
-## 7. Cleanup
+## 8. Cleanup
 
 - Không xóa project/volume không do test tạo.
 - `docker:remote:stop` hoặc `down` giữ volumes.
 - `reset` chỉ dùng với project disposable đã xác nhận vì xóa MySQL/Qdrant/upload data.
 - Xác nhận `git status --short` không có `.env`, upload, log, Qdrant data hoặc temp artifact.
 
-## 8. Evidence và bug report
+## 9. Evidence và bug report
 
 Ghi:
 

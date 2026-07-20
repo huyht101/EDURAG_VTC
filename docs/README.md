@@ -8,7 +8,7 @@ Tài liệu hiện hành của NodeJS/Core. Khi tài liệu lệch runtime, ưu 
 |---|---|
 | Chạy nhanh project | [Root README](../README.md) |
 | Chạy mock hoặc Node local | [Local/mock development](setup/local-development.md) |
-| Chạy Docker Node + Python + Qdrant, Swagger và lifecycle | [Remote Docker RAG](setup/remote-rag-e2e.md) |
+| Chạy Docker, Swagger, lifecycle và optional GCS originals | [Remote Docker RAG](setup/remote-rag-e2e.md) |
 | Hiểu ownership và data flow | [System overview](architecture/system-overview.md) |
 | Tra public role/workflow/conventions | [Public API](api/public-api.md); endpoint detail nằm trong Swagger |
 | Tích hợp NodeJS-Python | [Internal RAG contract](api/internal-rag-contract.md) |
@@ -32,4 +32,5 @@ Tài liệu hiện hành của NodeJS/Core. Khi tài liệu lệch runtime, ưu 
 - Database constraints/status/indexes: [`src/database/schema.sql`](../src/database/schema.sql).
 - NodeJS-Python JSON boundary: [contract v0.1](api/internal-rag-contract.md).
 - Corpus files/count/checksum: [`bootstrap/corpus/manifest.json`](../bootstrap/corpus/manifest.json).
+- Local credential placement: [`secrets/README.md`](../secrets/README.md).
 - Python production source: upstream repository của team Python; `python-service/` chỉ là tracked snapshot.

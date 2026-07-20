@@ -38,6 +38,9 @@ __pycache__/
 /python-service/model_cache/
 /python-service/models_cache/
 /python-service/downloads/
+/secrets/*.json
+/secrets/*.pem
+/secrets/*.key
 
 # Editors and OS metadata
 .vscode/

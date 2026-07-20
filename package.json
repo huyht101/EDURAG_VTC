@@ -37,6 +37,12 @@
     "corpus:export": "node scripts/corpus-manager.js export",
     "corpus:verify": "node scripts/corpus-manager.js verify",
     "corpus:restore": "node scripts/corpus-manager.js restore",
+    "corpus:files:inspect": "node scripts/corpus-files-manager.js inspect",
+    "corpus:files:publish": "node scripts/corpus-files-manager.js publish",
+    "corpus:files:restore": "node scripts/corpus-files-manager.js restore",
+    "corpus:files:verify": "node scripts/corpus-files-manager.js verify",
+    "test:corpus:files": "node scripts/corpus-files-test.js",
+    "test:corpus:files:live": "node scripts/corpus-files-live-smoke.js",
     "test:remote-dev-lifecycle": "node scripts/remote-dev-lifecycle-test.js",
     "preflight:remote": "node scripts/remote-preflight.js",
     "test:remote": "node scripts/remote-e2e-smoke.js"
@@ -53,5 +59,8 @@
   },
   "engines": {
     "node": ">=20.0.0"
+  },
+  "devDependencies": {
+    "@google-cloud/storage": "7.21.0"
   }
 }
