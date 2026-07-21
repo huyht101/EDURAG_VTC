@@ -2,52 +2,43 @@
 
 ## Current status
 
-**NODEJS/CORE CONSOLIDATION COMPLETE — PYTHON/RAG HANDOFF REMAINS**
+**CORPUS REMEDIATED — NODEJS SECURITY/RELIABILITY HARDENED — PYTHON HANDOFF REQUIRED**
 
-Baseline code trước consolidation: `8e7c1f620adf1f81387875977a0855b76423168a` cùng worktree changes hiện tại. Đây là development/integration readiness, không phải production readiness.
+Đây là development/integration readiness, chưa production-ready. Lượt hardening hiện tại không publish/restore cloud thật, không ingest/re-embed và không gọi paid provider.
 
-## Completed
+## Implemented in current worktree
 
-- Public Auth/Profile/Admin, Document, Chat, Citation và Dashboard APIs.
-- Remote NodeJS–Python contract, internal Bearer, complete-manifest callback và stale/duplicate guards.
-- Optional `clientRequestId`, immutable citation snapshots và multi-row usage.
-- Foreground Docker lifecycle và retained volumes.
-- Immutable cloud corpus release `v1-be5f3fc5669b25984d2333ca`: sanitized MySQL, Qdrant snapshot, exact-approved original và canonical manifest.
-- Reader-only credential được xác minh chỉ có `storage.objects.get/list`; không có create/update/delete.
-- Qdrant collection startup validate exact unnamed cosine vector `768`; concurrent create chỉ chấp nhận exact HTTP `409`, sau đó kiểm tra postcondition có bounded retry.
-- `qdrant-client==1.17.1` chạy với Qdrant server `1.18.2`, nằm trong một minor version và không còn compatibility warning.
-- Legacy pre-release object đã được xóa đúng generation bằng generation-match. Bucket tắt versioning và bật soft delete 7 ngày; object không còn live nhưng còn ở trạng thái soft-deleted trong retention window.
-- Mock Compose luôn dùng `RAG_MODE=mock`; remote override là opt-in.
-- Public citation chỉ cho chat-session owner, kể cả ADMIN; normal RAG answer bắt buộc có structured citation.
-- Auth rate limit, constant-time password-reset verification without mismatch attempts, CORS allowlist, generic unknown `500` và Node/MySQL readiness đã được harden.
-- Node CI chỉ chạy non-paid/static/contract/corpus checks.
+- Corpus identity v2 bao phủ canonical scoped MySQL data, Qdrant vectors/payload và originals; timestamp/temp path/export order/DDL auto-increment không tham gia identity.
+- `auto` chỉ restore khi MySQL/Qdrant/uploads đều `EMPTY`; `PRESENT`/partial/in-progress được giữ, `UNKNOWN/ERROR` không bị coi là empty. `required` vẫn strict; `off` không truy cập cloud.
+- Publish dry-run chỉ đọc running stores, không writer lifecycle/snapshot/staging/credential/GCS/pointer mutation. Publish thật create-only, manifest-last, verify-before-pointer và giữ writer pause đến khi kết thúc.
+- Restore verify trước apply, chỉ áp dụng trên empty stores, có recovery MySQL/Qdrant/originals và không có implicit force/replace.
+- Logout là logout-all bằng concurrency-safe `auth_version`; JWT khóa algorithm/issuer/audience/purpose/sub/jti/version/expiry. Reset token giả bị loại trước bcrypt; token hết hạn cleanup theo bounded batch.
+- Internal callback auth chạy trước large JSON parser. Helmet/CORS/rate limits, sanitized error boundary, bounded DB pool/query timeout và graceful shutdown đã có targeted regression.
+- DOCX yêu cầu bounded OOXML ZIP members; citation/session ownership và soft-delete behavior fail closed.
+- Normal RAG answer bắt buộc structured citation; Node lưu ordered multi-call usage. Stale assistant `PENDING` được conditional terminalize khi cùng idempotency key được retry, không tự gọi paid provider.
+- Runtime mock được giữ có chủ đích cho local/Part 2 regression; nó là deterministic stub nhỏ và không fallback từ remote. Remote Python vẫn là integration path chính.
 
 ## Evidence
 
 | Gate | Result |
 |---|---|
-| Syntax/OpenAPI/contract/corpus tests | PASS |
-| Node security consolidation tests | PASS; rate limit/CORS/reset/citation/error sanitization/bcrypt compatibility |
-| Part 2 mock regression | PASS |
-| Production dependency audit | PASS; 0 vulnerability with `--omit=dev` |
-| Canonical GCS inspect/verify | PASS; 3 artifacts, 4,432,575 bytes |
-| Independent Reader-only isolated restore | PASS; 1 document, 1 job, 2 chunks, 2 citations, 2 points, 1 original |
-| Document/citation original API | PASS; HTTP `200`, checksum verified |
-| Retained-volume restart/second restore | PASS; `mysql=0`, `qdrant=0`, original skipped idempotently |
-| Qdrant race unit tests | PASS |
-| Real two-worker empty-collection startup | PASS; expected `409` followed by compatible postcondition |
-| Restored collection startup | PASS; collection reused without mutation |
-| Legacy cleanup postcondition | PASS; canonical release still verifies, legacy live object absent |
-| Paid provider calls during hardening | 0 |
+| `test:corpus` | PASS — fake transport/staged fixtures; zero cloud mutation |
+| `test:contract` | PASS — Node boundary fixtures/mock transport, không phải remote runtime |
+| `test:node-consolidation` | PASS — Node runtime units/local HTTP |
+| `test:part2` | PASS — real Node/MySQL HTTP with deterministic RAG mock; includes concurrent idempotency |
+| Historical Reader-only GCS restore/API and Qdrant acceptance | PASS ở lượt trước; không chạy lại vì task này cấm cloud mutation/heavy acceptance |
+| Paid provider calls in current work | 0 |
 
-## Known limitations and follow-up
+Full syntax/OpenAPI/docs/audit/Compose verification phải được ghi theo kết quả cuối của worktree, không suy ra từ historical live evidence.
 
-- Fresh no-key `auto` can start without canonical corpus; existing compatible local volumes remain usable.
-- Cloud release is not bidirectional sync. New corpus data requires a new immutable manager publish.
-- Runtime still uses local MySQL/Qdrant/uploads; GCS is not a runtime provider.
-- Live retrieval/generation was intentionally not rerun in this hardening pass.
-- Theo quyết định owner, hai `.rar` mã hóa dưới `secrets/` tiếp tục được track và mật khẩu phân phối ngoài Git. Codex không mở nên không xác minh nội dung/thuật toán/mật khẩu; quyết định không áp dụng cho archive mới.
-- Python snapshot changes in `core/database.py`, `main.py`, `requirements.txt` and tests must be upstreamed to the Python repository before the next snapshot refresh.
-- Python ingest/callback/citation/usage/durability debt còn mở tại [Python/Data-RAG handoff](../architecture/python-rag-handoff.md); Node không đánh dấu các mục này là fixed.
+## Open handoff and limitations
 
-Next gate: run the [independent test plan](../testing/week3-remote-test-plan.md) on a fresh clone.
+- Python snapshot vẫn upsert retrieval-enabled random point IDs trước Node ACK; callback/partial batch failure có thể để orphan. Cần activation protocol + deterministic retry/cleanup; có thể cần payload/point-ID migration và re-ingest.
+- Python overlay nhỏ ở `services/ingestion.py`, `services/rag_engine.py` và test phải upstream trước snapshot refresh; overlay không thay thế upstream acceptance.
+- Python hiện chỉ trả một final `usage`; Node đã backward-compatibly hỗ trợ `usage_calls[]`, instrumentation router/answer còn mở.
+- FastAPI `BackgroundTasks` không phải durable queue. Stale processing `RUNNING` chưa được Node tự retry để tránh duplicate points/cost.
+- Corpus coordinated recovery không phải distributed transaction. `CORPUS_RESTORE_ROLLBACK_FAILED` cần operator intervention; tool không tự merge partial stores.
+- In-memory rate limit chỉ phù hợp single Node instance; multi-instance cần shared store. HSTS phải do trusted HTTPS proxy/deployment quyết định.
+- Hai archive `.rar` mã hóa dưới `secrets/` được track theo quyết định owner; password phân phối ngoài Git. Tooling/Docker/Corpus không đọc hoặc package chúng.
+
+Chi tiết: [Python/Data-RAG handoff](../architecture/python-rag-handoff.md), [internal RAG contract](../api/internal-rag-contract.md), [Corpus architecture](../architecture/corpus-portability.md) và [independent test plan](../testing/week3-remote-test-plan.md).

@@ -53,11 +53,12 @@ async function verifyAdminOtp(req, res, next) {
 
 /**
  * POST /api/auth/logout
- * JWT is stateless — server confirms logout; client must discard the token.
+ * Logout-all increments auth_version so all previously issued JWTs are revoked.
  */
 async function logout(req, res, next) {
   try {
-    return res.ok('Đăng xuất thành công. Vui lòng xóa token khỏi thiết bị của bạn.', {});
+    await authService.logoutAll(req.user.id, req.user.authVersion);
+    return res.ok('Đăng xuất tất cả thiết bị thành công.', {});
   } catch (err) {
     next(err);
   }

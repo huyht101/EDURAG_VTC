@@ -2,6 +2,7 @@
 require('dotenv').config();
 
 const express = require('express');
+const helmet = require('helmet');
 const swaggerUi = require('swagger-ui-express');
 const swaggerSpec = require('./configs/swagger');
 const ragConfig = require('./configs/rag');
@@ -11,6 +12,7 @@ const pool = require('./configs/db');
 const responseMiddleware = require('./middlewares/response-middleware');
 const { notFound, errorHandler } = require('./middlewares/error-middleware');
 const { createCorsMiddleware } = require('./middlewares/cors-middleware');
+const internalAuthMiddleware = require('./middlewares/internal-auth-middleware');
 
 const authRoutes = require('./routes/auth-routes');
 const userRoutes = require('./routes/user-routes');
@@ -25,14 +27,27 @@ const app = express();
 // Default remains false. Deployments behind a known reverse proxy may set an
 // exact hop count; arbitrary forwarded headers are never trusted by default.
 if (httpConfig.trustProxyHops > 0) app.set('trust proxy', httpConfig.trustProxyHops);
+app.use(helmet({
+  strictTransportSecurity: false,
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", 'data:'],
+      connectSrc: ["'self'"]
+    }
+  }
+}));
 app.use(createCorsMiddleware());
 
 // The internal complete-manifest callback can be larger than the public JSON API.
 // Keep this route-specific so unauthenticated public endpoints retain Express's 100 KB default.
 app.use(
   '/api/internal/rag',
-  express.json({ limit: ragConfig.callbackBodyLimit }),
   responseMiddleware,
+  internalAuthMiddleware,
+  express.json({ limit: ragConfig.callbackBodyLimit }),
   internalRagRoutes
 );
 

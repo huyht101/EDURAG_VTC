@@ -49,7 +49,7 @@ Expected:
 - `REMOTE_PREFLIGHT_OK`;
 - không có ingest, LlamaParse hoặc document embedding trong bootstrap.
 
-Nhấn `Ctrl+C`, chạy lại cùng project và xác nhận `CORPUS_ALREADY_RESTORED`, counts không duplicate, volumes được giữ.
+Nhấn `Ctrl+C`, chạy lại cùng project và xác nhận `CORPUS_RESTORE_SKIPPED_LOCAL_PRESENT`, không restore lần hai, counts không duplicate và volumes được giữ. Nếu upload thêm document đến `READY`, lần chạy `auto` tiếp theo vẫn giữ local divergence.
 
 ## 4. Swagger acceptance
 
@@ -66,16 +66,25 @@ Mở `http://localhost:5001/api-docs`.
 
 Không đổi/xóa key thật; trỏ `GCS_CREDENTIALS_FILE` tới explicit nonexistent test path trên một project disposable.
 
-- `auto`: startup degraded/empty, không xóa volumes và không giả vờ corpus đã restore.
+- `auto` + local empty: startup degraded/empty, không xóa volumes và không giả vờ corpus đã restore.
+- `auto` + local existing: không cần cloud comparison; giữ local, không restore đè.
 - `required`: orchestration fail, containers được stop best-effort và volumes được giữ.
 - Local original khác checksum: restore fail, không overwrite.
-- Partial/incompatible MySQL–Qdrant state: fail, không merge.
+- Partial rõ ràng như Qdrant points không có MySQL corpus hoặc completed chunks không có Qdrant là local `PRESENT`: `auto` cảnh báo/skip và tuyệt đối không merge/overwrite; `required`/explicit restore fail. Job đang xử lý không bị coi là cloud fingerprint corruption.
 
 `npm run corpus:verify` phải verify remote release; khi services chạy còn reconcile local counts/mapping/originals. `npm run corpus:restore` lần hai phải idempotent.
 
 ## 6. Writer acceptance (manager only)
 
-Manager trên exact-approved, quiescent source chạy `npm run corpus:publish` hai lần. Lần đầu upload data artifacts rồi manifest cuối; lần hai phải `uploaded=0`, không overwrite/delete. Reader-only tester không thực hiện bước này.
+Manager trên private/internal bucket và quiescent source:
+
+```powershell
+npm run corpus:publish -- --dry-run
+npm run corpus:publish -- --confirm-reviewed
+npm run corpus:verify
+```
+
+Trước dry-run, giữ MySQL/Qdrant chạy. Dry-run không được start/stop writer, tạo snapshot/staging, đọc credential, gọi GCS hay đổi pointer; plan phải liệt kê ID, title/filename, trạng thái, visibility, checksum, size và provisional identity. Operator review PII/personal data, secret, quyền chia sẻ và project scope trước confirmation. Publish lần hai cùng source phải `uploaded=0`, không overwrite/delete. Reader-only tester không thực hiện bước này.
 
 ## 7. Cleanup và evidence
 

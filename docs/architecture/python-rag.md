@@ -35,6 +35,8 @@ Khả năng trên đã được contract tests và isolated remote E2E kiểm ch
 - `embedding_config.output_dimensionality=768` cho `gemini-embedding-001`.
 - Idempotent Qdrant collection initialization with exact vector-schema validation and bounded concurrent-create postcondition retry.
 - Pin `qdrant-client==1.17.1` for the repository's Qdrant server `1.18.2`.
+- Fail closed trước Qdrant upsert khi embedding count khác chunk count.
+- Grounding guard: CHIT_CHAT và RAG output không có valid structured citation trả `no_answer=true`.
 - Safe standalone environment template.
 
 ## Limitations

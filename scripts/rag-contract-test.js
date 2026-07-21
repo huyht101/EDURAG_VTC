@@ -219,6 +219,18 @@ async function testChatContract() {
     errorCode: null
   });
 
+  const multiUsage = normalizeQueryResult({
+    ...answer,
+    usage: undefined,
+    usage_calls: [
+      { call_index: 1, operation_type: 'QUERY_REWRITE', provider: 'GOOGLE', model: 'router', prompt_tokens: 4, completion_tokens: 1 },
+      { call_index: 2, operation_type: 'ANSWER_GENERATION', provider: 'GOOGLE', model: 'answer', prompt_tokens: 10, completion_tokens: 3 }
+    ]
+  });
+  assert.deepEqual(multiUsage.usageCalls.map((call) => call.operationType), [
+    'QUERY_REWRITE', 'ANSWER_GENERATION'
+  ]);
+
   const noAnswerPayload = {
     ...fixture('chat/no-answer-response.json'),
     citations: [{ snippet: 'Must not become a synthetic citation.' }]
@@ -317,7 +329,7 @@ async function testUpstreamErrors() {
       question: 'test',
       history: []
     }),
-    (error) => error.message.includes('[REDACTED]')
+    (error) => error.message === 'Python RAG service is temporarily unavailable.'
       && !error.message.includes(internalToken)
       && !error.message.includes('Traceback')
   );
@@ -559,9 +571,19 @@ async function testMockRegression() {
     requestId: '33333333-3333-4333-8333-333333333333',
     question: 'mock regression'
   });
-  assert.equal(answer.answer, 'Mock answer: mock regression');
-  assert.equal(answer.noAnswer, false);
+  assert.equal(answer.answer, null);
+  assert.equal(answer.noAnswer, true);
   assert.equal(answer.usageCalls[0].provider, 'MOCK');
+  const previous = process.env.RAG_MOCK_SOURCE_VECTOR_NODE_ID;
+  process.env.RAG_MOCK_SOURCE_VECTOR_NODE_ID = '9589059b-c74b-40b8-896a-47aa77ed4601';
+  try {
+    const sourced = await client.query({ requestId: crypto.randomUUID(), question: 'sourced mock' });
+    assert.equal(sourced.noAnswer, false);
+    assert.equal(sourced.sources.length, 1);
+  } finally {
+    if (previous === undefined) delete process.env.RAG_MOCK_SOURCE_VECTOR_NODE_ID;
+    else process.env.RAG_MOCK_SOURCE_VECTOR_NODE_ID = previous;
+  }
 }
 
 async function main() {

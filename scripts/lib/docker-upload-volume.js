@@ -106,6 +106,28 @@ class DockerUploadVolume {
     });
   }
 
+  async inspectPresence() {
+    return this.withHelper(async (helper, volumeName) => {
+      const script = [
+        "const fs=require('fs'),path=require('path');",
+        "const root='/uploads';let files=0;",
+        'const walk=(directory)=>{for(const entry of fs.readdirSync(directory,{withFileTypes:true})){' +
+          "const target=path.join(directory,entry.name);if(entry.isSymbolicLink()){process.exit(4)}" +
+          'if(entry.isDirectory())walk(target);else if(entry.isFile())files+=1;}};',
+        'walk(root);console.log(JSON.stringify({empty:files===0,fileCount:files}));'
+      ].join('');
+      try {
+        const state = JSON.parse(this.docker(['exec', helper, 'node', '-e', script]));
+        return { ...state, volumeName };
+      } catch (_error) {
+        throw releaseError(
+          'CORPUS_UPLOAD_STATE_UNKNOWN',
+          'Cannot safely determine whether the upload volume is empty.'
+        );
+      }
+    });
+  }
+
   async copyOut(storageKey, destination) {
     await this.withHelper(async (helper) => {
       const target = helperPath(storageKey);
@@ -164,6 +186,28 @@ class DockerUploadVolume {
         throw releaseError('CORPUS_ORIGINAL_LOCAL_VERIFY_FAILED', 'Restored original failed local verification.');
       }
       return { restored: true, skipped: false, volumeName };
+    });
+  }
+
+  async removeExact(storageKey, expected) {
+    return this.withHelper(async (helper) => {
+      const target = helperPath(storageKey);
+      const script = [
+        "const fs=require('fs'),crypto=require('crypto');",
+        'const [p,expectedHash,expectedSize]=process.argv.slice(1);',
+        "if(!fs.existsSync(p)){process.exit(0)}",
+        'const s=fs.statSync(p);if(!s.isFile()||s.size!==Number(expectedSize)){process.exit(3)}',
+        "const h=crypto.createHash('sha256');const r=fs.createReadStream(p);",
+        "r.on('data',c=>h.update(c));r.on('end',()=>{if(h.digest('hex')!==expectedHash)process.exit(4);fs.unlinkSync(p)});"
+      ].join('');
+      try {
+        this.docker(['exec', helper, 'node', '-e', script, target, expected.sha256, String(expected.sizeBytes)]);
+      } catch (_error) {
+        throw releaseError(
+          'CORPUS_ORIGINAL_ROLLBACK_FAILED',
+          'A restored original changed before rollback; refusing unsafe deletion.'
+        );
+      }
     });
   }
 }

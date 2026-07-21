@@ -5,7 +5,7 @@ const appError = require('../utils/app-error');
  * Handle 404 Not Found endpoints
  */
 function notFound(req, res, next) {
-  next(appError(404, 'ENDPOINT_NOT_FOUND', `API endpoint không tồn tại: ${req.originalUrl}`));
+  next(appError(404, 'ENDPOINT_NOT_FOUND', 'API endpoint không tồn tại.'));
 }
 
 /**
@@ -22,9 +22,15 @@ function errorHandler(err, req, res, next) {
   const status = operational ? Number(safeError.status) || 500 : 500;
   const errorCode = operational ? safeError.code || 'APPLICATION_ERROR' : 'INTERNAL_SERVER_ERROR';
   
-  // Log lỗi chi tiết trên console server phục vụ debug
-  console.error(`[ERROR LOG] ${new Date().toISOString()} - status: ${status} - code: ${errorCode}`);
-  console.error(err.stack || err);
+  const rawCorrelationId = req?.headers?.['x-request-id'] || req?.body?.requestId
+    || req?.body?.request_id || req?.body?.jobId || req?.body?.job_id || 'none';
+  const correlationId = String(rawCorrelationId).replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 64) || 'none';
+  const method = req?.method || 'UNKNOWN';
+  const route = req?.route?.path || req?.baseUrl || 'unmatched';
+  const cause = String(err?.code || err?.name || 'Error').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 64);
+  // Raw errors can contain provider payloads, SQL, credentials or host paths.
+  // Operation-specific code should log only identifiers and redacted context.
+  console.error(`[ERROR] time=${new Date().toISOString()} status=${status} code=${errorCode} cause=${cause} method=${method} route=${route} correlation=${correlationId}`);
 
   const body = {
     success: false,

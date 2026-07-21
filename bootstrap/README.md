@@ -1,10 +1,7 @@
 # Cloud corpus bootstrap metadata
 
-Git chỉ giữ:
+Git chỉ giữ [`corpus-release.json`](corpus-release.json), là pointer nhỏ tới immutable release mặc định trên private GCS.
 
-- `corpus-release.json`: pointer nhỏ tới immutable release mặc định trên private GCS;
-- `corpus-approved-documents.json`: exact-checksum approvals cho tài liệu được phép publish.
+MySQL dump, Qdrant snapshot và original files không nằm trong Git. Không sửa pointer thủ công. Manager phải xem plan bằng `npm run corpus:publish -- --dry-run`, tự review dữ liệu rồi publish bằng `npm run corpus:publish -- --confirm-reviewed`.
 
-MySQL dump, Qdrant snapshot và original files không nằm trong Git. Không sửa pointer hoặc approval thủ công để bypass validation. Manager dùng `npm run corpus:publish`; thành viên dùng `npm run corpus:restore` hoặc `npm run docker:remote:dev`.
-
-Thiết kế, security gate và lifecycle: [Corpus portability](../docs/architecture/corpus-portability.md).
+Thiết kế, safety gate và lifecycle: [Corpus portability](../docs/architecture/corpus-portability.md).

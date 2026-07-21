@@ -32,7 +32,8 @@ async function findRequestPair(clientRequestId, executor) {
   const [rows] = await db(executor).execute(
     `SELECT u.id AS user_message_id, u.session_id, u.message_order AS user_message_order,
             u.content AS question, u.client_request_id, a.id AS assistant_message_id, a.content AS answer,
-            a.status AS assistant_status, a.no_answer, a.error_code
+            a.status AS assistant_status, a.no_answer, a.error_code,
+            a.created_at AS assistant_created_at
      FROM chat_messages u
      LEFT JOIN chat_messages a
        ON a.session_id = u.session_id
@@ -42,6 +43,17 @@ async function findRequestPair(clientRequestId, executor) {
     [clientRequestId]
   );
   return rows[0] || null;
+}
+
+async function failStalePending(id, timeoutMs, executor) {
+  const [result] = await db(executor).execute(
+    `UPDATE chat_messages
+     SET status = 'FAILED', error_code = 'RAG_PENDING_TIMEOUT', completed_at = CURRENT_TIMESTAMP(3)
+     WHERE id = ? AND sender_type = 'ASSISTANT' AND status = 'PENDING'
+       AND TIMESTAMPDIFF(MICROSECOND, created_at, CURRENT_TIMESTAMP(3)) >= ?`,
+    [id, timeoutMs * 1000]
+  );
+  return result.affectedRows === 1;
 }
 
 async function updateAssistantCompleted(id, { content, noAnswer }, executor) {
@@ -106,6 +118,7 @@ module.exports = {
   findRequestPair,
   updateAssistantCompleted,
   updateAssistantFailed,
+  failStalePending,
   listMessages,
   loadHistoryWindow
 };

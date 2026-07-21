@@ -122,6 +122,15 @@ async def ingest_document_background(request: IngestRequest) -> None:
         # ── Bước 4: Lưu vào Qdrant ───────────────────────────────
         await send_progress(callback_url, job_id, attempt_count, "indexing")
 
+        if len(nodes) != len(embeddings):
+            await send_failed(
+                callback_url, job_id, attempt_count,
+                "EMBEDDING_COUNT_MISMATCH",
+                "Embedding count does not match chunk count.",
+                stage="embedding",
+            )
+            return
+
         client = await get_qdrant_client()
         points = []
         chunk_manifest = []

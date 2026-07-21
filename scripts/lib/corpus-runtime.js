@@ -13,6 +13,7 @@ const {
   composePort,
   redacted
 } = require('../remote-test-utils');
+const { assertPublishableDocuments } = require('./corpus-release');
 
 const BUNDLE_FORMAT_VERSION = '1.0.0';
 const DATABASE_SCHEMA_VERSION = '1.0.0';
@@ -103,6 +104,38 @@ function mysqlDump(extraArgs) {
   }));
 }
 
+function createScopedMysqlExport() {
+  const common = [
+    '--default-character-set=utf8mb4', '--no-tablespaces', '--skip-comments',
+    '--skip-dump-date', '--set-gtid-purged=OFF', '--column-statistics=0'
+  ];
+  const schema = mysqlDump([...common, '--no-data', '--skip-triggers']);
+  const data = mysqlDump([
+    ...common,
+    '--no-create-info', '--single-transaction', '--quick', '--skip-lock-tables',
+    '--skip-add-locks', '--order-by-primary', `--ignore-table="${databaseName()}.auth_tokens"`
+  ]);
+  const dump = Buffer.concat([
+    Buffer.from('-- EDURAG portable corpus: schema 1.0.0 + sanitized data\nSET NAMES utf8mb4;\n', 'utf8'),
+    schema,
+    Buffer.from('\n', 'utf8'),
+    data
+  ]);
+  return { dump, contentSha256: sha256Buffer(data) };
+}
+
+function createScopedMysqlDump() {
+  return createScopedMysqlExport().dump;
+}
+
+function createMysqlRecoveryDump() {
+  return mysqlDump([
+    '--default-character-set=utf8mb4', '--no-tablespaces', '--skip-comments',
+    '--skip-dump-date', '--set-gtid-purged=OFF', '--column-statistics=0',
+    '--single-transaction', '--quick', '--skip-lock-tables', '--order-by-primary'
+  ]);
+}
+
 async function ensureDataServices() {
   compose(['config', '--quiet']);
   compose(['up', '-d', '--wait', 'db', 'qdrant']);
@@ -169,7 +202,29 @@ async function qdrantRuntimeInfo() {
   };
 }
 
-async function scrollQdrantPoints() {
+function canonicalJson(value) {
+  if (Array.isArray(value)) return value.map(canonicalJson);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalJson(value[key])]));
+  }
+  return value;
+}
+
+function qdrantContentSha256(points) {
+  const canonical = points.map((point) => {
+    if (!Array.isArray(point.vector) || point.vector.some((value) => !Number.isFinite(value))) {
+      throw corpusError('CORPUS_QDRANT_VECTOR_INVALID', 'Qdrant content identity requires finite dense vectors.');
+    }
+    return {
+      id: String(point.id),
+      payload: canonicalJson(point.payload || {}),
+      vector: point.vector
+    };
+  }).sort((left, right) => left.id.localeCompare(right.id));
+  return sha256Buffer(Buffer.from(JSON.stringify(canonical), 'utf8'));
+}
+
+async function scrollQdrantPoints(options = {}) {
   const name = encodeURIComponent(collectionName());
   const points = [];
   let offset = null;
@@ -180,7 +235,7 @@ async function scrollQdrantPoints() {
       body: JSON.stringify({
         limit: 256,
         with_payload: true,
-        with_vector: false,
+        with_vector: options.withVectors === true,
         ...(offset === null ? {} : { offset })
       })
     });
@@ -199,9 +254,12 @@ function databaseStats() {
       'nonDemoUsers', (SELECT COUNT(*) FROM users WHERE email <> 'admin@example.com'),
       'authTokens', (SELECT COUNT(*) FROM auth_tokens),
       'documents', (SELECT COUNT(*) FROM documents),
+      'readyDocuments', (SELECT COUNT(*) FROM documents WHERE processing_status = 'READY' AND visibility_status IN ('VISIBLE','HIDDEN')),
+      'inProgressDocuments', (SELECT COUNT(*) FROM documents WHERE processing_status IN ('UPLOADED','PROCESSING')),
       'jobs', (SELECT COUNT(*) FROM document_processing_jobs),
       'activeJobs', (SELECT COUNT(*) FROM document_processing_jobs WHERE status IN ('QUEUED','RUNNING')),
       'chunks', (SELECT COUNT(*) FROM document_chunks),
+      'activeChunks', (SELECT COUNT(*) FROM document_chunks dc JOIN documents d ON d.id = dc.document_id WHERE d.processing_status = 'READY' AND d.visibility_status IN ('VISIBLE','HIDDEN')),
       'sessions', (SELECT COUNT(*) FROM chat_sessions),
       'messages', (SELECT COUNT(*) FROM chat_messages),
       'citations', (SELECT COUNT(*) FROM citations),
@@ -233,11 +291,17 @@ function documentInventory() {
   return mysqlJsonRows(`
     SELECT JSON_OBJECT(
       'documentId', id,
+      'title', title,
       'sha256', checksum_sha256,
       'sizeBytes', file_size_bytes,
+      'storageType', storage_type,
       'localStorageKey', storage_key,
       'originalFilename', original_filename,
-      'mimeType', mime_type
+      'fileType', file_type,
+      'mimeType', mime_type,
+      'processingStatus', processing_status,
+      'visibilityStatus', visibility_status,
+      'deletedAt', deleted_at
     )
     FROM documents
     ORDER BY id;
@@ -257,36 +321,6 @@ async function sha256File(file) {
     stream.on('end', resolve);
   });
   return hash.digest('hex');
-}
-
-async function approvedDocumentPolicy() {
-  const directory = path.join(root, 'tests', 'fixtures', 'remote-e2e');
-  const names = await fsp.readdir(directory);
-  const fixtureHashes = new Set();
-  for (const name of names) {
-    const file = path.join(directory, name);
-    if ((await fsp.stat(file)).isFile()) fixtureHashes.add(await sha256File(file));
-  }
-  const approvalFile = path.join(root, 'bootstrap', 'corpus-approved-documents.json');
-  const document = JSON.parse(await fsp.readFile(approvalFile, 'utf8'));
-  if (!Array.isArray(document.approvals)) {
-    throw corpusError('CORPUS_APPROVAL_FILE_INVALID', 'bootstrap/corpus-approved-documents.json is invalid.');
-  }
-  const approvals = new Map();
-  for (const approval of document.approvals) {
-    const documentId = String(approval?.documentId || '');
-    const checksum = String(approval?.checksum || '').toLowerCase();
-    if (!/^\d+$/.test(documentId) || !SHA256.test(checksum)
-      || approval.purpose !== 'demo portable corpus'
-      || approval.originalFileIncluded !== false
-      || approval.reviewStatus !== 'APPROVED'
-      || !Number.isFinite(Date.parse(approval.reviewedAtUtc || ''))
-      || approvals.has(documentId)) {
-      throw corpusError('CORPUS_APPROVAL_FILE_INVALID', 'Corpus approvals must be exact, reviewed document/checksum records.');
-    }
-    approvals.set(documentId, { ...approval, checksum });
-  }
-  return { fixtureHashes, approvals };
 }
 
 function scanSensitiveText(label, value, options = {}) {
@@ -317,6 +351,16 @@ function scanSensitiveText(label, value, options = {}) {
   }
 }
 
+function assertSafeMysqlDump(value) {
+  const sql = Buffer.isBuffer(value) ? value.toString('utf8') : String(value);
+  scanSensitiveText('portable MySQL dump', sql, { serializedSql: true });
+  if (/INSERT\s+INTO\s+`?auth_tokens`?/i.test(sql)
+    || /\b(?:CREATE\s+USER|GRANT\s+.+\s+TO|DEFINER\s*=)/i.test(sql)) {
+    throw corpusError('CORPUS_MYSQL_DUMP_UNSAFE', 'MySQL dump contains auth-token data or host privilege statements.');
+  }
+  return sql;
+}
+
 function assertNoAbsolutePayloadPaths(label, value, key = '') {
   if (Array.isArray(value)) {
     value.forEach((item, index) => assertNoAbsolutePayloadPaths(`${label}[${index}]`, item, key));
@@ -335,7 +379,6 @@ function assertNoAbsolutePayloadPaths(label, value, key = '') {
 }
 
 async function assertSanitizedSource(points = [], options = {}) {
-  const requireApproval = options.requireApproval !== false;
   const users = mysqlJsonRows(`
     SELECT JSON_OBJECT('id', id, 'email', email, 'fullName', full_name,
       'phone', phone, 'passwordHash', password_hash)
@@ -360,31 +403,12 @@ async function assertSanitizedSource(points = [], options = {}) {
     throw corpusError('CORPUS_SECRET_SCAN_FAILED', 'auth_tokens contains a non-hash token representation.');
   }
 
-  const policy = await approvedDocumentPolicy();
   const documents = mysqlJsonRows(`
     SELECT JSON_OBJECT('id', id, 'title', title, 'filename', original_filename,
       'checksum', checksum_sha256, 'storageKey', storage_key)
     FROM documents ORDER BY id;
   `);
-  const documentApprovals = [];
   for (const document of documents) {
-    const checksum = String(document.checksum).toLowerCase();
-    const exactApproval = policy.approvals.get(String(document.id));
-    const approved = policy.fixtureHashes.has(checksum)
-      || (exactApproval && exactApproval.checksum === checksum);
-    if (requireApproval && !approved) {
-      throw corpusError(
-        'CORPUS_PII_REVIEW_REQUIRED',
-        `documents:${document.id} is not a tracked fixture or reviewed checksum; export aborted without reading it into Git.`
-      );
-    }
-    documentApprovals.push({
-      documentId: String(document.id),
-      checksum,
-      approvalSource: exactApproval ? 'EXACT_REVIEW' : 'TRACKED_FIXTURE',
-      reviewedAtUtc: exactApproval?.reviewedAtUtc || null,
-      originalFileIncluded: false
-    });
     scanSensitiveText(`documents:${document.id}:title`, document.title);
     scanSensitiveText(`documents:${document.id}:filename`, document.filename);
     if (path.isAbsolute(document.storageKey) || /^[A-Za-z]:[\\/]/.test(document.storageKey)
@@ -426,17 +450,17 @@ async function assertSanitizedSource(points = [], options = {}) {
     assertNoAbsolutePayloadPaths(`qdrant:${point.id}:payload`, point.payload);
   });
   return {
-    policy: 'demo-admin-and-tracked-fixtures-or-explicit-reviewed-checksums',
+    policy: 'private-internal-operator-review',
+    operatorReview: options.reviewConfirmed ? 'CONFIRMED' : 'PENDING',
     authTokens: 'schema included; all auth token rows excluded',
     clientRequestIds: 'retained as random business idempotency state; not credentials',
-    approvedDocumentCount: documents.length,
-    documentApprovals,
+    reviewedDocumentCount: documents.length,
     authTokenRowsExcluded: authTokens.length,
     secretAndPathScan: 'passed'
   };
 }
 
-async function reconcileRuntime() {
+async function reconcileRuntime(options = {}) {
   const stats = databaseStats();
   const qdrant = await qdrantRuntimeInfo();
   const chunks = activeChunkInventory();
@@ -449,7 +473,9 @@ async function reconcileRuntime() {
       `Qdrant vector size ${qdrant.vectorSize} does not match EMBEDDING_DIMENSION ${embeddingDimension()}.`
     );
   }
-  const points = qdrant.exists ? await scrollQdrantPoints() : [];
+  const points = qdrant.exists
+    ? await scrollQdrantPoints({ withVectors: options.withVectors === true })
+    : [];
   const pointMap = new Map(points.map((point) => [String(point.id), point]));
   const chunkIds = new Set(chunks.map((chunk) => chunk.vectorNodeId));
   for (const chunk of chunks) {
@@ -478,7 +504,10 @@ async function reconcileRuntime() {
 }
 
 function bootstrapEmpty(stats, qdrant) {
-  const mysqlBusinessRows = Number(stats.nonDemoUsers) + Number(stats.authTokens)
+  // auth_tokens is transient security state and is deliberately excluded from
+  // releases. The one documented Demo Admin is created by demo_seed.sql and is
+  // reference/bootstrap state rather than corpus content.
+  const mysqlBusinessRows = Number(stats.nonDemoUsers)
     + Number(stats.documents) + Number(stats.jobs) + Number(stats.chunks)
     + Number(stats.sessions) + Number(stats.messages) + Number(stats.citations) + Number(stats.usageRows);
   return {
@@ -545,30 +574,26 @@ async function exportCorpus(options = {}) {
     if (Number(stats.activeJobs) !== 0) {
       throw corpusError('CORPUS_ACTIVE_JOBS', 'QUEUED/RUNNING processing jobs exist; export requires a quiescent corpus.');
     }
-    const reconciled = await reconcileRuntime();
-    const sanitization = await assertSanitizedSource(reconciled.points);
+    const reconciled = await reconcileRuntime({ withVectors: true });
+    const documents = new Map(documentInventory().map((document) => [String(document.documentId), {
+      ...document,
+      documentId: String(document.documentId),
+      sha256: String(document.sha256 || '').toLowerCase(),
+      sizeBytes: Number(document.sizeBytes)
+    }]));
+    assertPublishableDocuments(documents);
+    const sanitization = await assertSanitizedSource(reconciled.points, {
+      reviewConfirmed: options.reviewConfirmed === true
+    });
     if (!reconciled.qdrant.exists || reconciled.points.length === 0) {
       throw corpusError('CORPUS_EMPTY', 'No Qdrant points are available for a portable corpus bundle.');
     }
 
     await fsp.rm(temporary, { recursive: true, force: true });
     await fsp.mkdir(path.join(temporary, 'mysql'), { recursive: true });
-    const commonDumpArgs = [
-      '--default-character-set=utf8mb4', '--no-tablespaces', '--skip-comments',
-      '--skip-dump-date', '--set-gtid-purged=OFF', '--column-statistics=0'
-    ];
-    const schema = mysqlDump([...commonDumpArgs, '--no-data', '--skip-triggers']);
-    const data = mysqlDump([
-      ...commonDumpArgs,
-      '--no-create-info', '--single-transaction', '--quick', '--skip-lock-tables',
-      '--skip-add-locks', '--order-by-primary', `--ignore-table="${databaseName()}.auth_tokens"`
-    ]);
-    const dump = Buffer.concat([
-      Buffer.from('-- EDURAG portable corpus: schema 1.0.0 + sanitized data\nSET NAMES utf8mb4;\n', 'utf8'),
-      schema,
-      Buffer.from('\n', 'utf8'),
-      data
-    ]);
+    const mysqlExport = createScopedMysqlExport();
+    const dump = mysqlExport.dump;
+    assertSafeMysqlDump(dump);
     await fsp.writeFile(path.join(temporary, MYSQL_DUMP_RELATIVE), dump);
 
     const snapshot = await createQdrantSnapshot(temporary);
@@ -580,7 +605,9 @@ async function exportCorpus(options = {}) {
         vectorNodeId: chunk.vectorNodeId,
         contentHash: chunk.contentHash,
         hidden: chunk.visibilityStatus === 'HIDDEN'
-      }))
+      })),
+      qdrantContentSha256: qdrantContentSha256(reconciled.points),
+      mysqlContentSha256: mysqlExport.contentSha256
     };
     await fsp.writeFile(path.join(temporary, INVENTORY_RELATIVE), `${JSON.stringify(inventory, null, 2)}\n`, 'utf8');
     await fsp.writeFile(path.join(temporary, 'README.md'), bundleReadme(), 'utf8');
@@ -726,12 +753,9 @@ async function verifyBundle(directory = BUNDLE_DIRECTORY, options = {}) {
   if (snapshotSize <= 0) {
     throw corpusError('CORPUS_SNAPSHOT_INVALID', 'Qdrant snapshot is empty.');
   }
-  const mysqlDump = await fsp.readFile(safeBundlePath(directory, manifest.files.mysqlDump), 'utf8');
-  scanSensitiveText('portable MySQL dump', mysqlDump, { serializedSql: true });
-  if (/INSERT\s+INTO\s+`?auth_tokens`?/i.test(mysqlDump)
-    || /\b(?:CREATE\s+USER|GRANT\s+.+\s+TO|DEFINER\s*=)/i.test(mysqlDump)) {
-    throw corpusError('CORPUS_MYSQL_DUMP_UNSAFE', 'MySQL dump contains auth-token data or host privilege statements.');
-  }
+  const mysqlDump = assertSafeMysqlDump(await fsp.readFile(
+    safeBundlePath(directory, manifest.files.mysqlDump), 'utf8'
+  ));
   let bundleBytes = 0;
   for (const relative of expected.keys()) {
     const size = (await fsp.stat(safeBundlePath(directory, relative))).size;
@@ -789,6 +813,28 @@ async function restoreQdrantSnapshot(manifest, bundleDirectory = BUNDLE_DIRECTOR
   }
 }
 
+async function recoverEmptyQdrantState(previous) {
+  const name = encodeURIComponent(collectionName());
+  const current = await qdrantRuntimeInfo();
+  if (current.exists) await qdrantRequest(`/collections/${name}`, { method: 'DELETE' });
+  if (previous.exists) {
+    await qdrantRequest(`/collections/${name}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        vectors: { size: previous.vectorSize, distance: previous.distance }
+      }),
+      errorCode: 'CORPUS_RESTORE_ROLLBACK_FAILED'
+    });
+  }
+  const restored = await qdrantRuntimeInfo();
+  if (restored.exists !== previous.exists || Number(restored.pointCount) !== 0
+    || (previous.exists && (restored.vectorSize !== previous.vectorSize
+      || restored.distance !== previous.distance))) {
+    throw corpusError('CORPUS_RESTORE_ROLLBACK_FAILED', 'Cannot restore the previous empty Qdrant state.');
+  }
+}
+
 async function restoreCorpus(options = {}) {
   const bundleDirectory = options.bundleDirectory || BUNDLE_DIRECTORY;
   const manifest = await verifyBundle(bundleDirectory, { quiet: options.quiet });
@@ -809,13 +855,39 @@ async function restoreCorpus(options = {}) {
       );
     }
     const sql = await fsp.readFile(safeBundlePath(bundleDirectory, manifest.files.mysqlDump));
-    mysqlInput(sql);
-    await restoreQdrantSnapshot(manifest, bundleDirectory);
-    const reconciled = await reconcileRuntime();
-    if (Number(reconciled.stats.documents) !== Number(manifest.documentCount)
-      || Number(reconciled.stats.chunks) !== Number(manifest.chunkCount)
-      || reconciled.points.length !== Number(manifest.qdrantPointCount)) {
-      throw corpusError('CORPUS_RESTORE_VERIFY_FAILED', 'Restored runtime counts do not match the bundle manifest.');
+    const recoveryDump = await (options.createMysqlRecoveryDump || createMysqlRecoveryDump)();
+    const applyMysql = options.mysqlInput || mysqlInput;
+    const recoverQdrant = options.recoverEmptyQdrantState || recoverEmptyQdrantState;
+    const restoreSnapshot = options.restoreQdrantSnapshot || restoreQdrantSnapshot;
+    let mutationStarted = false;
+    const rollback = async () => {
+      await applyMysql(recoveryDump);
+      await recoverQdrant(qdrant);
+    };
+    let reconciled;
+    try {
+      mutationStarted = true;
+      await applyMysql(sql);
+      await restoreSnapshot(manifest, bundleDirectory);
+      reconciled = await (options.reconcileRuntime || reconcileRuntime)();
+      if (Number(reconciled.stats.documents) !== Number(manifest.documentCount)
+        || Number(reconciled.stats.chunks) !== Number(manifest.chunkCount)
+        || reconciled.points.length !== Number(manifest.qdrantPointCount)) {
+        throw corpusError('CORPUS_RESTORE_VERIFY_FAILED', 'Restored runtime counts do not match the bundle manifest.');
+      }
+    } catch (error) {
+      if (mutationStarted) {
+        try { await rollback(); } catch (_rollbackError) {
+          throw corpusError(
+            'CORPUS_RESTORE_ROLLBACK_FAILED',
+            'Restore failed and the previous empty state could not be recovered safely.'
+          );
+        }
+      }
+      throw error;
+    }
+    if (options.retainRecovery) {
+      Object.defineProperty(reconciled, 'rollbackRestore', { value: rollback });
     }
     if (!options.quiet) {
       console.log(JSON.stringify({
@@ -835,14 +907,23 @@ async function restoreCorpus(options = {}) {
 module.exports = {
   BUNDLE_DIRECTORY,
   activeChunkInventory,
+  assertSafeMysqlDump,
+  assertSanitizedSource,
   bootstrapEmpty,
+  createScopedMysqlDump,
+  createScopedMysqlExport,
+  createMysqlRecoveryDump,
   databaseStats,
   documentInventory,
   ensureDataServices,
   exportCorpus,
+  freezeWriters,
   mysqlInput,
+  qdrantContentSha256,
   qdrantRuntimeInfo,
   reconcileRuntime,
+  recoverEmptyQdrantState,
+  resumeWriters,
   restoreCorpus,
   verifyBundle
 };

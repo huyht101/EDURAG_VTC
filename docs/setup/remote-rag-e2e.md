@@ -38,8 +38,8 @@ Foreground orchestration:
 1. validate root environment và Compose;
 2. build Node/Python images;
 3. start MySQL + Qdrant;
-4. download, stage và verify cloud release nếu mode yêu cầu;
-5. restore/skip MySQL, Qdrant và upload originals;
+4. probe local MySQL, Qdrant và upload volume;
+5. với `auto`, chỉ download/restore selected cloud release khi local thực sự empty; local đã có dữ liệu được giữ nguyên;
 6. start Node + Python;
 7. chạy remote preflight;
 8. attach `app`/`rag-service` logs.
@@ -53,7 +53,13 @@ CORPUS_RESTORE_OK
 REMOTE_PREFLIGHT_OK
 ```
 
-Trên compatible retained volumes, expected `CORPUS_ALREADY_RESTORED`. `auto` + thiếu key báo `CORPUS_BOOTSTRAP_SKIPPED` và tiếp tục với local state hiện có hoặc empty state; không fallback sang dump/snapshot trong Git.
+Trên retained volumes, expected `CORPUS_RESTORE_SKIPPED_LOCAL_PRESENT ... exactRelease=NOT_CHECKED`; `auto` không chạy deep exact-release comparison. Partial/in-progress local state cũng được coi là `PRESENT`, giữ nguyên và cảnh báo. Nếu probe trả `UNKNOWN/ERROR`, tool không restore và báo `CORPUS_RESTORE_SKIPPED_LOCAL_UNKNOWN`. `auto` + local empty nhưng thiếu key báo `CORPUS_BOOTSTRAP_SKIPPED` rồi tiếp tục empty; không fallback sang dump/snapshot trong Git.
+
+Chọn mode theo mục đích:
+
+- `auto`: development; bootstrap khi empty, ưu tiên local khi đã có dữ liệu;
+- `required`: acceptance strict; selected release và local non-empty phải khớp exact;
+- `off`: không đọc/restore/so sánh cloud release.
 
 ## 3. Corpus commands
 
@@ -63,13 +69,29 @@ npm run corpus:verify
 npm run corpus:restore
 ```
 
-Chỉ manager trên approved, quiescent source chạy:
+Manager dùng writer credential trên source quiescent. Xem plan trước:
 
 ```powershell
-npm run corpus:publish
+npm run corpus:publish -- --dry-run
+npm run corpus:publish -- --confirm-reviewed
+npm run corpus:verify
 ```
 
-Publish/restore không ingest, parse hoặc document-embed. `publish` create-only; `restore` không overwrite incompatible stores/files. Xem [Cloud corpus portability](../architecture/corpus-portability.md).
+`--confirm-reviewed` xác nhận operator đã kiểm tra PII/personal data, secret, quyền chia sẻ và project scope; không phải automated PII scanner. Policy đơn giản này chỉ dùng với private/internal bucket. Publish/restore không ingest, parse hoặc document-embed. `publish` create-only và pointer-last; `restore` không overwrite incompatible stores/files. Xem [Cloud corpus portability](../architecture/corpus-portability.md).
+
+Dry-run là read-only và yêu cầu MySQL/Qdrant đã chạy: không start/stop writer, không tạo snapshot/staging, không đọc cloud credential và không gọi GCS. Publish thật pause app/Python xuyên suốt frozen export + upload/read-back/pointer update, rồi resume trong `finally`; `Ctrl+C` có signal guard best-effort. Restore stage/verify trước apply và có recovery về empty state; không có implicit replace-local.
+
+Workflow manager chuẩn:
+
+1. Dùng viewer credential và chạy `npm run docker:remote:dev`.
+2. `auto` restore selected release nếu local empty; nếu local existing thì giữ local.
+3. Upload/process document mới và poll đến `READY`.
+4. Nhấn `Ctrl+C`; containers dừng, volumes được giữ.
+5. Chuyển sang writer credential qua kênh an toàn.
+6. Chạy dry-run, review exact originals/PII/secret/quyền chia sẻ/project scope.
+7. Chạy publish với `--confirm-reviewed`, sau đó `npm run corpus:verify`.
+
+Local divergence trong development là hợp lệ. Public corpus hoặc compliance audit cần policy riêng; không dùng confirmation flag này để hạ guard cho public bucket.
 
 ## 4. Swagger
 
@@ -111,7 +133,11 @@ Corpus đã restore cho phép chat/citation ngay, không cần upload lại. Upl
 |---|---|
 | Port in use | Đổi host port trong root `.env`. |
 | `GCS_CREDENTIAL_MISSING` | Với `auto`, stack chạy degraded; fresh canonical restore cần reader key. |
-| `CORPUS_PARTIAL_STATE` / mismatch | Không overwrite; dùng project/volumes fresh sau khi xác nhận target disposable. |
+| `CORPUS_RESTORE_SKIPPED_LOCAL_PRESENT` | `auto` phát hiện local data/partial/in-progress và giữ nguyên; dùng inspect/diagnostic thay vì restore đè. |
+| `CORPUS_RESTORE_SKIPPED_LOCAL_UNKNOWN` | Không xác định an toàn emptiness; `auto` không restore. Kiểm tra MySQL/Qdrant/upload probe. `required` sẽ fail. |
+| `CORPUS_RESTORE_ROLLBACK_FAILED` | Apply thất bại và không thể phục hồi exact empty pre-state; dừng, không chạy replace/merge tự động. |
+| `CORPUS_EXISTING_STATE_MISMATCH` | Chỉ strict `required`/restore/verify: local không khớp selected release. Development `auto` không ép exact match. |
+| `CORPUS_REVIEW_CONFIRMATION_REQUIRED` | Chạy dry-run, review plan rồi dùng đúng `--confirm-reviewed`. |
 | `401` public API | Dùng user JWT, không dùng internal token. |
 | Original unavailable | Corpus/original chưa restore; citation snapshot vẫn dùng được nếu structured local data tồn tại. |
 | Chat timeout | Kiểm tra Python/provider health và `RAG_QUERY_TIMEOUT_MS`. |

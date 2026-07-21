@@ -130,7 +130,10 @@ async def _handle_chit_chat(
         answer=answer,
         citations=[],
         confidence="high",
-        no_answer=False,
+        # CHIT_CHAT has no indexed evidence. Mark it as an ungrounded/no-answer
+        # result so the Node boundary never persists a normal answer without a
+        # structured citation.
+        no_answer=True,
         usage=usage,
     )
 
@@ -244,18 +247,35 @@ async def process_query(request: QueryRequest) -> QueryResponse:
     citations = _extract_citations(answer_text, filtered_results)
     confidence = _evaluate_confidence(filtered_results)
 
-    return QueryResponse(
-        answer=answer_text,
-        citations=citations,
-        confidence=confidence,
-        no_answer=False,
-        usage=usage,
-    )
+    return _finalize_rag_answer(answer_text, citations, confidence, usage)
 
 
 # ══════════════════════════════════════════════════════════════════
 # HÀM PHỤ TRỢ
 # ══════════════════════════════════════════════════════════════════
+
+def _finalize_rag_answer(
+    answer: str,
+    citations: list[Citation],
+    confidence: str,
+    usage: UsageInfo | None,
+) -> QueryResponse:
+    if not citations:
+        logger.warning("RAG answer did not contain a valid citation marker; returning no-answer")
+        return QueryResponse(
+            answer="Không đủ dữ liệu có thể trích dẫn để trả lời an toàn.",
+            citations=[],
+            confidence="low",
+            no_answer=True,
+            usage=usage,
+        )
+    return QueryResponse(
+        answer=answer,
+        citations=citations,
+        confidence=confidence,
+        no_answer=False,
+        usage=usage,
+    )
 
 def _format_history(history: list[ChatMessage]) -> str:
     """Format history thành text cho prompt."""

@@ -9,27 +9,13 @@ const {
   normalizeQueryResult
 } = require('./rag-contract');
 
-function redactSecret(value, secret) {
-  if (!secret || typeof value !== 'string') return value;
-  return value.split(secret).join('[REDACTED]');
-}
-
-function safeUpstreamText(value, internalToken) {
-  const firstLine = redactSecret(value, internalToken).split(/\r?\n/, 1)[0].trim();
-  return firstLine.slice(0, 500) || 'Python RAG service rejected the request.';
-}
-
-function upstreamMessage(payload, status, internalToken) {
+function upstreamMessage(payload, status) {
   if (payload && typeof payload === 'object') {
-    if (typeof payload.message === 'string' && payload.message) {
-      return safeUpstreamText(payload.message, internalToken);
-    }
-    if (typeof payload.detail === 'string' && payload.detail) {
-      return safeUpstreamText(payload.detail, internalToken);
-    }
     if (Array.isArray(payload.detail)) return `Python validation failed (${payload.detail.length} issue(s)).`;
   }
-  return `Python RAG service returned HTTP ${status}.`;
+  return status >= 500
+    ? 'Python RAG service is temporarily unavailable.'
+    : `Python RAG service rejected the request (HTTP ${status}).`;
 }
 
 function upstreamCode(payload, status) {
@@ -58,8 +44,10 @@ class MockRagClient {
     if (question.includes('__RAG_ERROR__')) {
       throw appError(502, 'RAG_MOCK_FAILURE', 'Mock RAG failure requested.');
     }
-    const noAnswer = question.includes('__NO_ANSWER__');
     const vectorNodeId = process.env.RAG_MOCK_SOURCE_VECTOR_NODE_ID || null;
+    const unsourcedContractViolation = question.includes('__UNSOURCED_ANSWER__');
+    const noAnswer = question.includes('__NO_ANSWER__')
+      || (!vectorNodeId && !unsourcedContractViolation);
     const usageCalls = [{
       requestId,
       callIndex: 1,
@@ -86,7 +74,7 @@ class MockRagClient {
     return {
       answer: noAnswer ? null : `Mock answer: ${question}`,
       noAnswer,
-      sources: !noAnswer && vectorNodeId ? [{
+      sources: !noAnswer && vectorNodeId && !unsourcedContractViolation ? [{
         vectorNodeId,
         sourceText: 'Mock source fragment.',
         retrievalScore: 1
@@ -135,7 +123,7 @@ class RemoteRagClient {
         throw appError(
           status,
           upstreamCode(payload, response.status),
-          upstreamMessage(payload, response.status, this.config.internalToken)
+          upstreamMessage(payload, response.status)
         );
       }
       return payload;

@@ -256,45 +256,62 @@ async function sendMessage(user, idValue, body) {
   const question = body.content.trim();
   const requestId = resolveClientRequestId(body.clientRequestId);
   let prepared;
-  try {
-    prepared = await withTransaction(async (connection) => {
-    const session = await sessionRepo.findOwnedByIdForUpdate(sessionId, user.id, connection);
-    if (!session || session.deleted_at) throw appError(404, 'CHAT_SESSION_NOT_FOUND', 'Không tìm thấy chat session.');
-    const duplicate = await messageRepo.findRequestPair(requestId, connection);
-    if (duplicate) {
-      if (Number(duplicate.session_id) !== sessionId) {
-        throw appError(409, 'CLIENT_REQUEST_ID_CONFLICT', 'clientRequestId đã được dùng cho session khác.');
+  for (let attempt = 1; attempt <= 3 && !prepared; attempt += 1) {
+    try {
+      prepared = await withTransaction(async (connection) => {
+        const session = await sessionRepo.findOwnedByIdForUpdate(sessionId, user.id, connection);
+        if (!session || session.deleted_at) throw appError(404, 'CHAT_SESSION_NOT_FOUND', 'Không tìm thấy chat session.');
+        const duplicate = await messageRepo.findRequestPair(requestId, connection);
+        if (duplicate) {
+          if (Number(duplicate.session_id) !== sessionId) {
+            throw appError(409, 'CLIENT_REQUEST_ID_CONFLICT', 'clientRequestId đã được dùng cho session khác.');
+          }
+          if (duplicate.assistant_status === 'PENDING' && duplicate.assistant_message_id) {
+            const recovered = await messageRepo.failStalePending(
+              duplicate.assistant_message_id,
+              ragConfig.pendingTimeoutMs,
+              connection
+            );
+            if (recovered) {
+              duplicate.assistant_status = 'FAILED';
+              duplicate.error_code = 'RAG_PENDING_TIMEOUT';
+            }
+          }
+          return { duplicate };
+        }
+        const userOrder = await messageRepo.nextMessageOrder(sessionId, connection);
+        const userMessageId = await messageRepo.insertMessage({
+          sessionId,
+          senderType: 'USER',
+          messageOrder: userOrder,
+          content: question,
+          status: 'COMPLETED',
+          clientRequestId: requestId,
+          completedAt: new Date()
+        }, connection);
+        const assistantMessageId = await messageRepo.insertMessage({
+          sessionId,
+          senderType: 'ASSISTANT',
+          messageOrder: userOrder + 1,
+          content: null,
+          status: 'PENDING'
+        }, connection);
+        return { userOrder, userMessageId, assistantMessageId };
+      });
+    } catch (error) {
+      if (error.code === 'ER_DUP_ENTRY' || error.code === 'ER_LOCK_DEADLOCK') {
+        const duplicate = await messageRepo.findRequestPair(requestId);
+        if (duplicate) {
+          if (Number(duplicate.session_id) === sessionId) return duplicateResult(duplicate);
+          throw appError(409, 'CLIENT_REQUEST_ID_CONFLICT', 'clientRequestId đã được dùng cho session khác.');
+        }
+        if (error.code === 'ER_LOCK_DEADLOCK' && attempt < 3) {
+          await new Promise((resolve) => setTimeout(resolve, 20 * attempt));
+          continue;
+        }
       }
-      return { duplicate };
+      throw error;
     }
-    const userOrder = await messageRepo.nextMessageOrder(sessionId, connection);
-    const userMessageId = await messageRepo.insertMessage({
-      sessionId,
-      senderType: 'USER',
-      messageOrder: userOrder,
-      content: question,
-      status: 'COMPLETED',
-      clientRequestId: requestId,
-      completedAt: new Date()
-    }, connection);
-    const assistantMessageId = await messageRepo.insertMessage({
-      sessionId,
-      senderType: 'ASSISTANT',
-      messageOrder: userOrder + 1,
-      content: null,
-      status: 'PENDING'
-    }, connection);
-    return { userOrder, userMessageId, assistantMessageId };
-    });
-  } catch (error) {
-    if (error.code === 'ER_DUP_ENTRY') {
-      const duplicate = await messageRepo.findRequestPair(requestId);
-      if (duplicate) {
-        if (Number(duplicate.session_id) === sessionId) return duplicateResult(duplicate);
-        throw appError(409, 'CLIENT_REQUEST_ID_CONFLICT', 'clientRequestId đã được dùng cho session khác.');
-      }
-    }
-    throw error;
   }
 
   if (prepared.duplicate) return duplicateResult(prepared.duplicate);

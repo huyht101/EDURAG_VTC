@@ -103,7 +103,7 @@ def test_query_endpoint(mock_process_query):
         answer="Mocked answer",
         citations=[],
         confidence="high",
-        no_answer=False,
+        no_answer=True,
     )
     
     payload = {

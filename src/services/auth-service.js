@@ -159,6 +159,7 @@ async function requestPasswordReset(email) {
   const expiresAt = new Date(Date.now() + RESET_TOKEN_EXPIRES_MINUTES * 60 * 1000);
 
   await withTransaction(async (connection) => {
+    await tokenRepo.deleteExpiredTokens(100, connection);
     await tokenRepo.revokeTokensByUserAndType(user.id, TOKEN_TYPES.PASSWORD_RESET, connection);
     await tokenRepo.saveToken({
       userId: user.id,
@@ -184,6 +185,10 @@ async function resetPassword({ token, newPassword }, dependencies = {}) {
     throw appError(400, 'INVALID_OR_EXPIRED_TOKEN', 'Token khôi phục không hợp lệ hoặc đã hết hạn.');
   }
   const suppliedHash = hashToken(userId, TOKEN_TYPES.PASSWORD_RESET, secret);
+  const candidate = await tokens.findActiveTokenByUserAndType(userId, TOKEN_TYPES.PASSWORD_RESET);
+  if (!candidate || !hashesMatch(candidate.token_hash, suppliedHash)) {
+    throw appError(400, 'INVALID_OR_EXPIRED_TOKEN', 'Token khoi phuc khong hop le hoac da het han.');
+  }
   const passwordHash = await passwordHasher(newPassword);
 
   const valid = await transaction(async (connection) => {
@@ -204,11 +209,29 @@ async function resetPassword({ token, newPassword }, dependencies = {}) {
   return true;
 }
 
+async function logoutAll(userId, expectedAuthVersion, dependencies = {}) {
+  const transaction = dependencies.withTransaction || withTransaction;
+  const users = dependencies.userRepo || userRepo;
+  await transaction(async (connection) => {
+    const current = await users.findUserByIdForUpdate(userId, connection);
+    if (!current || Number(current.auth_version) !== Number(expectedAuthVersion)) return;
+    await users.incrementAuthVersionIfCurrent(userId, expectedAuthVersion, connection);
+  });
+  return true;
+}
+
 function signJwt(user) {
   return jwt.sign(
-    { id: user.id, role: user.role, authVersion: user.auth_version },
+    { id: user.id, role: user.role, authVersion: user.auth_version, type: authConfig.purpose },
     authConfig.secret,
-    { expiresIn: authConfig.expiresIn }
+    {
+      algorithm: authConfig.algorithm,
+      issuer: authConfig.issuer,
+      audience: authConfig.audience,
+      subject: String(user.id),
+      jwtid: crypto.randomUUID(),
+      expiresIn: authConfig.expiresIn
+    }
   );
 }
 
@@ -231,6 +254,7 @@ async function issueOtp(userId, tokenType) {
   const tokenHash = hashToken(userId, tokenType, otpCode);
   const expiresAt = new Date(Date.now() + OTP_EXPIRES_MINUTES * 60 * 1000);
   await withTransaction(async (connection) => {
+    await tokenRepo.deleteExpiredTokens(100, connection);
     await tokenRepo.revokeTokensByUserAndType(userId, tokenType, connection);
     await tokenRepo.saveToken({ userId, tokenType, tokenHash, expiresAt }, connection);
   });
@@ -243,5 +267,7 @@ module.exports = {
   login,
   verifyAdminOtp,
   requestPasswordReset,
-  resetPassword
+  resetPassword,
+  logoutAll,
+  signJwt
 };

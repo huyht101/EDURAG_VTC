@@ -10,7 +10,7 @@ function parseId(value) {
 }
 
 function authorize(user, context) {
-  if (Number(context.session_user_id) !== Number(user.id)) {
+  if (context.session_deleted_at || Number(context.session_user_id) !== Number(user.id)) {
     throw appError(404, 'CITATION_NOT_FOUND', 'Không tìm thấy citation.');
   }
 }

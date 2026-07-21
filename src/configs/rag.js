@@ -33,6 +33,13 @@ module.exports = {
     }
     return value;
   },
+  get pendingTimeoutMs() {
+    const value = Number(process.env.CHAT_PENDING_TIMEOUT_MS || 120000);
+    if (!Number.isSafeInteger(value) || value < 10000 || value > 86400000) {
+      throw new Error('CHAT_PENDING_TIMEOUT_MS must be between 10000 and 86400000.');
+    }
+    return value;
+  },
   get internalToken() {
     if (!process.env.RAG_INTERNAL_TOKEN || process.env.RAG_INTERNAL_TOKEN.length < 32) {
       throw new Error('RAG_INTERNAL_TOKEN must contain at least 32 characters.');

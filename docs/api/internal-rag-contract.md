@@ -149,7 +149,7 @@ Current snapshot citation có `vector_node_id=str(result.id)`, `doc_id`, `snippe
 
 `no_answer=true` là success; NodeJS không tạo citation dù response có citation data.
 
-Target bắt buộc: `no_answer=false` phải có ít nhất một citation structured với `vector_node_id` và source fragment hợp lệ. Node resolve mọi citation tới MySQL chunk/document `READY + VISIBLE`; mảng rỗng hoặc source không xác minh được trả `502`, và assistant không được complete. Snapshot hiện còn nhánh CHIT_CHAT trả `no_answer=false` với `citations=[]`; đây là Python handoff, không phải lý do để nới validation Node.
+Target bắt buộc: `no_answer=false` phải có ít nhất một citation structured với `vector_node_id` và source fragment hợp lệ. Node resolve mọi citation tới MySQL chunk/document `READY + VISIBLE`; mảng rỗng hoặc source không xác minh được trả `502`, và assistant không được complete. Snapshot overlay hiện đổi CHIT_CHAT và RAG answer không có citation marker thành `no_answer=true`; patch nhỏ này phải upstream về Python repository. Node validation vẫn fail closed để không phụ thuộc vào overlay.
 
 ## Errors
 

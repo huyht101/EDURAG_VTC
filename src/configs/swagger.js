@@ -20,7 +20,7 @@ const definition = {
   info: {
     title: 'EduRAG NodeJS/Core API',
     version: '1.0.0-week3-contract-v0.1',
-    description: 'Foundation, Part 1 và Week 2 Part 2 APIs. RAG mock mode và remote contract v0.1 đã được kiểm thử; live E2E chỉ áp dụng cho topology development được tài liệu hóa.'
+    description: 'Foundation, Part 1 và Week 2 Part 2 APIs. Mock regression và remote boundary fixtures không thay thế live Python E2E; historical live evidence chỉ áp dụng cho topology development được tài liệu hóa.'
   },
   servers: [{ url: 'http://localhost:5001', description: 'Docker demo default' }],
   tags: [
@@ -38,7 +38,7 @@ const definition = {
   ],
   components: {
     securitySchemes: {
-      bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+      bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT', description: 'Access JWT constrained by issuer/audience/purpose/authVersion; logout revokes all previously issued tokens.' },
       internalBearer: { type: 'http', scheme: 'bearer', description: 'RAG_INTERNAL_TOKEN; never use a user JWT here.' }
     },
     schemas: {
@@ -250,7 +250,13 @@ const definition = {
       }
     },
     '/api/auth/logout': {
-      post: { tags: ['Authentication'], summary: 'Stateless client-side logout', security: [{ bearerAuth: [] }], responses: { 200: response('Logged out.'), 401: response('Unauthorized.', 'ErrorResponse') } }
+      post: {
+        tags: ['Authentication'],
+        summary: 'Logout all devices',
+        description: 'Increments the current user auth_version. Every access JWT issued before this request becomes invalid; a request already authorized may finish.',
+        security: [{ bearerAuth: [] }],
+        responses: { 200: response('All existing access tokens were revoked.'), 401: response('Unauthorized.', 'ErrorResponse') }
+      }
     },
     '/api/auth/forgot-password': {
       post: {
@@ -387,7 +393,7 @@ const operationDescriptions = {
   'POST /api/auth/register': 'Actor: public. Tạo STUDENT ở trạng thái ACTIVE hoặc TEACHER ở trạng thái PENDING chờ ADMIN review; không cấp quyền quản lý document cho STUDENT.',
   'POST /api/auth/login': 'Actor: public account owner. Chỉ ACTIVE user đăng nhập được; ADMIN phải hoàn tất OTP trước khi nhận user JWT.',
   'POST /api/auth/admin/verify-otp': 'Actor: ADMIN đang đăng nhập. Xác minh OTP development/email delivery và trả user JWT; OTP expired/used/revoked không được dùng lại.',
-  'POST /api/auth/logout': 'Actor: authenticated user. Stateless client-side logout; client xóa JWT hiện tại, endpoint không phải logout-all và không tăng auth_version.',
+  'POST /api/auth/logout': 'Actor: authenticated user. Logout-all increments auth_version and revokes every access JWT issued earlier; the client must still delete its local token.',
   'POST /api/auth/forgot-password': 'Actor: public. Tạo password-reset request với response chống account enumeration; development delivery không đồng nghĩa email production-ready.',
   'POST /api/auth/reset-password': 'Actor: người giữ reset token. Đổi password, tăng auth_version và consume token trong transaction; JWT cũ mất hiệu lực.',
   'GET /api/profile': 'Actor: ACTIVE authenticated user. Chỉ đọc profile và role/status hiện tại của chính mình.',
@@ -397,7 +403,7 @@ const operationDescriptions = {
   'GET /api/admin/users/{id}': 'Actor: ADMIN. Đọc account/profile detail của user theo id; không trả password/token hash.',
   'PUT /api/admin/users/{id}/status': 'Actor: ADMIN. Thực hiện approve/reject/reopen/lock/unlock theo transition hợp lệ; lock tăng auth_version.',
   'GET /api/documents': 'Actor: TEACHER hoặc ADMIN. TEACHER chỉ thấy document mình upload, ADMIN thấy toàn bộ; mặc định không list DELETED.',
-  'POST /api/documents': 'Actor: TEACHER hoặc ADMIN. Validate và lưu PDF/DOCX/TXT, tạo document + INGEST job rồi dispatch Python. HTTP 202 chỉ là accepted; tiếp theo poll GET /api/documents/jobs/{jobId} đến SUCCEEDED và kiểm tra document READY.',
+  'POST /api/documents': 'Actor: TEACHER hoặc ADMIN. Validate và lưu PDF/DOCX/TXT (DOCX phải là bounded OOXML archive), tạo document + INGEST job rồi dispatch Python. HTTP 202 chỉ là accepted; tiếp theo poll GET /api/documents/jobs/{jobId} đến SUCCEEDED và kiểm tra document READY.',
   'GET /api/documents/{id}': 'Actor: document owner TEACHER hoặc ADMIN. Đọc metadata và latest job; storage_key không được public.',
   'PATCH /api/documents/{id}': 'Actor: document owner TEACHER hoặc ADMIN. Chỉ đổi title; file gốc immutable và muốn thay nội dung phải upload document mới.',
   'DELETE /api/documents/{id}': 'Actor: document owner TEACHER hoặc ADMIN. Tạo async DELETE_VECTORS job rồi soft-delete business document; poll job status. Chat/citation snapshot không bị xóa.',

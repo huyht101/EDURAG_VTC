@@ -144,13 +144,17 @@ function parseDocumentsFromDump(sql) {
     }
     const document = {
       documentId: String(fields[0]),
+      title: String(fields[2]),
       originalFilename: String(fields[3]),
       storageType: String(fields[4]),
       localStorageKey: validateLocalStorageKey(fields[5]),
       fileType: String(fields[6]),
       mimeType: String(fields[7]),
       sizeBytes: Number(fields[8]),
-      sha256: String(fields[9]).toLowerCase()
+      sha256: String(fields[9]).toLowerCase(),
+      processingStatus: String(fields[10]),
+      visibilityStatus: String(fields[11]),
+      deletedAt: fields[13]
     };
     if (!/^\d+$/.test(document.documentId) || document.storageType !== 'LOCAL'
       || !Number.isSafeInteger(document.sizeBytes) || document.sizeBytes <= 0
@@ -160,6 +164,36 @@ function parseDocumentsFromDump(sql) {
     documents.set(document.documentId, document);
   }
   return documents;
+}
+
+function assertPublishableDocuments(documents) {
+  const entries = [...documents.values()];
+  if (entries.length === 0) {
+    throw releaseError('CORPUS_EMPTY', 'No documents are available for a corpus release.');
+  }
+  for (const document of entries) {
+    if (document.processingStatus !== 'READY') {
+      throw releaseError(
+        'CORPUS_DOCUMENT_NOT_READY',
+        `Document ${document.documentId} is ${document.processingStatus || 'UNKNOWN'}; only READY documents may be published.`
+      );
+    }
+    if (!['VISIBLE', 'HIDDEN'].includes(document.visibilityStatus) || document.deletedAt !== null) {
+      throw releaseError(
+        'CORPUS_DOCUMENT_NOT_PUBLISHABLE',
+        `Document ${document.documentId} is deleted or has an unsupported visibility state.`
+      );
+    }
+    if (document.storageType !== 'LOCAL') {
+      throw releaseError('CORPUS_DOCUMENT_STORAGE_UNSUPPORTED', 'Corpus publish supports LOCAL originals only.');
+    }
+    validateLocalStorageKey(document.localStorageKey);
+    if (!Number.isSafeInteger(Number(document.sizeBytes)) || Number(document.sizeBytes) <= 0
+      || !SHA256.test(String(document.sha256 || '').toLowerCase())) {
+      throw releaseError('CORPUS_DOCUMENT_METADATA_INVALID', `Document ${document.documentId} has invalid checksum or size metadata.`);
+    }
+  }
+  return entries;
 }
 
 async function loadBundleDocuments(bundleDirectory, bundleManifest) {
@@ -252,29 +286,27 @@ function normalizeArtifact(artifact, kind) {
   return { ...artifact, kind, sha256, sizeBytes };
 }
 
+function releaseIdFromFingerprint(sourceFingerprint) {
+  if (!SHA256.test(String(sourceFingerprint || ''))) {
+    throw releaseError('CORPUS_RELEASE_IDENTITY_INVALID', 'Complete corpus content fingerprint is invalid.');
+  }
+  return `v1-${sha256Buffer(Buffer.from(`content-v2:${sourceFingerprint}`)).slice(0, 24)}`;
+}
+
 function deriveReleaseId(input) {
-  const stable = {
-    mysql: { sha256: input.mysql.sha256, sizeBytes: input.mysql.sizeBytes },
-    qdrant: { sha256: input.qdrant.sha256, sizeBytes: input.qdrant.sizeBytes },
-    documents: input.documents.map((entry) => ({
-      documentId: String(entry.documentId), sha256: entry.sha256, sizeBytes: entry.sizeBytes,
-      localStorageKey: entry.localStorageKey
-    })).sort((a, b) => a.documentId.localeCompare(b.documentId)),
-    compatibility: input.compatibility,
-    expectedCounts: input.expectedCounts,
-    sourceFingerprint: input.sourceFingerprint
-  };
-  return `v1-${sha256Buffer(Buffer.from(JSON.stringify(stable))).slice(0, 24)}`;
+  return releaseIdFromFingerprint(input.sourceFingerprint);
 }
 
 function buildReleaseManifest(input) {
   const mysql = normalizeArtifact(input.mysql, 'mysql');
   const qdrant = normalizeArtifact(input.qdrant, 'qdrant');
   const documents = input.documents.map((entry) => normalizeArtifact({
-    ...entry,
     documentId: String(entry.documentId),
+    sha256: entry.sha256,
+    sizeBytes: entry.sizeBytes,
     localStorageKey: validateLocalStorageKey(entry.localStorageKey),
-    originalFilename: safeOriginalFilename(entry.originalFilename, entry.localStorageKey)
+    originalFilename: safeOriginalFilename(entry.originalFilename, entry.localStorageKey),
+    mimeType: entry.mimeType
   }, 'document'));
   const releaseId = deriveReleaseId({ ...input, mysql, qdrant, documents });
   const prefix = releasePrefix(input.config, releaseId);
@@ -285,6 +317,7 @@ function buildReleaseManifest(input) {
     provider: 'gcs',
     bucket: input.config.bucket,
     objectPrefix: prefix,
+    contentIdentityVersion: '2',
     sourceFingerprint: input.sourceFingerprint,
     compatibility: input.compatibility,
     expectedCounts: input.expectedCounts,
@@ -318,6 +351,7 @@ function validateReleaseManifest(manifest, config) {
     || !RELEASE_ID.test(String(manifest.releaseId || ''))
     || !Number.isFinite(Date.parse(manifest.createdAtUtc || ''))
     || !SHA256.test(String(manifest.sourceFingerprint || ''))
+    || ![undefined, '2'].includes(manifest.contentIdentityVersion)
     || manifest.bucket !== config.bucket
     || manifest.objectPrefix !== releasePrefix(config, manifest.releaseId)) {
     throw releaseError('CORPUS_RELEASE_MANIFEST_INVALID', 'Cloud corpus manifest header is invalid.');
@@ -426,6 +460,7 @@ module.exports = {
   POINTER_SCHEMA_VERSION,
   RELEASE_SCHEMA_VERSION,
   SHA256,
+  assertPublishableDocuments,
   buildReleaseManifest,
   credentialState,
   loadCloudConfig,
@@ -434,6 +469,7 @@ module.exports = {
   normalizeObjectPrefix,
   parseDocumentsFromDump,
   readPointer,
+  releaseIdFromFingerprint,
   releaseError,
   releasePrefix,
   requireCredential,

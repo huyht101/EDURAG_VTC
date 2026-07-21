@@ -197,6 +197,14 @@ async function updatePasswordAndIncrementVersion(id, passwordHash, executor) {
   );
 }
 
+async function incrementAuthVersionIfCurrent(id, expectedVersion, executor) {
+  const [result] = await executorOrPool(executor).execute(
+    'UPDATE users SET auth_version = auth_version + 1 WHERE id = ? AND auth_version = ?',
+    [id, expectedVersion]
+  );
+  return result.affectedRows === 1;
+}
+
 async function reviewTeacher(id, status, adminId, reviewNote, executor) {
   await executorOrPool(executor).execute(
     `UPDATE users
@@ -254,6 +262,7 @@ module.exports = {
   updateTeacherProfile,
   findPasswordHashById,
   updatePasswordAndIncrementVersion,
+  incrementAuthVersionIfCurrent,
   reviewTeacher,
   reopenTeacherReview,
   lockUser,

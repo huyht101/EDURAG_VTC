@@ -2,8 +2,6 @@
 
 const assert = require('assert/strict');
 const crypto = require('crypto');
-const fs = require('fs');
-const path = require('path');
 const mysql = require('mysql2/promise');
 
 const { main: runPreflight } = require('./remote-preflight');
@@ -12,8 +10,7 @@ const {
   compose,
   composePort,
   delay,
-  fetchWithTimeout,
-  root
+  fetchWithTimeout
 } = require('./remote-test-utils');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -175,17 +172,16 @@ async function main() {
       headers: bearer(token)
     }, expectOriginal ? [200] : [409]);
     if (expectOriginal) {
-      const approvals = JSON.parse(fs.readFileSync(
-        path.join(root, 'bootstrap', 'corpus-approved-documents.json'),
-        'utf8'
-      ));
-      const approved = approvals.approvals.find((entry) => String(entry.documentId) === '1');
-      assert(approved, 'Exact-checksum approval for restored document 1 is missing.');
+      const [[document]] = await pool.execute(
+        'SELECT checksum_sha256 FROM documents WHERE id = ?',
+        [1]
+      );
+      assert(document?.checksum_sha256, 'Restored document checksum metadata is missing.');
       for (const fileResponse of [documentFile, citationFile]) {
         assert.equal(
           crypto.createHash('sha256').update(fileResponse.body).digest('hex'),
-          approved.checksum,
-          'Restored original API checksum differs from the approved document.'
+          document.checksum_sha256,
+          'Restored original API checksum differs from document metadata.'
         );
         assert.match(fileResponse.headers.get('content-disposition') || '', /attachment/i);
         assert(fileResponse.headers.get('content-type'), 'Restored original API has no content type.');

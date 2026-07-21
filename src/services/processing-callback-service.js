@@ -100,7 +100,9 @@ async function handleCallback(payload, dependencies = defaultDependencies) {
     }
 
     const errorCode = payload.error?.code || `PROCESSING_${payload.eventType}`;
-    const errorMessage = payload.error?.message || null;
+    const errorMessage = payload.eventType === 'CANCELLED'
+      ? 'Python RAG processing was cancelled.'
+      : 'Python RAG processing failed.';
     if (payload.eventType === JOB_STATUSES.FAILED) {
       await jobs.markFailed(job.id, errorCode, errorMessage, connection);
     } else {

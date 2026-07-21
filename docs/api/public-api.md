@@ -35,11 +35,11 @@ ADMIN không tự động đọc chat session của user khác. Pagination dùng
 
 ### Authentication
 
-Student đăng ký thành `ACTIVE`; Teacher thành `PENDING` và cần Admin review. Admin login đúng password vẫn cần OTP trước khi nhận JWT. Change/reset password và lock account làm JWT cũ mất hiệu lực qua `auth_version`.
+Student đăng ký thành `ACTIVE`; Teacher thành `PENDING` và cần Admin review. Admin login đúng password vẫn cần OTP trước khi nhận JWT. Change/reset password, lock account và logout làm JWT cũ mất hiệu lực qua `auth_version`. Logout hiện là logout-all cho mọi token/thiết bị phát trước request; client vẫn xóa token local.
 
 ### Document ingest
 
-`POST /api/documents` nhận `multipart/form-data` với `file` và optional `title`; hỗ trợ PDF/DOCX/TXT. Response `202` chỉ xác nhận document/job đã được tạo và dispatch, chưa có nghĩa document `READY`.
+`POST /api/documents` nhận `multipart/form-data` với `file` và optional `title`; hỗ trợ PDF/DOCX/TXT. DOCX phải là bounded OOXML ZIP có core members, không chỉ mang ZIP magic bytes. Response `202` chỉ xác nhận document/job đã được tạo và dispatch, chưa có nghĩa document `READY`.
 
 Client poll `GET /api/documents/jobs/{jobId}`. Chỉ khi job `SUCCEEDED` và document `READY + VISIBLE` thì document mới thuộc retrieval corpus. Hide tắt retrieval nhưng giữ vectors; delete soft-delete và giữ chat/citation history. Original file không immutable-update: thay nội dung bằng upload document mới.
 
@@ -60,7 +60,7 @@ Swagger simple example không cần `clientRequestId`; frontend chỉ nên giữ
 
 ### Citation và original file
 
-Citation là immutable snapshot từ structured source, không phải parsing ký hiệu `[1]`. `GET /api/citations/{id}/source` trả snapshot và `originalAvailable`; endpoint `/file` stream file vật lý khi còn tồn tại và được phép. Repository bundle không commit original binary; canonical cloud release hiện có một exact-approved original có thể materialize vào local upload volume. Khi không có credential/file restore, citation snapshot vẫn dùng được và file endpoint có thể trả unavailable.
+Citation là immutable snapshot từ structured source, không phải parsing ký hiệu `[1]`. `GET /api/citations/{id}/source` trả snapshot và `originalAvailable`; endpoint `/file` stream file vật lý khi còn tồn tại và được phép. Repository không commit original binary; canonical private cloud release hiện có một reviewed original có thể materialize vào local upload volume. Khi không có credential/file restore, citation snapshot vẫn dùng được và file endpoint có thể trả unavailable.
 
 Mọi citation endpoint trước hết yêu cầu owner của chat session chứa citation; ADMIN không bypass ownership này. Sau đó file stream còn áp dụng current source authorization. Truy cập citation ngoài session của mình trả `404` để hạn chế enumeration.
 

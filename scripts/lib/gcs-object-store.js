@@ -28,6 +28,41 @@ class GcsObjectStore {
     this.bucket = this.storage.bucket(bucket);
   }
 
+  async assertPrivateTarget() {
+    let metadata;
+    try {
+      [metadata] = await this.bucket.getMetadata();
+    } catch (error) {
+      const status = upstreamStatus(error);
+      if (status === 401 || status === 403) {
+        throw gcsError(
+          'GCS_BUCKET_PRIVACY_UNVERIFIED',
+          'Publisher cannot verify that the target bucket is private/internal.'
+        );
+      }
+      throw gcsError('GCS_BUCKET_PRIVACY_UNVERIFIED', 'Target bucket privacy metadata is unavailable.');
+    }
+    if (metadata.iamConfiguration?.publicAccessPrevention === 'enforced') return;
+
+    let policy;
+    try {
+      [policy] = await this.bucket.iam.getPolicy({ requestedPolicyVersion: 3 });
+    } catch (_error) {
+      throw gcsError(
+        'GCS_BUCKET_PRIVACY_UNVERIFIED',
+        'Public access prevention is not enforced and bucket IAM cannot be verified.'
+      );
+    }
+    const publicBinding = (policy.bindings || []).some((binding) =>
+      (binding.members || []).some((member) => member === 'allUsers' || member === 'allAuthenticatedUsers'));
+    if (publicBinding) {
+      throw gcsError(
+        'GCS_PUBLIC_BUCKET_BLOCKED',
+        'Simplified operator-reviewed corpus publishing is not allowed for a public bucket.'
+      );
+    }
+  }
+
   async metadata(objectKey) {
     try {
       const [metadata] = await this.bucket.file(objectKey).getMetadata();

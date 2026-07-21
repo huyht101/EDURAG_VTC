@@ -16,20 +16,24 @@ async function main() {
     compose(['up', '-d', '--wait', 'db', 'qdrant']);
     composeExec('db', ['sh', '-lc', [
       'export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"',
-      'exec mysql -uroot edurag --batch --execute="INSERT INTO auth_tokens (user_id, token_type, token_hash, expires_at) SELECT id, \'PASSWORD_RESET\', REPEAT(\'0\', 64), DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 HOUR) FROM users WHERE email=\'admin@example.com\'"'
+      'exec mysql -uroot edurag --batch --execute="INSERT INTO documents '
+        + '(uploaded_by,title,original_filename,storage_type,storage_key,file_type,mime_type,file_size_bytes,'
+        + 'checksum_sha256,processing_status,visibility_status,processed_at) '
+        + 'SELECT id,\'partial restore marker\',\'partial.txt\',\'LOCAL\',\'documents/partial/partial.txt\','
+        + '\'TXT\',\'text/plain\',1,REPEAT(\'0\',64),\'READY\',\'VISIBLE\',UTC_TIMESTAMP(3) '
+        + 'FROM users WHERE email=\'admin@example.com\'"'
     ].join('; ')]);
     const previousMode = process.env.CORPUS_BOOTSTRAP;
     process.env.CORPUS_BOOTSTRAP = 'auto';
     try {
-      await assert.rejects(
-        () => bootstrapCorpus(),
-        (error) => error.code === 'CORPUS_PARTIAL_STATE'
-      );
+      const result = await bootstrapCorpus();
+      assert.equal(result.status, 'CORPUS_RESTORE_SKIPPED_LOCAL_PRESENT');
+      assert.equal(result.partial, true);
     } finally {
       if (previousMode === undefined) delete process.env.CORPUS_BOOTSTRAP;
       else process.env.CORPUS_BOOTSTRAP = previousMode;
     }
-    console.log('CORPUS_PARTIAL_STATE_TEST_OK auto=blocked no_overwrite=true');
+    console.log('CORPUS_PARTIAL_STATE_TEST_OK auto=retained no_overwrite=true');
   } finally {
     compose(['down', '-v', '--remove-orphans'], { allowFailure: true });
   }

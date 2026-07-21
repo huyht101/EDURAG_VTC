@@ -158,7 +158,9 @@ async function listDocuments(user, query) {
 async function getDocument(user, idValue) {
   const id = parseId(idValue, 'document id');
   const document = await documentRepo.findById(id);
-  if (!document) throw appError(404, 'DOCUMENT_NOT_FOUND', 'Không tìm thấy document.');
+  if (!document || document.visibility_status === DOCUMENT_STATUSES.visibility.DELETED) {
+    throw appError(404, 'DOCUMENT_NOT_FOUND', 'Không tìm thấy document.');
+  }
   assertManager(user, document);
   return {
     document: publicDocument(document),
@@ -183,7 +185,9 @@ async function updateDocument(user, idValue, title) {
 async function openManagedFile(user, idValue) {
   const id = parseId(idValue, 'document id');
   const document = await documentRepo.findById(id);
-  if (!document) throw appError(404, 'DOCUMENT_NOT_FOUND', 'Không tìm thấy document.');
+  if (!document || document.visibility_status === DOCUMENT_STATUSES.visibility.DELETED) {
+    throw appError(404, 'DOCUMENT_NOT_FOUND', 'Không tìm thấy document.');
+  }
   assertManager(user, document);
   const file = await fileService.open(document.storage_key);
   return { ...file, document };

@@ -40,7 +40,7 @@ async function listByMessageIds(messageIds, executor) {
 
 async function findContextById(id, executor) {
   const [rows] = await db(executor).execute(
-    `SELECT c.*, m.session_id, s.user_id AS session_user_id,
+    `SELECT c.*, m.session_id, s.user_id AS session_user_id, s.deleted_at AS session_deleted_at,
             d.uploaded_by, d.original_filename, d.storage_key, d.mime_type,
             d.processing_status, d.visibility_status
      FROM citations c

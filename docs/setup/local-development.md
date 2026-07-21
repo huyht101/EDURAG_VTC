@@ -21,9 +21,13 @@ npm run docker:mock:ps
 
 Browser frontend khác origin phải nằm trong comma-separated `CORS_ALLOWED_ORIGINS`; Postman/server-to-server không có `Origin` vẫn được phép. `TRUST_PROXY_HOPS=0` là mặc định an toàn; chỉ đặt số hop chính xác khi deployment thực sự có reverse proxy. Auth limiter hiện dùng memory của từng Node process, cấu hình qua `AUTH_*_RATE_LIMIT_*`; nhiều replica cần shared store ở phase production.
 
+JWT local/remote dùng cùng `JWT_ISSUER` và `JWT_AUDIENCE`; đổi hai giá trị này làm token cũ không còn hợp lệ. MySQL pool/queue/connect/query limits dùng `DB_CONNECTION_LIMIT`, `DB_QUEUE_LIMIT`, `DB_CONNECT_TIMEOUT_MS`, `DB_QUERY_TIMEOUT_MS`. `CHAT_PENDING_TIMEOUT_MS` chỉ terminalize stale assistant khi đúng idempotency key được retry; nó không tự gọi provider. `SHUTDOWN_TIMEOUT_MS` giới hạn graceful HTTP/MySQL drain.
+
 `GET /health` là process liveness. `GET /ready` chạy một MySQL probe nhẹ; endpoint này không chứng minh Python/Qdrant/provider khỏe. Docker healthcheck tiếp tục dùng liveness để dependency DB gián đoạn không tự gây restart loop cho Node.
 
 Mock stack chạy NodeJS + MySQL, không gọi Python/Qdrant/provider. Fresh volume tự chạy `schema.sql` rồi `demo_seed.sql`.
+
+Disposition: **RUNTIME RETAINED WITH EVIDENCE** vì `docker:mock:*` và `test:part2` là consumer thực tế. Stub chỉ mô phỏng accepted operations, deterministic no-answer/failure và sourced answer khi test cung cấp một `vector_node_id` đã tồn tại; nó không tự tạo citation giả. Remote error không bao giờ silently fallback sang mock, và mock PASS không được gọi là Python/live E2E PASS.
 
 ```powershell
 npm run check

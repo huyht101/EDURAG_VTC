@@ -75,11 +75,23 @@ async function recordFailedAttempt(id, maxAttempts, executor) {
   );
 }
 
+async function deleteExpiredTokens(limit = 100, executor) {
+  const bounded = Math.min(1000, Math.max(1, Number.parseInt(limit, 10) || 100));
+  const [result] = await executorOrPool(executor).execute(
+    `DELETE FROM auth_tokens
+     WHERE expires_at <= CURRENT_TIMESTAMP(3)
+     ORDER BY expires_at
+     LIMIT ${bounded}`
+  );
+  return result.affectedRows;
+}
+
 module.exports = {
   saveToken,
   findValidToken,
   findActiveTokenByUserAndType,
   markTokenAsUsed,
   revokeTokensByUserAndType,
-  recordFailedAttempt
+  recordFailedAttempt,
+  deleteExpiredTokens
 };

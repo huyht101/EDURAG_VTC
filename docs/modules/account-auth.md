@@ -13,9 +13,9 @@ Student/Teacher registration, login, Admin OTP, password reset, profile, passwor
 - Login chỉ verify password cho ACTIVE user. Admin tiếp tục qua OTP trước khi nhận JWT.
 - Change/reset password tăng `auth_version`; reset password và token `used_at` cùng transaction.
 
-JWT middleware verify chữ ký, current status và current `auth_version`; không cache. Logout là stateless client-side logout, không tăng version.
+Access JWT khóa `HS256`, `issuer`, `audience`, purpose `access`, UUID `jti`, `sub`, `iat`, `exp` và `authVersion`. Middleware verify các claim, current account status và current `auth_version`; không cache. `POST /api/auth/logout` là logout-all: tăng version bằng conditional update dưới row lock, nên mọi JWT phát trước đó trên mọi thiết bị bị từ chối. Request đã authorize trước lúc logout vẫn có thể hoàn tất; client vẫn phải xóa token local.
 
-Token/OTP dùng secure randomness và HMAC với server-side pepper. OTP ngắn vẫn dùng expiry/used/revoked/attempt count. Password-reset secret entropy cao được so HMAC constant-time dưới row lock; mismatch không tăng attempt hoặc revoke token hợp lệ. Development secret delivery chỉ bật rõ trong local demo và chưa phải email provider production.
+Token/OTP dùng secure randomness và HMAC với server-side pepper. OTP ngắn vẫn dùng expiry/used/revoked/attempt count. Password-reset secret entropy cao được kiểm tra trước khi chạy bcrypt rồi kiểm tra lại dưới transaction/row lock; mismatch không tăng attempt hoặc revoke token hợp lệ. Cleanup token hết hạn chạy lazy theo batch tối đa 1.000 row khi phát OTP/reset token. Development secret delivery chỉ bật rõ trong local demo và chưa phải email provider production.
 
 Register/login có configurable general limiter; Admin OTP/forgot/reset dùng limiter nghiêm ngặt hơn. Limiter hiện lưu memory riêng trong mỗi Node process, phù hợp demo/MVP nhưng không distributed-safe; production multi-instance cần shared rate-limit store. `TRUST_PROXY_HOPS` mặc định `0` và chỉ được đặt exact hop count khi có reverse proxy đã biết.
 

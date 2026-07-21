@@ -13,8 +13,23 @@ async function authMiddleware(req, res, next) {
 
     let decoded;
     try {
-      decoded = jwt.verify(authHeader.slice(7), authConfig.secret);
+      decoded = jwt.verify(authHeader.slice(7), authConfig.secret, {
+        algorithms: [authConfig.algorithm],
+        issuer: authConfig.issuer,
+        audience: authConfig.audience
+      });
     } catch (_error) {
+      return res.err(401, 'Access token không hợp lệ hoặc đã hết hạn.', 'TOKEN_INVALID_OR_EXPIRED');
+    }
+
+    if (decoded.type !== authConfig.purpose
+      || typeof decoded.jti !== 'string'
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(decoded.jti)
+      || !Number.isSafeInteger(Number(decoded.id))
+      || decoded.sub !== String(decoded.id)
+      || !Number.isSafeInteger(decoded.iat)
+      || !Number.isSafeInteger(decoded.exp)
+      || decoded.exp <= decoded.iat) {
       return res.err(401, 'Access token không hợp lệ hoặc đã hết hạn.', 'TOKEN_INVALID_OR_EXPIRED');
     }
 

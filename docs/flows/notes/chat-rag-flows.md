@@ -3,6 +3,7 @@
 - Chat session CRUD, offset-limit history, soft delete and ownership checks are implemented.
 - A session row lock allocates stable `message_order`; optional `clientRequestId` is generated server-side when blank/omitted, while a supplied UUID prevents duplicate USER messages.
 - USER and ASSISTANT PENDING rows commit before the RAG network call.
+- Retrying the same `clientRequestId` conditionally changes an expired ASSISTANT `PENDING` row to `FAILED/RAG_PENDING_TIMEOUT`; it never starts a second paid call or inserts another pair.
 - Mock and remote RAG clients return the same normalized answer/source/usage structure. Remote HTTP uses `POST /api/query`, snake_case and lowercase history roles.
 - Python receives only the bounded current history window; MySQL remains durable history.
 - Assistant completion, verified citation fragments, usage rows and `last_message_at` persist in one transaction.
@@ -12,4 +13,4 @@
 - Citation snapshot access survives document hide/delete, but only the session owner may read it; ADMIN has no public bypass. Original file access then follows current authorization/state.
 - Multiple usage calls per assistant message are supported. Dashboard scope is `LLM_CALLS_ONLY`.
 
-Realtime delivery, automatic query retry, pricing calculation and Python/Qdrant internals remain outside MVP.
+Realtime delivery, automatic provider retry, scheduler-based stale recovery, pricing calculation and Python/Qdrant internals remain outside MVP.

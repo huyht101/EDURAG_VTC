@@ -4,12 +4,14 @@
 - Remote ingest serializes `POST /api/ingest` in snake_case, derives a contained Python-visible `file_path` from `storage_key`, uses the `mvp-global` subject compatibility shim and sends empty `teacher_metadata`.
 - TEACHER ownership and ADMIN global access are enforced in both route and service layers.
 - Upload writes the generated local file before the document/job transaction and compensates by deleting that file if the transaction fails.
+- DOCX upload validates bounded OOXML central-directory members, encryption/traversal/symlink indicators and expansion limits before persistence; arbitrary ZIP is rejected.
 - Ingest dispatch happens after commit. Remote failure marks job/document `FAILED`, retains the original file and returns 503; no durable retry is promised.
 - Mock ingest is accepted but still requires the internal callback to make the document `READY`.
 - Callback normalizes Python `chunk_manifest` or compatibility alias `chunks`, locks job/document rows, checks `jobId + attemptCount`, acknowledges duplicate/stale callbacks, and persists one complete manifest transactionally. Preview-only manifests remain invalid.
 - Hide/unhide/delete use existing operation job types. Mock operations complete immediately; remote operations stay `RUNNING` until callback.
 - Hide preserves vectors; delete soft-deletes MySQL metadata and preserves file/history.
 - Public DTOs and file responses never expose `storage_key`.
+- Direct document detail/file access treats soft-deleted documents as not found. Existing citation snapshot stays readable by its session owner; original streaming then follows current source state/authorization.
 
 Public reprocess, batching, durable scheduling and parallel generations remain outside MVP.
 

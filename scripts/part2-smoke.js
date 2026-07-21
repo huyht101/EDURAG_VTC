@@ -33,13 +33,10 @@ const userRepo = require('../src/repositories/user-repository');
 const documentRepo = require('../src/repositories/document-repository');
 const documentService = require('../src/services/document-service');
 const documentFileService = require('../src/services/document-file-service');
+const authService = require('../src/services/auth-service');
 
 function accessToken(user) {
-  return jwt.sign(
-    { id: user.id, role: user.role, authVersion: user.auth_version },
-    process.env.JWT_SECRET,
-    { expiresIn: '1h' }
-  );
+  return authService.signJwt(user);
 }
 
 async function createActiveUser(role, suffix) {
@@ -77,6 +74,52 @@ async function recursiveFileCount(directory) {
     if (error.code === 'ENOENT') return 0;
     throw error;
   }
+}
+
+async function cleanupSmokeSuffix(suffix) {
+  const storageKeys = await withTransaction(async (connection) => {
+    const [users] = await connection.execute(
+      'SELECT id FROM users WHERE email LIKE ?',
+      [`%${suffix}@smoke.test`]
+    );
+    const userIds = users.map((row) => row.id);
+    if (!userIds.length) return [];
+    const userMarks = userIds.map(() => '?').join(',');
+    const [sessions] = await connection.execute(
+      `SELECT id FROM chat_sessions WHERE user_id IN (${userMarks})`, userIds
+    );
+    const sessionIds = sessions.map((row) => row.id);
+    const sessionMarks = sessionIds.map(() => '?').join(',');
+    const [messages] = sessionIds.length
+      ? await connection.execute(`SELECT id FROM chat_messages WHERE session_id IN (${sessionMarks})`, sessionIds)
+      : [[]];
+    const messageIds = messages.map((row) => row.id);
+    const messageMarks = messageIds.map(() => '?').join(',');
+    const [documents] = await connection.execute(
+      `SELECT id, storage_key FROM documents WHERE uploaded_by IN (${userMarks})`, userIds
+    );
+    const documentIds = documents.map((row) => row.id);
+    const documentMarks = documentIds.map(() => '?').join(',');
+
+    if (messageIds.length) {
+      await connection.execute(`DELETE FROM citations WHERE message_id IN (${messageMarks})`, messageIds);
+      await connection.execute(`DELETE FROM llm_usage_logs WHERE message_id IN (${messageMarks})`, messageIds);
+      await connection.execute(`DELETE FROM chat_messages WHERE id IN (${messageMarks})`, messageIds);
+    }
+    await connection.execute(`DELETE FROM llm_usage_logs WHERE user_id IN (${userMarks})`, userIds);
+    if (sessionIds.length) {
+      await connection.execute(`DELETE FROM chat_sessions WHERE id IN (${sessionMarks})`, sessionIds);
+    }
+    if (documentIds.length) {
+      await connection.execute(`DELETE FROM document_chunks WHERE document_id IN (${documentMarks})`, documentIds);
+      await connection.execute(`DELETE FROM document_processing_jobs WHERE document_id IN (${documentMarks})`, documentIds);
+      await connection.execute(`DELETE FROM documents WHERE id IN (${documentMarks})`, documentIds);
+    }
+    await connection.execute(`DELETE FROM auth_tokens WHERE user_id IN (${userMarks})`, userIds);
+    await connection.execute(`DELETE FROM users WHERE id IN (${userMarks})`, userIds);
+    return documents.map((row) => row.storage_key).filter(Boolean);
+  });
+  await Promise.all(storageKeys.map((storageKey) => documentFileService.remove(storageKey).catch(() => {})));
 }
 
 async function listenOnSafePort(application) {
@@ -443,7 +486,7 @@ async function main() {
     const unsourcedRequestId = crypto.randomUUID();
     await request(`/api/chat/sessions/${noAnswerSession.id}/messages`, {
       method: 'POST', headers: auth(studentToken, { 'content-type': 'application/json' }),
-      body: JSON.stringify({ content: 'Mock answer without configured source', clientRequestId: unsourcedRequestId })
+      body: JSON.stringify({ content: '__UNSOURCED_ANSWER__', clientRequestId: unsourcedRequestId })
     }, 502);
     const failedHistory = (await request(`/api/chat/sessions/${noAnswerSession.id}/messages`, {
       headers: auth(studentToken)
@@ -547,6 +590,7 @@ async function main() {
     console.log('PART2_SMOKE_OK');
   } finally {
     await new Promise((resolve) => server.close(resolve));
+    await cleanupSmokeSuffix(suffix);
     await pool.end();
   }
 }
