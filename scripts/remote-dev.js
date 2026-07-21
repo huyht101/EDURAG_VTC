@@ -8,7 +8,6 @@ const {
 } = require('./remote-test-utils');
 const { main: runPreflight } = require('./remote-preflight');
 const { bootstrapCorpus } = require('./corpus-manager');
-const { bootstrapOriginalFiles } = require('./corpus-files-manager');
 
 let logProcess = null;
 let shuttingDown = false;
@@ -46,9 +45,9 @@ async function main() {
 
   compose(['build', 'app', 'rag-service']);
   compose(['up', '-d', '--wait', 'db', 'qdrant']);
-  await bootstrapCorpus();
   compose(['create', 'app']);
-  await bootstrapOriginalFiles();
+  const corpus = await bootstrapCorpus();
+  console.log(`REMOTE_DEV_CORPUS state=${corpus.status || corpus.reason || 'UNKNOWN'}`);
   compose(['up', '-d', '--wait', 'app', 'rag-service']);
   await runPreflight();
 

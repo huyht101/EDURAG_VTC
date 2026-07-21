@@ -9,7 +9,7 @@ Team Python/Data-RAG sở hữu production source trong upstream repository riê
 | Upstream repository | <https://github.com/manh2905/RAG_service> |
 | Branch/tag | `Unknown` |
 | Upstream commit | `Unknown` |
-| Snapshot refreshed/audited | `2026-07-17` |
+| Snapshot refreshed/audited | `2026-07-21` |
 | Import source | Source copy; exact upstream export metadata chưa được ghi |
 | Local Python runtime patch status | Có integration overlays cần upstream, liệt kê bên dưới |
 
@@ -33,13 +33,15 @@ Khả năng trên đã được contract tests và isolated remote E2E kiểm ch
 - Explicit `INTERNAL_SECRET`, constant-time Bearer verification và auth/schema tests.
 - `llama-index-llms-google-genai` và `llama-index-embeddings-google-genai` requirements alignment.
 - `embedding_config.output_dimensionality=768` cho `gemini-embedding-001`.
+- Idempotent Qdrant collection initialization with exact vector-schema validation and bounded concurrent-create postcondition retry.
+- Pin `qdrant-client==1.17.1` for the repository's Qdrant server `1.18.2`.
 - Safe standalone environment template.
 
 ## Limitations
 
 - FastAPI `BackgroundTasks` không phải durable queue.
 - Python snapshot Compose là standalone; root `docker-compose.remote.yml` mới là integration topology đã verify.
-- Qdrant client `1.14.2` cảnh báo với server `1.18.2`; live integration PASS nhưng version support cần được team Python chốt.
+- Qdrant client `1.17.1` và server `1.18.2` đã được kiểm chứng không còn compatibility warning. Pin này phải được upstream cùng collection race fix.
 - Node team không sở hữu retrieval quality, prompt/model tuning hoặc Python release.
 
 Sau mỗi import, cập nhật metadata/capability tại file này và làm theo [snapshot refresh guide](../setup/python-snapshot-refresh.md). Current gate nằm tại [Week 3 readiness](../status/week3-integration-readiness.md).

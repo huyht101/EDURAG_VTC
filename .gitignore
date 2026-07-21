@@ -54,5 +54,7 @@ week2_nodejs_core_ref/
 # Keep python-service source trackable; ignore only generated packages/import archives.
 /artifacts/
 /python-service/*.zip
+/bootstrap/corpus/
 /bootstrap/.corpus-build-*/
 /bootstrap/.corpus-previous-*/
+/bootstrap/.corpus-release-*/

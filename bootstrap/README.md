@@ -1,9 +1,10 @@
-# Corpus bootstrap
+# Cloud corpus bootstrap metadata
 
-Portable corpus được tạo vào `bootstrap/corpus/` bằng `npm run corpus:export`. Không tạo hoặc sửa bundle thủ công.
+Git chỉ giữ:
 
-Export chỉ thành công khi source data qua sanitization và MySQL–Qdrant reconciliation. Xem [portable corpus architecture](../docs/architecture/corpus-portability.md) để biết format, restore và giới hạn file gốc.
+- `corpus-release.json`: pointer nhỏ tới immutable release mặc định trên private GCS;
+- `corpus-approved-documents.json`: exact-checksum approvals cho tài liệu được phép publish.
 
-Fixture files được Git track tự động được xem là demo-approved. Với một document demo không thể/không nên commit file gốc, data owner phải review nội dung rồi thêm SHA-256 vào `corpus-approved-documents.json`; không thêm checksum chỉ để bypass lỗi export.
+MySQL dump, Qdrant snapshot và original files không nằm trong Git. Không sửa pointer hoặc approval thủ công để bypass validation. Manager dùng `npm run corpus:publish`; thành viên dùng `npm run corpus:restore` hoặc `npm run docker:remote:dev`.
 
-Original binaries không được commit. Host-side `corpus:files:*` tooling publish/restore exact-approved files qua private GCS; mapping canonical nằm trong `corpus/original-files.json` khi đã publish thành công.
+Thiết kế, security gate và lifecycle: [Corpus portability](../docs/architecture/corpus-portability.md).

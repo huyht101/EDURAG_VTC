@@ -1,32 +1,29 @@
-# Independent test plan
+# Week 3 independent test plan
 
-Checklist cho thành viên thứ hai kiểm tra fresh clone. Không sửa Python runtime/schema và không ghi credential vào evidence.
+Checklist cho tester fresh-clone. Không sửa schema/Python runtime và không ghi credential vào evidence.
 
-## 1. Chuẩn bị
+## 1. Setup
 
 ```powershell
 npm ci
 Copy-Item .env.example .env
 ```
 
-Điền provider credentials và secrets trong root `.env` qua kênh an toàn. Chọn `REMOTE_COMPOSE_PROJECT` riêng. Nếu test original restore, đặt reader key tại `secrets/gcs.json`; writer key chỉ dành cho manager publish. Không tạo `PythonSevice.env` và không commit `.env`/credential.
+Điền root `.env` qua kênh an toàn. Đặt reader-only key tại `secrets/gcs.json`; writer key không cần cho acceptance này. Không commit `.env`/credential.
 
 ## 2. Automated baseline
 
 ```powershell
 npm run check
 npm run test:openapi
+npm run test:docs
 npm run test:contract
 npm run test:corpus
-npm run test:corpus:files
-npm run test:docs
 npm run docker:mock:config
 npm run docker:remote:config
 ```
 
-Expected: syntax, OpenAPI, contract, corpus checksum/tamper và Markdown links đều PASS. Các test này không gọi paid provider.
-
-Part 2 mock regression cần MySQL development:
+Các gate trên không gọi paid provider. Mock HTTP regression:
 
 ```powershell
 npm run docker:mock:up
@@ -34,104 +31,56 @@ npm run test:part2
 npm run docker:mock:down
 ```
 
-Đảm bảo `RAG_MODE=mock` khi chạy mock stack. `docker:mock:down` giữ volumes; chỉ dùng `docker:mock:reset` với project disposable.
+## 3. Reader-only fresh restore
 
-## 3. Remote foreground và corpus restore
-
-Giữ `CORPUS_BOOTSTRAP=auto`:
+Giữ `CORPUS_BOOTSTRAP=auto`, dùng một `REMOTE_COMPOSE_PROJECT` mới và chạy:
 
 ```powershell
+npm run corpus:inspect
 npm run docker:remote:dev
 ```
 
-Trên fresh volumes, xác nhận:
+Expected:
 
-- `CORPUS_RESTORE_OK` với 1 document, 2 chunks, 2 Qdrant points;
+- full release download/verification;
+- `CORPUS_RESTORE_OK` với 1 document, 1 job, 2 chunks, 2 citations và 2 Qdrant points;
+- one original restored vào upload volume;
 - `REMOTE_PREFLIGHT_OK`;
-- app/Python logs được attach;
-- không có document ingest/LlamaParse trong bootstrap log.
-- `CORPUS_FILES_RESTORE_OK` nếu reader key/object hợp lệ; hoặc `CORPUS_FILES_SKIPPED` nếu mode `auto` không có key.
+- không có ingest, LlamaParse hoặc document embedding trong bootstrap.
 
-Nếu volumes đã có data, expected là `CORPUS_BOOTSTRAP_SKIPPED` với `DATA_EXISTS`.
+Nhấn `Ctrl+C`, chạy lại cùng project và xác nhận `CORPUS_ALREADY_RESTORED`, counts không duplicate, volumes được giữ.
 
-## 4. Manual Swagger checks
+## 4. Swagger acceptance
 
 Mở `http://localhost:5001/api-docs`.
 
-1. Login Demo Admin `admin@example.com / 123456`.
-2. Lấy `[DEV-ONLY ADMIN OTP]` từ terminal.
-3. Verify OTP và Authorize bằng user JWT.
-4. Tạo chat session.
-5. Gửi question chỉ có `content`, không gửi `clientRequestId`.
-6. Xác nhận response trả UUID được server sinh.
-7. Xác nhận assistant `COMPLETED`, citation tồn tại và `/api/citations/{id}/source` có snapshot.
-8. Nếu original đã restore, xác nhận metadata `originalAvailable=true` và document/citation file endpoint stream được PDF. Nếu không key, xác nhận snapshot vẫn đọc được và original endpoint báo unavailable.
-9. Nếu kiểm tra retry, gửi lại cùng UUID trong cùng session và xác nhận không duplicate; dùng UUID đó ở session khác phải trả `409`.
+1. Login Demo Admin `admin@example.com` / `123456`.
+2. Lấy OTP từ app log, verify và Authorize bằng user JWT.
+3. Xem document/citation metadata: `originalAvailable=true`.
+4. Xác nhận `GET /api/documents/{id}/file` và `GET /api/citations/{id}/file` stream original đúng MIME/content-disposition.
+5. Xác nhận citation source snapshot không rỗng và không public GCS URL/path.
+6. Optional paid check: tạo chat session, gửi một question chỉ có `content`, xác nhận UUID được sinh, answer/citation/usage được persist. Không assert exact LLM wording.
 
-ADMIN chỉ đọc chat của chính mình. `no_answer=true` là success hợp lệ và không được có citation giả.
+## 5. Negative modes
 
-## 5. Original-file acceptance không dùng paid provider
+Không đổi/xóa key thật; trỏ `GCS_CREDENTIALS_FILE` tới explicit nonexistent test path trên một project disposable.
 
-### Không key
+- `auto`: startup degraded/empty, không xóa volumes và không giả vờ corpus đã restore.
+- `required`: orchestration fail, containers được stop best-effort và volumes được giữ.
+- Local original khác checksum: restore fail, không overwrite.
+- Partial/incompatible MySQL–Qdrant state: fail, không merge.
 
-- Trỏ `GCS_CREDENTIALS_FILE` tới explicit nonexistent test path; không rename/xóa key thật.
-- `CORPUS_FILES_BOOTSTRAP=auto`: expected skip, stack tiếp tục.
-- `CORPUS_FILES_BOOTSTRAP=required`: expected fail trước app startup, volumes được giữ.
+`npm run corpus:verify` phải verify remote release; khi services chạy còn reconcile local counts/mapping/originals. `npm run corpus:restore` lần hai phải idempotent.
 
-### Reader
+## 6. Writer acceptance (manager only)
 
-```powershell
-npm run corpus:files:inspect
-npm run corpus:files:verify
-npm run corpus:files:restore
-npm run corpus:files:restore
-```
+Manager trên exact-approved, quiescent source chạy `npm run corpus:publish` hai lần. Lần đầu upload data artifacts rồi manifest cuối; lần hai phải `uploaded=0`, không overwrite/delete. Reader-only tester không thực hiện bước này.
 
-Lần đầu restore, lần hai idempotent skip. Kiểm file checksum/API nhưng không ingest/embed.
+## 7. Cleanup và evidence
 
-### Writer manager
+- `docker:remote:stop`/`down` giữ volumes; `reset` chỉ dùng với project disposable đã xác nhận.
+- Không xóa project/volume của người khác.
+- `git status --short` không được có `.env`, credential, downloaded dump/snapshot/original hoặc temp artifact.
+- Báo branch/commit, command, PASS/FAIL, status/counts, HTTP status/error code và logs đã redact.
 
-Chỉ manager chạy `npm run corpus:files:publish` sau exact-checksum review. Chạy lần hai phải skip object đã verify; không overwrite/delete. Evidence chỉ ghi count/status, không ghi credential hoặc object content.
-
-## 6. Optional paid live automation
-
-Chỉ chạy khi project đã được xác nhận isolated và team cho phép provider call:
-
-```powershell
-npm run test:corpus:live
-```
-
-Expected: citation map restored chunk, usage được persist, còn ingest-job/chunk/Qdrant-point counts không tăng. Không chạy lại nếu một query đã đủ evidence. Full `npm run test:remote` có upload/ingest/hide/unhide/delete và chỉ dùng cho một disposable E2E project, không dùng trên corpus cần giữ.
-
-Live wording và `no_answer` không deterministic; contract/mock tests chịu trách nhiệm cho các nhánh này.
-
-## 7. Lifecycle và restart
-
-Nhấn `Ctrl+C`:
-
-- containers dừng;
-- named volumes còn;
-- không có orphan child process trong normal shutdown.
-
-Chạy lại `npm run docker:remote:dev`; expected `DATA_EXISTS`, không restore lần hai và không duplicate counts. Abrupt kill/Docker crash không bảo đảm signal cleanup; dùng `npm run docker:remote:stop` nếu cần.
-
-## 8. Cleanup
-
-- Không xóa project/volume không do test tạo.
-- `docker:remote:stop` hoặc `down` giữ volumes.
-- `reset` chỉ dùng với project disposable đã xác nhận vì xóa MySQL/Qdrant/upload data.
-- Xác nhận `git status --short` không có `.env`, upload, log, Qdrant data hoặc temp artifact.
-
-## 9. Evidence và bug report
-
-Ghi:
-
-- branch/commit và timestamp;
-- command + PASS/FAIL/BLOCKED;
-- lifecycle/status/counts, không ghi content hoặc secret;
-- expected/actual;
-- endpoint, HTTP status và `errorCode`;
-- request/response shape và logs đã redact;
-- model name, không ghi API key.
-
-Setup chi tiết nằm duy nhất tại [Remote Docker RAG](../setup/remote-rag-e2e.md); endpoint behavior nằm trong Swagger và [Public API](../api/public-api.md).
+Setup canonical: [Remote Docker RAG](../setup/remote-rag-e2e.md). Endpoint semantics: Swagger và [Public API](../api/public-api.md).

@@ -62,13 +62,10 @@ async def lifespan(app: FastAPI):
     logger.info("   Sim Threshold: %.2f", settings.SIMILARITY_THRESHOLD)
     logger.info("=" * 60)
 
-    # Khởi tạo kết nối Qdrant sớm để fail-fast nếu có lỗi
-    try:
-        await get_qdrant_client()
-        logger.info("Khởi tạo thành công — Service sẵn sàng phục vụ ✓")
-    except Exception as e:
-        logger.error("⚠️  Không thể kết nối Qdrant: %s", str(e))
-        logger.warning("Service vẫn khởi động nhưng các API sẽ lỗi cho đến khi Qdrant sẵn sàng")
+    # Khởi tạo sớm và fail-fast: không phục vụ request nếu collection thiếu,
+    # unavailable hoặc không khớp vector contract.
+    await get_qdrant_client()
+    logger.info("Khởi tạo thành công — Service sẵn sàng phục vụ ✓")
 
     yield  # ← App chạy ở đây
 

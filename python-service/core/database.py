@@ -9,6 +9,7 @@ Phiên bản v3:
 - Thêm payload index cho is_hidden (tăng tốc filter khi search).
 """
 
+import asyncio
 import logging
 # pyrefly: ignore [missing-import]
 from qdrant_client import QdrantClient, models
@@ -62,36 +63,107 @@ async def _ensure_collection_exists(
     client: QdrantClient,
     collection_name: str,
     vector_size: int,
+    postcondition_attempts: int = 10,
 ) -> None:
     """
     Kiểm tra collection đã tồn tại chưa.
     Nếu chưa → tạo mới với Cosine similarity + payload indexes.
     """
+    collections = client.get_collections().collections
+    existing_names = [col.name for col in collections]
+
+    if collection_name in existing_names:
+        _validate_collection(client, collection_name, vector_size)
+        logger.info("Collection '%s' đã tồn tại và tương thích ✓", collection_name)
+        return
+
+    logger.info("Collection '%s' chưa tồn tại — đang tạo mới...", collection_name)
+    created = False
     try:
-        collections = client.get_collections().collections
-        existing_names = [col.name for col in collections]
+        client.create_collection(
+            collection_name=collection_name,
+            vectors_config=models.VectorParams(
+                size=vector_size,
+                distance=models.Distance.COSINE,
+            ),
+        )
+        created = True
+    except Exception as error:
+        if not _is_concurrent_create_conflict(error):
+            raise
+        logger.info(
+            "Collection '%s' vừa được worker khác tạo; đang kiểm tra postcondition...",
+            collection_name,
+        )
 
-        if collection_name not in existing_names:
-            logger.info("Collection '%s' chưa tồn tại — đang tạo mới...", collection_name)
+    # Never treat a 409 as success by itself. The collection must now exist,
+    # be available and match the exact unnamed-vector contract.
+    await _wait_for_collection_postcondition(
+        client, collection_name, vector_size, attempts=postcondition_attempts
+    )
 
-            client.create_collection(
-                collection_name=collection_name,
-                vectors_config=models.VectorParams(
-                    size=vector_size,
-                    distance=models.Distance.COSINE,
-                ),
-            )
+    if created:
+        _create_payload_indexes(client, collection_name)
+        logger.info("Đã tạo collection '%s' với %d chiều vector ✓", collection_name, vector_size)
 
-            # Tạo payload indexes để tăng tốc filter/delete
-            _create_payload_indexes(client, collection_name)
 
-            logger.info("Đã tạo collection '%s' với %d chiều vector ✓", collection_name, vector_size)
-        else:
-            logger.info("Collection '%s' đã tồn tại ✓", collection_name)
+def _is_concurrent_create_conflict(error: Exception) -> bool:
+    """Only accept qdrant-client's exact HTTP 409 create conflict."""
+    try:
+        from qdrant_client.http.exceptions import UnexpectedResponse
+    except ImportError:
+        return False
+    return isinstance(error, UnexpectedResponse) and error.status_code == 409
 
-    except Exception as e:
-        logger.error("Lỗi khi kiểm tra/tạo collection: %s", str(e))
-        raise
+
+def _is_transient_collection_read(error: Exception) -> bool:
+    """Recognize only bounded post-create read failures observed from Qdrant."""
+    try:
+        from qdrant_client.http.exceptions import UnexpectedResponse
+    except ImportError:
+        return False
+    return isinstance(error, UnexpectedResponse) and error.status_code in {404, 500, 503}
+
+
+async def _wait_for_collection_postcondition(
+    client: QdrantClient,
+    collection_name: str,
+    vector_size: int,
+    attempts: int = 10,
+) -> None:
+    last_error: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            _validate_collection(client, collection_name, vector_size)
+            return
+        except Exception as error:
+            if not _is_transient_collection_read(error):
+                raise
+            last_error = error
+            if attempt < attempts:
+                await asyncio.sleep(min(0.05 * attempt, 0.25))
+    assert last_error is not None
+    raise last_error
+
+
+def _validate_collection(client: QdrantClient, collection_name: str, vector_size: int) -> None:
+    """Validate availability and the exact unnamed cosine-vector schema."""
+    info = client.get_collection(collection_name=collection_name)
+    status = getattr(getattr(info, "status", None), "value", getattr(info, "status", None))
+    if str(status).lower() not in {"green", "yellow", "grey"}:
+        raise RuntimeError(f"Qdrant collection '{collection_name}' is not available.")
+
+    vectors = getattr(getattr(getattr(info, "config", None), "params", None), "vectors", None)
+    if vectors is None or isinstance(vectors, dict):
+        raise RuntimeError(f"Qdrant collection '{collection_name}' does not use one unnamed vector.")
+
+    actual_size = getattr(vectors, "size", None)
+    distance = getattr(vectors, "distance", None)
+    actual_distance = getattr(distance, "value", distance)
+    if actual_size != vector_size or str(actual_distance).lower() != "cosine":
+        raise RuntimeError(
+            f"Qdrant collection '{collection_name}' has an incompatible vector configuration."
+        )
 
 
 def _create_payload_indexes(client: QdrantClient, collection_name: str) -> None:

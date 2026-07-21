@@ -5,7 +5,7 @@ const fsp = require('fs/promises');
 const path = require('path');
 
 const { compose, composeProject, docker } = require('../remote-test-utils');
-const { originalFilesError, validateLocalStorageKey } = require('./corpus-original-files');
+const { releaseError, validateLocalStorageKey } = require('./corpus-release');
 
 const APP_UPLOAD_DESTINATION = '/usr/src/app/uploads';
 
@@ -46,20 +46,32 @@ class DockerUploadVolume {
     const image = String(this.compose(['images', '-q', 'app'], { allowFailure: true }) || '').trim()
       .split(/\r?\n/).filter(Boolean)[0];
     if (!image) {
-      throw originalFilesError(
-        'CORPUS_FILES_APP_IMAGE_MISSING',
+      throw releaseError(
+        'CORPUS_APP_IMAGE_MISSING',
         'Build the remote app image before accessing the upload volume.'
       );
     }
     return image;
   }
 
-  async withHelper(callback) {
-    const resolved = this.resolve();
+  ensure() {
+    let resolved = this.resolve();
+    if (resolved.resolvable) return resolved;
+
+    // A standalone corpus:restore starts only MySQL and Qdrant. Create the
+    // stopped app container so Compose materializes the canonical upload
+    // volume and we can discover its exact name without guessing.
+    this.compose(['create', 'app']);
+    resolved = this.resolve();
     if (!resolved.resolvable) {
-      throw originalFilesError('CORPUS_FILES_UPLOAD_VOLUME_UNAVAILABLE', 'Docker upload volume is unavailable.');
+      throw releaseError('CORPUS_UPLOAD_VOLUME_UNAVAILABLE', 'Docker upload volume is unavailable.');
     }
-    const name = `edurag-corpus-files-${crypto.randomUUID()}`;
+    return resolved;
+  }
+
+  async withHelper(callback) {
+    const resolved = this.ensure();
+    const name = `edurag-corpus-release-${crypto.randomUUID()}`;
     const image = this.appImage();
     try {
       this.docker([
@@ -89,7 +101,7 @@ class DockerUploadVolume {
       try {
         return JSON.parse(this.docker(['exec', helper, 'node', '-e', script, target]));
       } catch (_error) {
-        throw originalFilesError('CORPUS_FILES_LOCAL_READ_FAILED', 'Cannot inspect an original in the upload volume.');
+        throw releaseError('CORPUS_ORIGINAL_LOCAL_READ_FAILED', 'Cannot inspect an original in the upload volume.');
       }
     });
   }
@@ -99,12 +111,12 @@ class DockerUploadVolume {
       const target = helperPath(storageKey);
       const exists = this.docker(['exec', helper, 'test', '-f', target], { allowFailure: true });
       if (!dockerResultSucceeded(exists)) {
-        throw originalFilesError('CORPUS_FILES_LOCAL_SOURCE_MISSING', 'Approved original is missing from the upload volume.');
+        throw releaseError('CORPUS_ORIGINAL_SOURCE_MISSING', 'Approved original is missing from the upload volume.');
       }
       try {
         this.docker(['cp', `${helper}:${target}`, destination]);
       } catch (_error) {
-        throw originalFilesError('CORPUS_FILES_LOCAL_READ_FAILED', 'Cannot copy the approved original from the upload volume.');
+        throw releaseError('CORPUS_ORIGINAL_LOCAL_READ_FAILED', 'Cannot copy the approved original from the upload volume.');
       }
     });
   }
@@ -125,12 +137,12 @@ class DockerUploadVolume {
         if (current.sha256 === expected.sha256 && current.sizeBytes === expected.sizeBytes) {
           return { restored: false, skipped: true, volumeName };
         }
-        throw originalFilesError(
-          'CORPUS_FILES_LOCAL_MISMATCH',
+        throw releaseError(
+          'CORPUS_ORIGINAL_LOCAL_MISMATCH',
           'Existing local original differs from the approved checksum; refusing overwrite.'
         );
       }
-      const temporary = `/uploads/.corpus-files-${crypto.randomUUID()}`;
+      const temporary = `/uploads/.corpus-release-${crypto.randomUUID()}`;
       try {
         this.docker(['cp', sourceFile, `${helper}:${temporary}`]);
         const finalize = [
@@ -144,12 +156,12 @@ class DockerUploadVolume {
       } catch (error) {
         this.docker(['exec', helper, 'rm', '-f', temporary], { allowFailure: true });
         if (error.code) throw error;
-        throw originalFilesError('CORPUS_FILES_LOCAL_WRITE_FAILED', 'Atomic upload-volume restore failed.');
+        throw releaseError('CORPUS_ORIGINAL_LOCAL_WRITE_FAILED', 'Atomic upload-volume restore failed.');
       }
       const restored = JSON.parse(this.docker(['exec', helper, 'node', '-e', statScript, target]));
       if (!restored.exists || restored.sha256 !== expected.sha256
         || restored.sizeBytes !== expected.sizeBytes) {
-        throw originalFilesError('CORPUS_FILES_LOCAL_VERIFY_FAILED', 'Restored original failed local verification.');
+        throw releaseError('CORPUS_ORIGINAL_LOCAL_VERIFY_FAILED', 'Restored original failed local verification.');
       }
       return { restored: true, skipped: false, volumeName };
     });

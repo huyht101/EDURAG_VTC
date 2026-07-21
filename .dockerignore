@@ -11,6 +11,7 @@ week2_nodejs_core_ref
 /secrets
 /artifacts
 /bootstrap/corpus
+/bootstrap/.corpus-release-*
 /logs
 *.log
 /coverage

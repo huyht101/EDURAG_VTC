@@ -14,7 +14,7 @@ function upstreamStatus(error) {
 
 function mapReadError(error, missingCode = 'GCS_OBJECT_MISSING') {
   const status = upstreamStatus(error);
-  if (status === 404) return gcsError(missingCode, 'The approved GCS object does not exist.');
+  if (status === 404) return gcsError(missingCode, 'The requested GCS release object does not exist.');
   if (status === 401 || status === 403) {
     return gcsError('GCS_READ_PERMISSION_REQUIRED', 'GCS reader permission or valid credentials are required.');
   }
@@ -36,6 +36,8 @@ class GcsObjectStore {
         sizeBytes: Number(metadata.size),
         sha256: String(metadata.metadata?.sha256 || '').toLowerCase(),
         documentId: String(metadata.metadata?.documentId || ''),
+        kind: String(metadata.metadata?.kind || ''),
+        releaseId: String(metadata.metadata?.releaseId || ''),
         generation: String(metadata.generation || '')
       };
     } catch (error) {
@@ -54,9 +56,11 @@ class GcsObjectStore {
         metadata: {
           contentType: metadata.contentType,
           metadata: {
-            documentId: String(metadata.documentId),
+            ...(metadata.documentId === undefined ? {} : { documentId: String(metadata.documentId) }),
+            kind: String(metadata.kind || ''),
+            releaseId: String(metadata.releaseId || ''),
             sha256: metadata.sha256,
-            bundleVersion: String(metadata.bundleVersion),
+            schemaVersion: String(metadata.schemaVersion || ''),
             sizeBytes: String(metadata.sizeBytes)
           }
         }
@@ -66,7 +70,7 @@ class GcsObjectStore {
       const status = upstreamStatus(error);
       if (status === 412) return { uploaded: false, preconditionFailed: true };
       if (status === 401 || status === 403) {
-        throw gcsError('GCS_WRITE_PERMISSION_REQUIRED', 'GCS writer permission is required to publish originals.');
+        throw gcsError('GCS_WRITE_PERMISSION_REQUIRED', 'GCS writer permission is required to publish a corpus release.');
       }
       throw gcsError('GCS_UPLOAD_FAILED', 'GCS create-only upload failed.');
     }

@@ -2,53 +2,45 @@
 
 ## Current status
 
-**WEEK 3 NODEJS/CORE READY FOR INDEPENDENT TEST WITH PORTABLE CORPUS**
+**POST-MIGRATION HARDENING COMPLETE — READY FOR INDEPENDENT RETEST**
 
-Áp dụng cho isolated development topology tại baseline `18ddf20417ab7b214b0bf6eb6d7e03e4f937d706` cùng worktree changes hiện tại. Đây không phải production readiness.
+Baseline: `c3fa1c7763bb03ba763b09b47677a756bebec535` cùng worktree changes hiện tại. Đây là development/integration readiness, không phải production readiness.
 
-## Implemented
+## Completed
 
-- Public Auth/Profile/Admin, Document, Chat, Citation và basic Dashboard APIs.
-- RAG `mock|remote` adapter; internal Bearer hai chiều.
-- Upload/shared storage, processing jobs, complete-manifest callback và stale/duplicate guard.
-- Chat idempotency với optional `clientRequestId`, immutable citation snapshot và multi-row usage.
-- Foreground Docker lifecycle qua `docker:remote:dev`.
-- Portable sanitized MySQL + Qdrant corpus, exact-checksum approval, verify/restore/auto-bootstrap.
-- Host-side private GCS publish/restore cho exact-approved originals; runtime storage vẫn LOCAL và credential không vào containers.
-- Canonical corpus: schema/bundle `1.0.0`, 1 document, 2 chunks, 2 Qdrant points, `gemini-embedding-001` dimension 768; original binary không nằm trong Git.
+- Public Auth/Profile/Admin, Document, Chat, Citation và Dashboard APIs.
+- Remote NodeJS–Python contract, internal Bearer, complete-manifest callback và stale/duplicate guards.
+- Optional `clientRequestId`, immutable citation snapshots và multi-row usage.
+- Foreground Docker lifecycle và retained volumes.
+- Immutable cloud corpus release `v1-be5f3fc5669b25984d2333ca`: sanitized MySQL, Qdrant snapshot, exact-approved original và canonical manifest.
+- Reader-only credential được xác minh chỉ có `storage.objects.get/list`; không có create/update/delete.
+- Qdrant collection startup validate exact unnamed cosine vector `768`; concurrent create chỉ chấp nhận exact HTTP `409`, sau đó kiểm tra postcondition có bounded retry.
+- `qdrant-client==1.17.1` chạy với Qdrant server `1.18.2`, nằm trong một minor version và không còn compatibility warning.
+- Legacy pre-release object đã được xóa đúng generation bằng generation-match. Bucket tắt versioning và bật soft delete 7 ngày; object không còn live nhưng còn ở trạng thái soft-deleted trong retention window.
 
-## Verification evidence
+## Evidence
 
 | Gate | Result |
 |---|---|
-| Syntax/OpenAPI/contract | PASS |
+| Syntax/OpenAPI/contract/corpus tests | PASS |
 | Part 2 mock regression | PASS |
-| Remote preflight and live upload/callback/chat/hide/unhide/delete | PASS, 2026-07-17 |
-| Python 3.11 compile/tests without provider calls | PASS |
-| Corpus PII/secret/path scan and checksums | PASS |
-| Isolated MySQL + Qdrant restore/reconciliation | PASS |
-| One restored live query with mapped citation and usage | PASS; no ingest/chunk/point increase |
-| Auto-bootstrap empty/existing/partial/required behavior | PASS |
-| Foreground controlled shutdown and volume retention | PASS |
-| GCS create-only publish + download-back checksum | PASS, 2026-07-21; 1 object, second publish skipped |
-| Isolated GCS original restore + document/citation file APIs | PASS, 2026-07-21; second restore skipped |
-| Missing-key `auto`/`required` | PASS; auto preserved Chat/citation snapshot, required failed closed |
+| Canonical GCS inspect/verify | PASS; 3 artifacts, 4,432,575 bytes |
+| Independent Reader-only isolated restore | PASS; 1 document, 1 job, 2 chunks, 2 citations, 2 points, 1 original |
+| Document/citation original API | PASS; HTTP `200`, checksum verified |
+| Retained-volume restart/second restore | PASS; `mysql=0`, `qdrant=0`, original skipped idempotently |
+| Qdrant race unit tests | PASS |
+| Real two-worker empty-collection startup | PASS; expected `409` followed by compatible postcondition |
+| Restored collection startup | PASS; collection reused without mutation |
+| Legacy cleanup postcondition | PASS; canonical release still verifies, legacy live object absent |
+| Paid provider calls during hardening | 0 |
 
-## Known limitations
+## Known limitations and follow-up
 
-- Runtime vẫn là local shared-volume storage; GCS chỉ là one-way original-file distribution, không phải runtime provider hoặc bidirectional sync.
-- Không có reader key/object thì file download unavailable nhưng Chat/RAG/citation snapshot vẫn dùng được; reprocess cần upload theo flow hiện tại.
-- Failed jobs không có durable queue/scheduler hoặc public retry API.
-- Query vẫn dùng provider; live `no_answer` không deterministic.
-- Qdrant client `1.14.2` emits compatibility warning với server `1.18.2`; verified integration vẫn PASS.
-- Current Python upstream commit chưa được ghi nhận chính xác.
+- Fresh no-key `auto` can start without canonical corpus; existing compatible local volumes remain usable.
+- Cloud release is not bidirectional sync. New corpus data requires a new immutable manager publish.
+- Runtime still uses local MySQL/Qdrant/uploads; GCS is not a runtime provider.
+- Live retrieval/generation was intentionally not rerun in this hardening pass.
+- Two tracked `.rar` files under `secrets/` appear credential-related by filename. They were not opened, changed or deleted. Repository owner must verify, revoke/rotate if needed, remove them from Git/history, then run a secret scan. New `.rar` files are ignored.
+- Python snapshot changes in `core/database.py`, `main.py`, `requirements.txt` and tests must be upstreamed to the Python repository before the next snapshot refresh.
 
-## Python upstream debt
-
-- Upstream explicit internal-secret/Bearer tests và constant-time verification overlay.
-- Upstream `google_genai` adapter requirements và embedding output dimension 768.
-- Record exact upstream commit và align supported Qdrant client/server versions.
-
-## Next gate
-
-Thành viên NodeJS thứ hai chạy [independent test plan](../testing/week3-remote-test-plan.md) từ fresh clone và ghi evidence đã redact. Setup canonical: [Remote Docker RAG](../setup/remote-rag-e2e.md).
+Next gate: run the [independent test plan](../testing/week3-remote-test-plan.md) on a fresh clone.

@@ -17,10 +17,6 @@ os.environ["LLAMA_CLOUD_API_KEY"] = "test-llama-cloud-api-key"
 os.environ["INTERNAL_SECRET"] = TEST_INTERNAL_SECRET
 AUTH_HEADERS = {"Authorization": f"Bearer {TEST_INTERNAL_SECRET}"}
 
-# Mock external heavy dependencies before importing app
-sys.modules['qdrant_client'] = MagicMock()
-sys.modules['qdrant_client.models'] = MagicMock()
-
 # Mock llama_parse
 sys.modules['llama_parse'] = MagicMock()
 

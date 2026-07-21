@@ -1,11 +1,11 @@
-# Local credentials
+# Local GCS credentials
 
-Corpus tooling mặc định đọc Google service-account key tại `secrets/gcs.json`.
+Host-side corpus tooling mặc định đọc service-account key tại `secrets/gcs.json`.
 
-- Giữ credential ở local và không commit.
-- Reader credential được inspect/verify/download approved original files.
-- Chỉ manager writer credential được publish approved original.
-- Không chia sẻ writer key; revoke/rotate ngay khi nghi ngờ bị lộ.
-- Docker image/container không nhận thư mục hoặc nội dung này.
+- Reader credential đủ cho `corpus:inspect`, `corpus:verify` và `corpus:restore`.
+- Chỉ manager giữ writer credential để chạy `corpus:publish`.
+- Không commit, mount vào container, copy vào image hoặc gửi writer key cho tester.
+- Không lưu credential archive (`.zip`, `.rar`, v.v.) trong Git; ignore không thể bảo vệ file đã được track từ trước.
+- Revoke/rotate ngay khi nghi ngờ key bị lộ.
 
-Integrated stack đọc cấu hình GCS không bí mật từ root `.env`. Python standalone configuration là luồng riêng.
+Root `.env` chỉ khai báo project/bucket/prefix/path. NodeJS, Python, MySQL và Qdrant containers không nhận credential hoặc GCS configuration.

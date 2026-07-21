@@ -1,15 +1,19 @@
 'use strict';
 
 const assert = require('assert/strict');
+const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const mysql = require('mysql2/promise');
 
 const { main: runPreflight } = require('./remote-preflight');
-const { reconcileRuntime } = require('./corpus-manager');
+const { reconcileRuntime } = require('./lib/corpus-runtime');
 const {
   compose,
   composePort,
   delay,
-  fetchWithTimeout
+  fetchWithTimeout,
+  root
 } = require('./remote-test-utils');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -24,11 +28,12 @@ async function httpRequest(baseUrl, requestPath, options = {}, expected = [200])
   );
   const contentType = response.headers.get('content-type') || '';
   const payload = contentType.includes('application/json') ? await response.json() : null;
+  const body = payload === null ? Buffer.from(await response.arrayBuffer()) : null;
   if (!expected.includes(response.status)) {
     const code = payload?.errorCode || payload?.error_code || 'UNEXPECTED_RESPONSE';
     throw new Error(`${options.method || 'GET'} ${requestPath} returned ${response.status} (${code}).`);
   }
-  return { status: response.status, payload };
+  return { status: response.status, payload, body, headers: response.headers };
 }
 
 function bearer(token, extra = {}) {
@@ -160,14 +165,32 @@ async function main() {
       headers: bearer(token)
     })).payload.data;
     assert(detail.sourceText && source.sourceText, 'Citation immutable source snapshot is empty.');
-    assert.equal(detail.originalAvailable, false, 'Restored corpus must not claim an original file is available.');
+    const expectOriginal = process.env.RESTORED_CORPUS_EXPECT_ORIGINAL === 'true';
+    assert.equal(detail.originalAvailable, expectOriginal, 'Restored original availability differs from expectation.');
 
     const documentFile = await httpRequest(baseUrl, '/api/documents/1/file', {
       headers: bearer(token)
-    }, [404]);
+    }, expectOriginal ? [200] : [404]);
     const citationFile = await httpRequest(baseUrl, `/api/citations/${citation.id}/file`, {
       headers: bearer(token)
-    }, [409]);
+    }, expectOriginal ? [200] : [409]);
+    if (expectOriginal) {
+      const approvals = JSON.parse(fs.readFileSync(
+        path.join(root, 'bootstrap', 'corpus-approved-documents.json'),
+        'utf8'
+      ));
+      const approved = approvals.approvals.find((entry) => String(entry.documentId) === '1');
+      assert(approved, 'Exact-checksum approval for restored document 1 is missing.');
+      for (const fileResponse of [documentFile, citationFile]) {
+        assert.equal(
+          crypto.createHash('sha256').update(fileResponse.body).digest('hex'),
+          approved.checksum,
+          'Restored original API checksum differs from the approved document.'
+        );
+        assert.match(fileResponse.headers.get('content-disposition') || '', /attachment/i);
+        assert(fileResponse.headers.get('content-type'), 'Restored original API has no content type.');
+      }
+    }
 
     const [[citationRow], usageRows] = await Promise.all([
       pool.execute(
@@ -199,7 +222,7 @@ async function main() {
       'exec', '-T', 'app', 'sh', '-lc',
       "find /usr/src/app/uploads -type f -print 2>/dev/null | head -n 1"
     ]);
-    assert.equal(uploadFiles, '', 'Restored corpus unexpectedly contains an original upload file.');
+    assert.equal(Boolean(uploadFiles), expectOriginal, 'Upload-volume original availability differs from expectation.');
 
     console.log(JSON.stringify({
       status: 'RESTORED_CORPUS_LIVE_OK',

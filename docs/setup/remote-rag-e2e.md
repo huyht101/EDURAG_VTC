@@ -1,14 +1,13 @@
 # Remote Docker RAG
 
-Hướng dẫn canonical để chạy NodeJS, MySQL 8.4, Python RAG và Qdrant trên cùng Docker network. Không cần `PythonSevice.env`, `$env:...`, `-f` hoặc `-p` cho workflow thông thường.
+Hướng dẫn canonical cho NodeJS, MySQL 8.4, Python RAG và Qdrant trên cùng Docker network, kèm cloud corpus bootstrap.
 
 ## 1. Chuẩn bị
 
-- Node.js 20+
-- Docker Desktop đang chạy
-- Root `.env` tạo từ `.env.example`
-- Gemini và LlamaParse credentials hợp lệ
-- Optional GCS reader/writer credential tại `secrets/gcs.json` nếu cần original files
+- Node.js 20+, Docker Desktop và Docker Compose.
+- Root `.env` tạo từ `.env.example`.
+- Gemini/LlamaParse credentials cho live RAG.
+- Reader-capable `secrets/gcs.json` để fresh machine restore canonical corpus. Writer key chỉ dành cho manager publish.
 
 ```powershell
 npm ci
@@ -17,64 +16,62 @@ Copy-Item .env.example .env
 
 Điền trong root `.env`:
 
+- app/database/auth secrets;
+- `RAG_MODE=remote`, `RAG_INTERNAL_TOKEN` tối thiểu 32 ký tự;
 - `GOOGLE_API_KEY`, `LLAMA_CLOUD_API_KEY`;
-- `RAG_INTERNAL_TOKEN` tối thiểu 32 ký tự;
-- `JWT_SECRET`, `TOKEN_HMAC_PEPPER`;
-- `DB_PASSWORD` và `MYSQL_ROOT_PASSWORD` giống nhau trong local topology;
-- `REMOTE_COMPOSE_PROJECT` và các host port nếu default đang bận.
+- `GEMINI_LLM_MODEL=models/gemini-3.5-flash`;
+- `GEMINI_EMBEDDING_MODEL=models/gemini-embedding-001`, `EMBEDDING_DIMENSION=768`;
+- `CORPUS_BOOTSTRAP=auto`;
+- `GCS_PROJECT_ID`, `GCS_BUCKET`, `GCS_OBJECT_PREFIX`, `GCS_CREDENTIALS_FILE`.
 
-Giữ contract đã kiểm thử:
+Không cần file env phụ, terminal `$env:...`, Compose `-f/-p` dài hoặc GCS key trong container. Root Compose chỉ inject provider/internal variables mà runtime cần; host corpus tooling tự đọc GCS config.
 
-```dotenv
-GEMINI_LLM_MODEL=models/gemini-3.5-flash
-GEMINI_EMBEDDING_MODEL=models/gemini-embedding-001
-EMBEDDING_DIMENSION=768
-CORPUS_BOOTSTRAP=auto
-CORPUS_FILES_BOOTSTRAP=auto
-```
-
-Root Compose inject `RAG_INTERNAL_TOKEN` sang Python dưới tên `INTERNAL_SECRET`. Provider keys chỉ được inject vào Python. Không commit `.env`.
-
-GCS chỉ phân phối original files của portable corpus; Node/Python runtime không nhận GCS credential. Cấu hình host-side trong root `.env`:
-
-```dotenv
-GCS_PROJECT_ID=your-google-cloud-project-id
-GCS_BUCKET=your-private-corpus-bucket
-GCS_OBJECT_PREFIX=portable-corpus/v1
-GCS_CREDENTIALS_FILE=./secrets/gcs.json
-CORPUS_FILES_BOOTSTRAP=auto
-```
-
-Xem [credential placement](../../secrets/README.md). Reader key chỉ inspect/verify/restore; chỉ manager writer key được chạy publish.
-
-## 2. Start foreground
+## 2. Start và bootstrap
 
 ```powershell
 npm run docker:remote:config
 npm run docker:remote:dev
 ```
 
-`docker:remote:dev` thực hiện:
+Foreground orchestration:
 
 1. validate root environment và Compose;
-2. build Node/Python image rồi start MySQL + Qdrant;
-3. auto-bootstrap MySQL/Qdrant theo `CORPUS_BOOTSTRAP`;
-4. tạo upload volume và restore/skip originals theo `CORPUS_FILES_BOOTSTRAP`;
-5. start Node + Python;
-6. chạy remote preflight;
-7. follow log `app` và `rag-service`.
+2. build Node/Python images;
+3. start MySQL + Qdrant;
+4. download, stage và verify cloud release nếu mode yêu cầu;
+5. restore/skip MySQL, Qdrant và upload originals;
+6. start Node + Python;
+7. chạy remote preflight;
+8. attach `app`/`rag-service` logs.
 
-Kết quả preflight mong đợi:
+Node gọi `http://rag-service:8000`; Python callback `http://app:5000`; Qdrant là `http://qdrant:6333`. Node mount uploads read/write, Python mount cùng volume read-only. GCS key không được mount/inject.
+
+Expected log trên fresh reader-enabled volumes:
 
 ```text
-REMOTE_PREFLIGHT_OK generation=models/gemini-3.5-flash embedding=models/gemini-embedding-001
+CORPUS_RESTORE_OK
+REMOTE_PREFLIGHT_OK
 ```
 
-Node gọi `http://rag-service:8000`; Python callback `http://app:5000`; Python gọi `http://qdrant:6333`. Không dùng `localhost` giữa containers. Node mount upload read/write, Python mount cùng volume read-only.
+Trên compatible retained volumes, expected `CORPUS_ALREADY_RESTORED`. `auto` + thiếu key báo `CORPUS_BOOTSTRAP_SKIPPED` và tiếp tục với local state hiện có hoặc empty state; không fallback sang dump/snapshot trong Git.
 
-## 3. URL và login Swagger
+## 3. Corpus commands
 
-Với port mặc định:
+```powershell
+npm run corpus:inspect
+npm run corpus:verify
+npm run corpus:restore
+```
+
+Chỉ manager trên approved, quiescent source chạy:
+
+```powershell
+npm run corpus:publish
+```
+
+Publish/restore không ingest, parse hoặc document-embed. `publish` create-only; `restore` không overwrite incompatible stores/files. Xem [Cloud corpus portability](../architecture/corpus-portability.md).
+
+## 4. Swagger
 
 | Service | URL |
 |---|---|
@@ -84,76 +81,16 @@ Với port mặc định:
 | Python health | `http://localhost:8000/api/health` |
 | Qdrant health | `http://localhost:6333/healthz` |
 
-Demo Admin local only: `admin@example.com / 123456`.
+Demo Admin: `admin@example.com` / `123456` (local only).
 
 1. Gọi `POST /api/auth/login`.
-2. Đọc `[DEV-ONLY ADMIN OTP]` ngay trong terminal đang attach log; hoặc dùng `npm run docker:remote:logs:app`.
+2. Lấy `[DEV-ONLY ADMIN OTP]` từ terminal hoặc `npm run docker:remote:logs:app`.
 3. Gọi `POST /api/auth/admin/verify-otp`.
-4. Copy `data.token`, nhấn **Authorize** trong Swagger và dán user JWT.
+4. Dùng `data.token` tại Swagger **Authorize**. Không dùng internal token cho public API.
 
-Không dán internal token vào Swagger public routes.
+Corpus đã restore cho phép chat/citation ngay, không cần upload lại. Upload document mới vẫn là async: response `202`, sau đó poll `GET /api/documents/jobs/{jobId}` đến terminal status. Chat request đơn giản chỉ cần `content`; `clientRequestId` optional và server tự sinh UUID.
 
-## 4. Workflow kiểm tra
-
-### Corpus đã restore
-
-Với fresh volumes và `CORPUS_BOOTSTRAP=auto`, canonical MySQL/Qdrant được restore trước khi app start. Có thể tạo chat session và hỏi ngay mà không upload/parse/embed lại document. `CORPUS_FILES_BOOTSTRAP=auto` cố restore approved originals từ private GCS; thiếu key/object thì log skip đã redact và Chat/RAG/citation snapshot vẫn hoạt động.
-
-### Upload document mới
-
-1. `POST /api/documents` với PDF/DOCX/TXT.
-2. Lưu `data.document.id` và `data.job.id` từ response `202`.
-3. Poll `GET /api/documents/jobs/{jobId}` đến `SUCCEEDED`.
-4. Xác nhận document `READY + VISIBLE`.
-5. Tạo session bằng `POST /api/chat/sessions`.
-6. Gửi question qua `POST /api/chat/sessions/{id}/messages`.
-7. Đọc citation qua `/api/citations/{id}` hoặc `/source`.
-
-Simple chat request chỉ cần `content`; server tự sinh `clientRequestId`. Chỉ gửi UUID ổn định khi retry cùng logical request. Không assert chính xác wording của LLM.
-
-Endpoint-level payload/status/error nằm trong Swagger. Role/workflow tổng quan: [Public API](../api/public-api.md).
-
-## 5. Corpus bootstrap modes
-
-| `CORPUS_BOOTSTRAP` | Hành vi |
-|---|---|
-| `off` | Không xét bundle. |
-| `auto` | Restore bundle valid khi cả MySQL và Qdrant bootstrap-empty; skip khi đã có data. |
-| `required` | Fail startup nếu bundle thiếu, tampered hoặc incompatible. |
-
-Partial/non-empty stores không bị overwrite. Restore không gọi document ingest, LlamaParse hoặc document embedding. Query vẫn dùng query embedding và LLM.
-
-Original-file bootstrap là gate độc lập:
-
-| `CORPUS_FILES_BOOTSTRAP` | Hành vi |
-|---|---|
-| `off` | Không truy cập GCS. |
-| `auto` | Restore khi manifest/config/key/object hợp lệ; thiếu key hoặc read permission thì cảnh báo và tiếp tục không có originals. |
-| `required` | Fail foreground startup nếu manifest/key/object/checksum không đạt. Không xóa volumes. |
-
-Các command quản trị bundle:
-
-```powershell
-npm run corpus:inspect
-npm run corpus:verify
-npm run corpus:restore
-```
-
-`corpus:restore` chỉ dùng với bootstrap-empty target. Quy trình export và exact approval nằm tại [Corpus portability](../architecture/corpus-portability.md).
-
-Original-file commands chạy trên host:
-
-```powershell
-npm run corpus:files:inspect
-npm run corpus:files:verify
-npm run corpus:files:restore
-```
-
-Chỉ manager đã review exact checksum mới chạy `npm run corpus:files:publish`. Publish dùng immutable object key và create-only precondition; không overwrite/delete. Restore ghi atomically vào local upload volume, không mutate MySQL/Qdrant và không ingest/embed.
-
-## 6. Lifecycle và logs
-
-Nhấn `Ctrl+C` để best-effort stop containers và giữ MySQL/Qdrant/upload named volumes. Abrupt process kill, Docker Desktop crash hoặc mất điện không bảo đảm signal cleanup; chạy `npm run docker:remote:stop` trước khi start lại nếu cần.
+## 5. Lifecycle
 
 | Command | Mục đích |
 |---|---|
@@ -163,20 +100,19 @@ Nhấn `Ctrl+C` để best-effort stop containers và giữ MySQL/Qdrant/upload 
 | `npm run preflight:remote` | Health/auth/network/shared-volume checks. |
 | `npm run docker:remote:stop` | Stop containers, giữ volumes. |
 | `npm run docker:remote:down` | Xóa containers/network, giữ named volumes. |
-| `npm run docker:remote:reset` | **Destructive:** xóa volumes của remote project. |
+| `npm run docker:remote:reset` | **Destructive:** xóa volumes của configured remote project. |
 
-Mặc định chỉ app/Python logs được attach. Đặt `REMOTE_DEV_ALL_LOGS=true` trong `.env` nếu cần xem cả MySQL/Qdrant.
+`Ctrl+C` best-effort stop containers và giữ volumes. Abrupt kill, Docker crash hoặc mất điện không bảo đảm signal cleanup; lần chạy sau reuse volumes và verify state. Đặt `REMOTE_DEV_ALL_LOGS=true` trong `.env` nếu cần attach cả MySQL/Qdrant logs.
 
-## 7. Lỗi thường gặp
+## 6. Lỗi thường gặp
 
-| Lỗi | Kiểm tra |
+| Lỗi | Hướng xử lý |
 |---|---|
-| Port in use | Đổi host port trong root `.env`, không dùng biến terminal tạm. |
+| Port in use | Đổi host port trong root `.env`. |
+| `GCS_CREDENTIAL_MISSING` | Với `auto`, stack chạy degraded; fresh canonical restore cần reader key. |
+| `CORPUS_PARTIAL_STATE` / mismatch | Không overwrite; dùng project/volumes fresh sau khi xác nhận target disposable. |
 | `401` public API | Dùng user JWT, không dùng internal token. |
-| Admin chưa có JWT | Hoàn tất OTP step. |
-| Job `FAILED` | Xem job detail và app/Python logs. |
-| Chat timeout | Kiểm tra `RAG_QUERY_TIMEOUT_MS`, Python health và provider. |
-| Original unavailable | Kiểm tra `CORPUS_FILES_BOOTSTRAP`, manifest và reader credential; không key vẫn dùng citation/source snapshot. |
-| `CORPUS_PARTIAL_STATE` | Không overwrite; kiểm tra/reset đúng isolated target rồi restore lại. |
+| Original unavailable | Corpus/original chưa restore; citation snapshot vẫn dùng được nếu structured local data tồn tại. |
+| Chat timeout | Kiểm tra Python/provider health và `RAG_QUERY_TIMEOUT_MS`. |
 
-Kiểm thử tự động và cleanup project cô lập: [Independent test plan](../testing/week3-remote-test-plan.md).
+Quy trình kiểm thử đầy đủ: [Independent test plan](../testing/week3-remote-test-plan.md).

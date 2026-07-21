@@ -33,6 +33,10 @@ function main() {
   const stalePatterns = [
     ['docs/setup/docker-demo.md', 'deleted Docker setup guide'],
     ['docs/status/python-snapshot-source.md', 'merged snapshot status document'],
+    ['CORPUS_FILES_BOOTSTRAP', 'superseded split original-file bootstrap mode'],
+    ['corpus:files:', 'superseded split original-file command'],
+    ['npm run corpus:export', 'superseded local bundle export command'],
+    ['bootstrap/corpus/manifest.json', 'removed repository corpus manifest'],
     ['Portable corpus: BLOCKED BY DATA APPROVAL', 'resolved corpus approval status'],
     ['Corpus export/restore | BLOCKED', 'resolved corpus readiness status'],
     ['Remote integration chưa được xác minh', 'obsolete remote verification claim']
