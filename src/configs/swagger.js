@@ -24,7 +24,7 @@ const definition = {
   },
   servers: [{ url: 'http://localhost:5001', description: 'Docker demo default' }],
   tags: [
-    { name: 'Authentication', description: 'Đăng ký, đăng nhập, Admin OTP, logout và password recovery.' },
+    { name: 'Authentication', description: 'Đăng ký, đăng nhập, Admin OTP, logout và password recovery; public sensitive operations có per-process rate limit.' },
     { name: 'Profile', description: 'ACTIVE user đọc/cập nhật profile và đổi password của chính mình.' },
     { name: 'Admin - Users', description: 'ADMIN quản lý trạng thái và tra cứu tài khoản.' },
     { name: 'Documents', description: 'TEACHER quản lý tài liệu mình upload; ADMIN quản lý toàn bộ.' },
@@ -220,7 +220,10 @@ const definition = {
   },
   paths: {
     '/health': {
-      get: { tags: ['System'], summary: 'Health check', responses: { 200: { description: 'Server is running.' } } }
+      get: { tags: ['System'], summary: 'Process liveness', responses: { 200: { description: 'Node process is serving HTTP.' } } }
+    },
+    '/ready': {
+      get: { tags: ['System'], summary: 'Node/MySQL readiness', responses: { 200: { description: 'Node and MySQL are ready.' }, 503: { description: 'MySQL is temporarily unavailable.' } } }
     },
     '/api/auth/register': {
       post: {
@@ -228,14 +231,14 @@ const definition = {
         summary: 'Đăng ký Student hoặc Teacher',
         description: 'Student được ACTIVE; Teacher được PENDING.',
         requestBody: jsonBody({ $ref: '#/components/schemas/RegisterBody' }),
-        responses: { 201: response('Registered.'), 400: response('Invalid input.', 'ErrorResponse'), 409: response('Duplicate.', 'ErrorResponse') }
+        responses: { 201: response('Registered.'), 400: response('Invalid input.', 'ErrorResponse'), 409: response('Duplicate.', 'ErrorResponse'), 429: response('Per-process rate limit exceeded.', 'ErrorResponse') }
       }
     },
     '/api/auth/login': {
       post: {
         tags: ['Authentication'], summary: 'Đăng nhập ACTIVE user',
         requestBody: jsonBody({ $ref: '#/components/schemas/LoginBody' }),
-        responses: { 200: response('Authenticated or Admin OTP required.'), 401: response('Invalid credentials.', 'ErrorResponse'), 403: response('Account not ACTIVE.', 'ErrorResponse') }
+        responses: { 200: response('Authenticated or Admin OTP required.'), 401: response('Invalid credentials.', 'ErrorResponse'), 403: response('Account not ACTIVE.', 'ErrorResponse'), 429: response('Per-process rate limit exceeded.', 'ErrorResponse') }
       }
     },
     '/api/auth/admin/verify-otp': {
@@ -243,7 +246,7 @@ const definition = {
         tags: ['Authentication'], summary: 'Xác minh Admin OTP',
         description: 'Email provider chưa tích hợp; development delivery phải bật rõ bằng env.',
         requestBody: jsonBody({ $ref: '#/components/schemas/VerifyOtpBody' }),
-        responses: { 200: response('JWT issued.'), 400: response('OTP invalid/expired/revoked.', 'ErrorResponse') }
+        responses: { 200: response('JWT issued.'), 400: response('OTP invalid/expired/revoked.', 'ErrorResponse'), 429: response('Strict per-process rate limit exceeded.', 'ErrorResponse') }
       }
     },
     '/api/auth/logout': {
@@ -254,14 +257,14 @@ const definition = {
         tags: ['Authentication'], summary: 'Yêu cầu password reset',
         description: 'Luôn trả response chung; email provider chưa tích hợp.',
         requestBody: jsonBody({ $ref: '#/components/schemas/ForgotPasswordBody' }),
-        responses: { 200: response('Request accepted.'), 400: response('Invalid input.', 'ErrorResponse') }
+        responses: { 200: response('Request accepted.'), 400: response('Invalid input.', 'ErrorResponse'), 429: response('Strict per-process rate limit exceeded.', 'ErrorResponse') }
       }
     },
     '/api/auth/reset-password': {
       post: {
         tags: ['Authentication'], summary: 'Reset password và tăng auth_version',
         requestBody: jsonBody({ $ref: '#/components/schemas/ResetPasswordBody' }),
-        responses: { 200: response('Password reset.'), 400: response('Token invalid/expired/revoked.', 'ErrorResponse') }
+        responses: { 200: response('Password reset.'), 400: response('Token invalid/expired/revoked.', 'ErrorResponse'), 429: response('Strict per-process rate limit exceeded.', 'ErrorResponse') }
       }
     },
     '/api/profile': {
@@ -361,7 +364,7 @@ const definition = {
     },
     '/api/chat/sessions/{id}/messages': {
       get: { tags: ['Chat Messages'], summary: 'List paginated session messages', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }, { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0, default: 0 } }, { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 50 } }], responses: { 200: response('History.') } },
-      post: { tags: ['Chat Messages'], summary: 'Send question and wait for RAG answer', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/ChatMessageBody' }, examples: { simple: { summary: 'Swagger/simple request; server generates clientRequestId', value: { content: 'Tài liệu mô tả nội dung chính nào?' } }, safeRetry: { summary: 'Advanced retry with client-controlled idempotency UUID', value: { content: 'Tài liệu mô tả nội dung chính nào?', clientRequestId: '35ad0d0e-a423-4b06-a643-9a8391a6a4da' } } } } } }, responses: { 200: response('Assistant result with the final clientRequestId.', 'SuccessResponse', { success: true, message: 'Chat response completed.', data: { duplicate: false, clientRequestId: '35ad0d0e-a423-4b06-a643-9a8391a6a4da', userMessageId: 41, assistantMessage: { id: 42, status: 'COMPLETED', content: 'Câu trả lời...', noAnswer: false, citations: [] } } }), 409: response('clientRequestId belongs to another session.', 'ErrorResponse'), 502: response('RAG response invalid/failed.', 'ErrorResponse'), 503: response('RAG unavailable or timed out.', 'ErrorResponse') } }
+      post: { tags: ['Chat Messages'], summary: 'Send question and wait for RAG answer', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/ChatMessageBody' }, examples: { simple: { summary: 'Swagger/simple request; server generates clientRequestId', value: { content: 'Tài liệu mô tả nội dung chính nào?' } }, safeRetry: { summary: 'Advanced retry with client-controlled idempotency UUID', value: { content: 'Tài liệu mô tả nội dung chính nào?', clientRequestId: '35ad0d0e-a423-4b06-a643-9a8391a6a4da' } } } } } }, responses: { 200: response('Assistant result with the final clientRequestId.', 'SuccessResponse', { success: true, message: 'Chat response completed.', data: { duplicate: false, clientRequestId: '35ad0d0e-a423-4b06-a643-9a8391a6a4da', userMessageId: 41, assistantMessage: { id: 42, status: 'COMPLETED', content: 'Câu trả lời có nguồn.', noAnswer: false, citations: [{ id: 43, vectorNodeId: '6f9ad988-e3bf-45a0-911d-c03345b05d67', citationOrder: 1, sourceText: 'Structured source fragment.' }] } } }), 409: response('clientRequestId belongs to another session.', 'ErrorResponse'), 502: response('RAG response invalid, including a sourced answer without a verifiable structured citation.', 'ErrorResponse'), 503: response('RAG unavailable or timed out.', 'ErrorResponse') } }
     },
     '/api/citations/{id}': {
       get: { tags: ['Citations'], summary: 'Authorized immutable citation snapshot', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 200: response('Citation.'), 404: response('Not found.', 'ErrorResponse') } }
@@ -380,6 +383,7 @@ const definition = {
 
 const operationDescriptions = {
   'GET /health': 'Actor: public monitoring. Kiểm tra NodeJS process đang phục vụ request; không kiểm tra toàn bộ MySQL/Python/Qdrant topology.',
+  'GET /ready': 'Actor: public orchestration. Kiểm tra NodeJS và một truy vấn MySQL nhẹ; không chứng minh Python, Qdrant hoặc provider đang khỏe.',
   'POST /api/auth/register': 'Actor: public. Tạo STUDENT ở trạng thái ACTIVE hoặc TEACHER ở trạng thái PENDING chờ ADMIN review; không cấp quyền quản lý document cho STUDENT.',
   'POST /api/auth/login': 'Actor: public account owner. Chỉ ACTIVE user đăng nhập được; ADMIN phải hoàn tất OTP trước khi nhận user JWT.',
   'POST /api/auth/admin/verify-otp': 'Actor: ADMIN đang đăng nhập. Xác minh OTP development/email delivery và trả user JWT; OTP expired/used/revoked không được dùng lại.',
@@ -407,7 +411,7 @@ const operationDescriptions = {
   'GET /api/chat/sessions/{id}': 'Actor: session owner. Đọc session detail kèm paginated messages/citations; endpoint read-only và không mở quyền ADMIN đọc session người khác.',
   'DELETE /api/chat/sessions/{id}': 'Actor: session owner. Soft-delete session; messages, citations và usage vẫn được giữ trong MySQL nhưng session không còn xuất hiện qua public history APIs.',
   'GET /api/chat/sessions/{id}/messages': 'Actor: session owner. Đọc messages theo message_order với offset/limit; assistant message gồm citation snapshots, không bao gồm usage rows.',
-  'POST /api/chat/sessions/{id}/messages': 'Actor: session owner. Persist USER + ASSISTANT PENDING trước network call, chờ Python/LLM rồi persist answer/citations/usage. clientRequestId optional; no_answer=true là success hợp lệ. Timeout/upstream failure để assistant FAILED và có thể lâu hơn API thông thường.',
+  'POST /api/chat/sessions/{id}/messages': 'Actor: session owner. Persist USER + ASSISTANT PENDING trước network call, chờ Python/LLM rồi persist answer/citations/usage. clientRequestId optional; no_answer=true là success hợp lệ. no_answer=false bắt buộc có ít nhất một structured citation map được tới READY + VISIBLE chunk, nếu không assistant FAILED. Timeout/upstream failure có thể lâu hơn API thông thường.',
   'GET /api/citations/{id}': 'Actor: owner của chat session chứa citation. Đọc immutable citation snapshot; không phụ thuộc document hiện còn visible hoặc original file còn tồn tại.',
   'GET /api/citations/{id}/source': 'Actor: owner của chat session chứa citation. Đọc source-text snapshot và cờ originalAvailable; đây không phải stream file.',
   'GET /api/citations/{id}/file': 'Actor: owner của chat session chứa citation và current source authorization hợp lệ. Stream original file; restored portable corpus có thể trả ORIGINAL_SOURCE_UNAVAILABLE trong khi snapshot vẫn đọc được.',

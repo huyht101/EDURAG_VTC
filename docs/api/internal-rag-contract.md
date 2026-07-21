@@ -113,7 +113,7 @@ Mỗi chunk bắt buộc:
 - full `chunk_text`;
 - SHA-256 `content_hash` khớp chính xác `chunk_text`.
 
-Optional: `token_count`, `page_number`, `section_title`, `chapter`, `section`, `source_locator`. `page_number <= 0` được normalize thành `null`.
+Optional: `token_count`, `page_number`, `section_title`, `chapter`, `section`, `source_locator`. `page_number` là 1-based khi có; TXT/DOCX có thể dùng synthetic segment thay vì trang vật lý. `page_number <= 0` được normalize thành `null`.
 
 NodeJS không nhận `text_preview` thay full text, không tự hash preview và không sinh fake vector ID.
 
@@ -148,6 +148,8 @@ Python `usage` hỗ trợ `prompt_tokens`, `completion_tokens`, `total_tokens`, 
 Current snapshot citation có `vector_node_id=str(result.id)`, `doc_id`, `snippet`, optional `page_number`, `chapter`, `section`. NodeJS nhận `snippet` làm source fragment alias, resolve ID qua `document_chunks`, không suy đoán vector ID và không parse marker `[1]`.
 
 `no_answer=true` là success; NodeJS không tạo citation dù response có citation data.
+
+Target bắt buộc: `no_answer=false` phải có ít nhất một citation structured với `vector_node_id` và source fragment hợp lệ. Node resolve mọi citation tới MySQL chunk/document `READY + VISIBLE`; mảng rỗng hoặc source không xác minh được trả `502`, và assistant không được complete. Snapshot hiện còn nhánh CHIT_CHAT trả `no_answer=false` với `citations=[]`; đây là Python handoff, không phải lý do để nới validation Node.
 
 ## Errors
 

@@ -4,13 +4,7 @@ const ROLES = require('../constants/roles');
 const STATUSES = require('../constants/statuses');
 const withTransaction = require('../database/transaction');
 const userRepo = require('../repositories/user-repository');
-
-function appError(status, code, message) {
-  const error = new Error(message);
-  error.status = status;
-  error.code = code;
-  return error;
-}
+const appError = require('../utils/app-error');
 
 function bcryptRounds() {
   const rounds = Number(process.env.BCRYPT_ROUNDS || 12);

@@ -15,6 +15,7 @@ Copy-Item .env.example .env
 
 ```powershell
 npm run check
+npm run test:node-consolidation
 npm run test:openapi
 npm run test:docs
 npm run test:contract

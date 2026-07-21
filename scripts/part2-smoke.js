@@ -15,6 +15,8 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 process.env.NODE_ENV = 'development';
 process.env.AUTH_DEV_DELIVERY_LOG_SECRETS = 'true';
 process.env.RAG_MODE = 'mock';
+process.env.AUTH_RATE_LIMIT_MAX = '1000';
+process.env.AUTH_SENSITIVE_RATE_LIMIT_MAX = '1000';
 
 const required = [
   'DB_HOST', 'DB_NAME', 'DB_USER', 'DB_PASSWORD', 'JWT_SECRET',
@@ -409,6 +411,7 @@ async function main() {
       headers: auth(studentToken)
     })).payload.data;
     assert.equal(availableCitation.originalAvailable, true);
+    await request(`/api/citations/${citationId}`, { headers: auth(adminToken) }, 404);
 
     const storedDocument = await documentRepo.findById(documentId);
     await documentFileService.remove(storedDocument.storage_key);
@@ -437,6 +440,20 @@ async function main() {
       body: JSON.stringify({ content: '__NO_ANSWER__', clientRequestId: crypto.randomUUID() })
     })).payload.data;
     assert.equal(noAnswer.assistantMessage.noAnswer, true);
+    const unsourcedRequestId = crypto.randomUUID();
+    await request(`/api/chat/sessions/${noAnswerSession.id}/messages`, {
+      method: 'POST', headers: auth(studentToken, { 'content-type': 'application/json' }),
+      body: JSON.stringify({ content: 'Mock answer without configured source', clientRequestId: unsourcedRequestId })
+    }, 502);
+    const failedHistory = (await request(`/api/chat/sessions/${noAnswerSession.id}/messages`, {
+      headers: auth(studentToken)
+    })).payload.data.messages;
+    const unsourcedUser = failedHistory.find((message) => message.clientRequestId === unsourcedRequestId);
+    const unsourcedAssistant = failedHistory.find(
+      (message) => message.messageOrder === unsourcedUser.messageOrder + 1
+    );
+    assert.equal(unsourcedAssistant.status, 'FAILED');
+    assert.equal(unsourcedAssistant.errorCode, 'RAG_CITATIONS_REQUIRED');
     await request(`/api/chat/sessions/${noAnswerSession.id}/messages`, {
       method: 'POST', headers: auth(studentToken, { 'content-type': 'application/json' }),
       body: JSON.stringify({ content: '__RAG_ERROR__', clientRequestId: crypto.randomUUID() })
@@ -486,6 +503,46 @@ async function main() {
 
     await request(`/api/chat/sessions/${session.id}`, { method: 'DELETE', headers: auth(studentToken) }, 204);
     await request(`/api/chat/sessions/${session.id}`, { headers: auth(studentToken) }, 404);
+
+    let deliveredResetToken;
+    const originalResetWarn = console.warn;
+    console.warn = (...args) => {
+      const match = args.join(' ').match(/\[DEV-ONLY PASSWORD RESET TOKEN\] ([^ ]+)/);
+      if (match) deliveredResetToken = match[1];
+      else originalResetWarn(...args);
+    };
+    let knownForgot;
+    try {
+      knownForgot = await request('/api/auth/forgot-password', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: studentEmail })
+      });
+    } finally {
+      console.warn = originalResetWarn;
+    }
+    const unknownForgot = await request('/api/auth/forgot-password', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: `unknown-${suffix}@smoke.test` })
+    });
+    assert.equal(knownForgot.payload.message, unknownForgot.payload.message);
+    assert(deliveredResetToken, 'Development adapter must deliver a reset token.');
+    const resetUserId = deliveredResetToken.split('.')[0];
+    await request('/api/auth/reset-password', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token: `${resetUserId}.${'0'.repeat(64)}`, newPassword: 'StudentReset@2026' })
+    }, 400);
+    await request('/api/auth/reset-password', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token: deliveredResetToken, newPassword: 'StudentReset@2026' })
+    });
+    await request('/api/auth/reset-password', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token: deliveredResetToken, newPassword: 'StudentAgain@2026' })
+    }, 400);
+    await request('/api/auth/login', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: studentEmail, password: 'StudentReset@2026' })
+    });
 
     console.log('PART2_SMOKE_OK');
   } finally {

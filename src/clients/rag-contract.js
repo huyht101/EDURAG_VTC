@@ -153,6 +153,13 @@ function normalizeQueryResult(payload) {
   }
   const noAnswer = result.no_answer;
   const citations = result.citations;
+  if (!noAnswer && citations.length === 0) {
+    throw appError(
+      502,
+      'RAG_CITATIONS_REQUIRED',
+      'Python RAG answer must include at least one structured citation.'
+    );
+  }
   let usageCalls = [];
 
   if (Array.isArray(result.usage_calls)) {

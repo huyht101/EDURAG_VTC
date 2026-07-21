@@ -229,6 +229,14 @@ async function testChatContract() {
   assert.deepEqual(noAnswer.sources, []);
   assert.throws(
     () => normalizeQueryResult({
+      answer: 'Answer without evidence.',
+      no_answer: false,
+      citations: []
+    }),
+    (error) => error.code === 'RAG_CITATIONS_REQUIRED' && error.status === 502
+  );
+  assert.throws(
+    () => normalizeQueryResult({
       answer: 'Unverifiable',
       no_answer: false,
       citations: [{ source_text: 'Missing vector ID.' }]

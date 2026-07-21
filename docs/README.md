@@ -11,6 +11,7 @@ Tài liệu hiện hành của NodeJS/Core. Khi có khác biệt, ưu tiên runt
 | Hiểu cloud corpus release | [Corpus portability](architecture/corpus-portability.md) |
 | Tra public role/workflow | [Public API](api/public-api.md); endpoint detail ở Swagger |
 | Tích hợp NodeJS–Python | [Internal RAG contract](api/internal-rag-contract.md) |
+| Theo dõi debt phía Python | [Python/Data-RAG handoff](architecture/python-rag-handoff.md) |
 | Tra database | [Database index](database/README.md) |
 | Kiểm thử độc lập | [Week 3 test plan](testing/week3-remote-test-plan.md) |
 | Xem readiness hiện tại | [Week 3 readiness](status/week3-integration-readiness.md) |

@@ -11,13 +11,17 @@ Root `.env` là cấu hình local duy nhất của Node/Compose. Không commit f
 
 ## Mock stack
 
-Đặt `RAG_MODE=mock` trong `.env`:
+`.env.example` mặc định `RAG_MODE=mock`, và base `docker-compose.yml` ép app dùng mock để lệnh có tên `docker:mock:*` không thể vô tình gọi Python. Remote Compose override mới chuyển app sang `remote`.
 
 ```powershell
 npm run docker:mock:config
 npm run docker:mock:up
 npm run docker:mock:ps
 ```
+
+Browser frontend khác origin phải nằm trong comma-separated `CORS_ALLOWED_ORIGINS`; Postman/server-to-server không có `Origin` vẫn được phép. `TRUST_PROXY_HOPS=0` là mặc định an toàn; chỉ đặt số hop chính xác khi deployment thực sự có reverse proxy. Auth limiter hiện dùng memory của từng Node process, cấu hình qua `AUTH_*_RATE_LIMIT_*`; nhiều replica cần shared store ở phase production.
+
+`GET /health` là process liveness. `GET /ready` chạy một MySQL probe nhẹ; endpoint này không chứng minh Python/Qdrant/provider khỏe. Docker healthcheck tiếp tục dùng liveness để dependency DB gián đoạn không tự gây restart loop cho Node.
 
 Mock stack chạy NodeJS + MySQL, không gọi Python/Qdrant/provider. Fresh volume tự chạy `schema.sql` rồi `demo_seed.sql`.
 

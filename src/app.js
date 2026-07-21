@@ -5,9 +5,12 @@ const express = require('express');
 const swaggerUi = require('swagger-ui-express');
 const swaggerSpec = require('./configs/swagger');
 const ragConfig = require('./configs/rag');
+const httpConfig = require('./configs/http');
+const pool = require('./configs/db');
 
 const responseMiddleware = require('./middlewares/response-middleware');
 const { notFound, errorHandler } = require('./middlewares/error-middleware');
+const { createCorsMiddleware } = require('./middlewares/cors-middleware');
 
 const authRoutes = require('./routes/auth-routes');
 const userRoutes = require('./routes/user-routes');
@@ -18,6 +21,11 @@ const citationRoutes = require('./routes/citation-routes');
 const dashboardRoutes = require('./routes/dashboard-routes');
 
 const app = express();
+
+// Default remains false. Deployments behind a known reverse proxy may set an
+// exact hop count; arbitrary forwarded headers are never trusted by default.
+if (httpConfig.trustProxyHops > 0) app.set('trust proxy', httpConfig.trustProxyHops);
+app.use(createCorsMiddleware());
 
 // The internal complete-manifest callback can be larger than the public JSON API.
 // Keep this route-specific so unauthenticated public endpoints retain Express's 100 KB default.
@@ -62,6 +70,16 @@ app.get('/api-docs.json', (req, res) => {
 // ─────────────────────────────────────────────
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'OK', uptime: process.uptime() });
+});
+
+app.get('/ready', async (req, res) => {
+  try {
+    await pool.query('SELECT 1');
+    return res.status(200).json({ status: 'READY', checks: { mysql: 'UP' } });
+  } catch (error) {
+    console.error(`[READINESS] ${new Date().toISOString()} MySQL check failed`, error);
+    return res.status(503).json({ status: 'NOT_READY', checks: { mysql: 'DOWN' } });
+  }
 });
 
 // ─────────────────────────────────────────────

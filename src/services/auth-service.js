@@ -9,17 +9,11 @@ const TOKEN_TYPES = require('../constants/token-types');
 const withTransaction = require('../database/transaction');
 const userRepo = require('../repositories/user-repository');
 const tokenRepo = require('../repositories/token-repository');
+const appError = require('../utils/app-error');
 
 const OTP_EXPIRES_MINUTES = 10;
 const RESET_TOKEN_EXPIRES_MINUTES = 15;
 const MAX_TOKEN_ATTEMPTS = 5;
-
-function appError(status, code, message) {
-  const error = new Error(message);
-  error.status = status;
-  error.code = code;
-  return error;
-}
 
 function bcryptRounds() {
   const rounds = Number(process.env.BCRYPT_ROUNDS || 12);
@@ -178,23 +172,32 @@ async function requestPasswordReset(email) {
   return true;
 }
 
-async function resetPassword({ token, newPassword }) {
+async function resetPassword({ token, newPassword }, dependencies = {}) {
+  const transaction = dependencies.withTransaction || withTransaction;
+  const tokens = dependencies.tokenRepo || tokenRepo;
+  const users = dependencies.userRepo || userRepo;
+  const passwordHasher = dependencies.hashPassword
+    || ((password) => bcrypt.hash(password, bcryptRounds()));
   const [userIdText, secret, ...extra] = token.split('.');
   const userId = Number(userIdText);
-  if (!Number.isSafeInteger(userId) || !secret || extra.length > 0) {
+  if (!Number.isSafeInteger(userId) || !/^[0-9a-f]{64}$/.test(secret || '') || extra.length > 0) {
     throw appError(400, 'INVALID_OR_EXPIRED_TOKEN', 'Token khôi phục không hợp lệ hoặc đã hết hạn.');
   }
   const suppliedHash = hashToken(userId, TOKEN_TYPES.PASSWORD_RESET, secret);
-  const passwordHash = await bcrypt.hash(newPassword, bcryptRounds());
+  const passwordHash = await passwordHasher(newPassword);
 
-  const valid = await withTransaction(async (connection) => {
-    const record = await tokenRepo.findActiveTokenByUserAndType(userId, TOKEN_TYPES.PASSWORD_RESET, connection);
-    if (!record || !hashesMatch(record.token_hash, suppliedHash)) {
-      if (record) await tokenRepo.recordFailedAttempt(record.id, MAX_TOKEN_ATTEMPTS, connection);
-      return false;
-    }
-    await userRepo.updatePasswordAndIncrementVersion(userId, passwordHash, connection);
-    await tokenRepo.markTokenAsUsed(record.id, connection);
+  const valid = await transaction(async (connection) => {
+    // Password-reset secrets have high entropy. A mismatch is checked in
+    // constant time but never consumes attempts or revokes the valid row; the
+    // public rate limiter bounds online guessing by source IP.
+    const record = await tokens.findActiveTokenByUserAndType(
+      userId,
+      TOKEN_TYPES.PASSWORD_RESET,
+      connection
+    );
+    if (!record || !hashesMatch(record.token_hash, suppliedHash)) return false;
+    await users.updatePasswordAndIncrementVersion(userId, passwordHash, connection);
+    await tokens.markTokenAsUsed(record.id, connection);
     return true;
   });
   if (!valid) throw appError(400, 'INVALID_OR_EXPIRED_TOKEN', 'Token khôi phục không hợp lệ hoặc đã hết hạn.');

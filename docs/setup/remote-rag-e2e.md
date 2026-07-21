@@ -17,7 +17,7 @@ Copy-Item .env.example .env
 Điền trong root `.env`:
 
 - app/database/auth secrets;
-- `RAG_MODE=remote`, `RAG_INTERNAL_TOKEN` tối thiểu 32 ký tự;
+- `RAG_INTERNAL_TOKEN` tối thiểu 32 ký tự; remote Compose override tự đặt `RAG_MODE=remote`, không cần đổi mock default trong `.env`;
 - `GOOGLE_API_KEY`, `LLAMA_CLOUD_API_KEY`;
 - `GEMINI_LLM_MODEL=models/gemini-3.5-flash`;
 - `GEMINI_EMBEDDING_MODEL=models/gemini-embedding-001`, `EMBEDDING_DIMENSION=768`;
@@ -78,6 +78,7 @@ Publish/restore không ingest, parse hoặc document-embed. `publish` create-onl
 | Swagger | `http://localhost:5001/api-docs` |
 | OpenAPI | `http://localhost:5001/api-docs.json` |
 | Node health | `http://localhost:5001/health` |
+| Node readiness | `http://localhost:5001/ready` |
 | Python health | `http://localhost:8000/api/health` |
 | Qdrant health | `http://localhost:6333/healthz` |
 

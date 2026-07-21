@@ -28,11 +28,11 @@ sequenceDiagram
       RAG-->>Node: no_answer=true, string answer, confidence=low, usage may be null
       Node->>DB: Transaction: complete ASSISTANT, persist usage and touch session
       Node-->>Client: 200 without fabricated citations
-    else Structured answer, sources may be empty
+    else Structured answer must include sources
       RAG-->>Node: answer, confidence string, citations with vector_node_id, and usage
       Node->>DB: Resolve vector_node_id to READY and VISIBLE chunks and documents
       Node->>Node: Validate source snapshots and usage metadata
-      alt Source or usage validation fails
+      alt Citation missing or source or usage validation fails
         Node->>DB: Set ASSISTANT FAILED
         Node-->>Client: 502 unverifiable RAG result
       else Result is valid

@@ -15,7 +15,9 @@ Student/Teacher registration, login, Admin OTP, password reset, profile, passwor
 
 JWT middleware verify chữ ký, current status và current `auth_version`; không cache. Logout là stateless client-side logout, không tăng version.
 
-Token/OTP dùng secure randomness. Password-reset token entropy cao và OTP được HMAC với server-side pepper; lifecycle dùng expiry/used/revoked/attempt count. Development secret delivery chỉ bật rõ trong local demo và chưa phải email provider production.
+Token/OTP dùng secure randomness và HMAC với server-side pepper. OTP ngắn vẫn dùng expiry/used/revoked/attempt count. Password-reset secret entropy cao được so HMAC constant-time dưới row lock; mismatch không tăng attempt hoặc revoke token hợp lệ. Development secret delivery chỉ bật rõ trong local demo và chưa phải email provider production.
+
+Register/login có configurable general limiter; Admin OTP/forgot/reset dùng limiter nghiêm ngặt hơn. Limiter hiện lưu memory riêng trong mỗi Node process, phù hợp demo/MVP nhưng không distributed-safe; production multi-instance cần shared rate-limit store. `TRUST_PROXY_HOPS` mặc định `0` và chỉ được đặt exact hop count khi có reverse proxy đã biết.
 
 Password mới phải dài tối thiểu 8, gồm uppercase/lowercase/digit/special. Login chỉ yêu cầu non-empty password để tài khoản demo cũ/ngắn vẫn được bcrypt verify; policy tạo password không bị nới.
 

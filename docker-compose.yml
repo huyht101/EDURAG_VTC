@@ -41,9 +41,17 @@ services:
       BCRYPT_ROUNDS: ${BCRYPT_ROUNDS:-12}
       TOKEN_HMAC_PEPPER: ${TOKEN_HMAC_PEPPER:-demo-only-token-hmac-pepper-change-production}
       AUTH_DEV_DELIVERY_LOG_SECRETS: ${AUTH_DEV_DELIVERY_LOG_SECRETS:-true}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-0}
+      AUTH_RATE_LIMIT_WINDOW_MS: ${AUTH_RATE_LIMIT_WINDOW_MS:-900000}
+      AUTH_RATE_LIMIT_MAX: ${AUTH_RATE_LIMIT_MAX:-30}
+      AUTH_SENSITIVE_RATE_LIMIT_WINDOW_MS: ${AUTH_SENSITIVE_RATE_LIMIT_WINDOW_MS:-900000}
+      AUTH_SENSITIVE_RATE_LIMIT_MAX: ${AUTH_SENSITIVE_RATE_LIMIT_MAX:-10}
       UPLOAD_DIR: /usr/src/app/uploads
       FILE_MAX_SIZE_BYTES: ${FILE_MAX_SIZE_BYTES:-20971520}
-      RAG_MODE: ${RAG_MODE:-mock}
+      # The base stack is always mock. docker-compose.remote.yml explicitly
+      # opts the same app service into remote mode.
+      RAG_MODE: mock
       RAG_SERVICE_URL: ${RAG_SERVICE_URL:-http://host.docker.internal:8000}
       RAG_INTERNAL_TOKEN: ${RAG_INTERNAL_TOKEN:-demo-only-rag-internal-token-change-production}
       RAG_REQUEST_TIMEOUT_MS: ${RAG_REQUEST_TIMEOUT_MS:-10000}

@@ -13,6 +13,7 @@
     "test:corpus:partial": "node scripts/corpus-partial-state-test.js",
     "test:corpus:live": "node scripts/restored-corpus-live-smoke.js",
     "test:contract": "node scripts/rag-contract-test.js",
+    "test:node-consolidation": "node scripts/node-consolidation-test.js",
     "test:part2": "node scripts/part2-smoke.js",
     "docker:mock:config": "docker compose config --quiet",
     "docker:mock:up": "docker compose up -d --build --wait",
@@ -41,9 +42,11 @@
     "test:remote": "node scripts/remote-e2e-smoke.js"
   },
   "dependencies": {
-    "bcrypt": "^5.1.1",
+    "bcrypt": "6.0.0",
+    "cors": "2.8.6",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
+    "express-rate-limit": "8.6.0",
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.2.0",
     "mysql2": "^3.9.7",

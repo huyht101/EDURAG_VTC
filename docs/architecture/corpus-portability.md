@@ -50,7 +50,7 @@ npm run corpus:verify
 
 - `inspect`: read-only config/pointer/remote/local state.
 - `publish`: manager-only; xuất source corpus đã approve, reconcile MySQL–Qdrant, tạo release và publish manifest-last.
-- `restore`: download/verify toàn bộ release trước mutation; restore MySQL/Qdrant vào empty stores và originals atomically vào upload volume.
+- `restore`: download/verify toàn bộ release trước mutation; restore MySQL/Qdrant vào empty stores và copy originals atomically theo từng file vào upload volume. Đây không phải một cross-store transaction và không rollback đồng thời ba store.
 - `verify`: read-only remote verification và local reconciliation nếu services đang chạy.
 
 Future publish vẫn giữ exact-approval, PII/secret/path scan, logical MySQL export và official Qdrant collection snapshot. Không ingest/embed lại để tạo release.

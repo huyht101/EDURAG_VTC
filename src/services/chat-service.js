@@ -323,6 +323,10 @@ async function sendMessage(user, idValue, body) {
     await markAssistantFailed(prepared.assistantMessageId, 'RAG_ANSWER_INVALID');
     throw appError(502, 'RAG_ANSWER_INVALID', 'RAG answer không hợp lệ.');
   }
+  if (!result.noAnswer && (!Array.isArray(result.sources) || result.sources.length === 0)) {
+    await markAssistantFailed(prepared.assistantMessageId, 'RAG_CITATIONS_REQUIRED');
+    throw appError(502, 'RAG_CITATIONS_REQUIRED', 'RAG answer phải có ít nhất một structured citation.');
+  }
 
   try {
     const citations = result.noAnswer ? [] : await mapCitations(result.sources || []);

@@ -17,7 +17,7 @@ sequenceDiagram
 
   Client->>Node: Request citation snapshot or original file with user JWT
   Node->>DB: Read citation, assistant message and chat session
-  Node->>Node: Authorize chat-session owner or ADMIN
+  Node->>Node: Authorize chat-session owner; ADMIN has no bypass
   alt Not authorized
     Node-->>Client: 404 citation not found
   else Snapshot requested

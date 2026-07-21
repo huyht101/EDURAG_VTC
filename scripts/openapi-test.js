@@ -33,6 +33,17 @@ assert(chatPost.requestBody.content['application/json'].examples.simple.value.co
 assert(!Object.hasOwn(chatPost.requestBody.content['application/json'].examples.simple.value, 'clientRequestId'));
 assert.match(chatPost.requestBody.content['application/json'].examples.safeRetry.value.clientRequestId, /^[0-9a-f-]{36}$/i);
 assert(chatPost.responses[200].content['application/json'].example.data.clientRequestId);
+assert(chatPost.responses[200].content['application/json'].example.data.assistantMessage.citations.length > 0);
+assert.match(chatPost.description, /structured citation/i);
+
+assert(spec.paths['/ready'].get.responses[503]);
+for (const path of [
+  '/api/auth/register', '/api/auth/login', '/api/auth/admin/verify-otp',
+  '/api/auth/forgot-password', '/api/auth/reset-password'
+]) {
+  assert(spec.paths[path].post.responses[429], `${path} must document rate limiting.`);
+}
+assert.match(spec.paths['/api/citations/{id}'].get.description, /owner của chat session/);
 
 const callback = spec.paths['/api/internal/rag/processing-callback'].post;
 assert.deepEqual(callback.security, [{ internalBearer: [] }]);

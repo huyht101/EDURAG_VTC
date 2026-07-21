@@ -40,7 +40,7 @@ Service khóa session row trước khi tính `MAX(message_order)+1`, nên một 
 | `vector_node_id_snapshot` | CHAR(36), required | — | Immutable source node ID |
 | `citation_order` | SMALLINT UNSIGNED, required | UNIQUE with message; CHECK `>=1` | Display order |
 | `document_title_snapshot` | VARCHAR(255), required | — | Immutable title |
-| `page_number_snapshot` | INT UNSIGNED, nullable | CHECK `>=1` | Immutable page |
+| `page_number_snapshot` | INT UNSIGNED, nullable | CHECK `>=1` | Immutable 1-based page/synthetic segment |
 | `section_title_snapshot` | VARCHAR(500), nullable | — | Immutable section |
 | `source_text_snapshot` | TEXT, required | — | Actual cited fragment, not necessarily whole chunk |
 | `source_locator_snapshot` | JSON, nullable | — | Immutable locator |

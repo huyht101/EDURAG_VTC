@@ -58,7 +58,7 @@
 | `chunk_text` | TEXT, required | — | Parent source chunk snapshot |
 | `content_hash` | CHAR(64), required | — | Chunk SHA-256 |
 | `token_count` | INT UNSIGNED, nullable | CHECK positive | Optional count |
-| `page_number` | INT UNSIGNED, nullable | CHECK `>=1` | PDF page, 1-based |
+| `page_number` | INT UNSIGNED, nullable | CHECK `>=1` | 1-based page; TXT/DOCX may use a synthetic segment |
 | `section_title` | VARCHAR(500), nullable | — | DOCX/TXT/PDF section |
 | `source_locator` | JSON, nullable | — | Paragraph/offset/bounding metadata extension |
 | `created_at` | DATETIME(3), auto UTC | — | Persist time |

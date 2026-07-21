@@ -1,0 +1,31 @@
+name: NodeJS Core CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  non-paid-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: cp .env.example .env
+      - run: npm run check
+      - run: npm run test:node-consolidation
+      - run: npm run test:openapi
+      - run: npm run test:docs
+      - run: npm run test:contract
+      - run: npm run test:corpus
+      - run: docker compose config --quiet
+      - run: npm audit --omit=dev

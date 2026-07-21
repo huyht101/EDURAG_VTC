@@ -17,6 +17,7 @@ function documentUploadMiddleware(req, res, next) {
       error.status = 400;
       error.code = error.code || 'INVALID_MULTIPART_UPLOAD';
     }
+    error.isOperational = true;
     return next(error);
   });
 }

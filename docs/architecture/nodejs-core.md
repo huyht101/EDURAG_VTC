@@ -17,6 +17,8 @@ Public API dùng user JWT. Middleware verify chữ ký, đọc lại user/role/s
 
 Internal callback dùng Bearer `RAG_INTERNAL_TOKEN` qua middleware riêng và constant-time digest comparison. Hai loại token không dùng lẫn.
 
+Public auth routes có configurable per-process rate limit. CORS dùng exact allowlist; request không có `Origin` vẫn được phép. `TRUST_PROXY_HOPS=0` là mặc định và chỉ đổi theo số reverse-proxy hop đã biết. Unknown internal errors trả generic `500` trong khi server log giữ diagnostic detail.
+
 ## Transactions
 
 `withTransaction` lấy connection, begin, commit/rollback và release trong `finally`. Registration, reset password, status transitions, document/job creation, callback manifest và chat completion đều dùng transaction phù hợp.
@@ -28,4 +30,5 @@ File I/O và HTTP tới Python không nằm trong MySQL transaction. MySQL và Q
 - ADMIN: quản lý mọi document và xem dashboard.
 - TEACHER: quản lý document có `uploaded_by` là chính mình.
 - STUDENT: không dùng Document Management; được chat và xem citation/source thuộc session của mình.
+- Citation snapshot/source luôn thuộc session owner; ADMIN không bypass public chat ownership.
 - Mọi ACTIVE user có thể chat trên kho retrieval `READY + VISIBLE`; chưa có subject/course/class scope.

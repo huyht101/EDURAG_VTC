@@ -25,6 +25,8 @@ Mock NodeJS + MySQL, không gọi Python/provider:
 npm run docker:mock:up
 ```
 
+Base Compose luôn ép `RAG_MODE=mock`; `.env.example` cũng dùng mock. Remote chỉ được bật chủ động bởi Compose override trong lệnh bên dưới.
+
 Full remote stack và cloud corpus bootstrap:
 
 ```powershell
@@ -36,9 +38,10 @@ npm run docker:remote:dev
 - Swagger: <http://localhost:5001/api-docs>
 - OpenAPI: <http://localhost:5001/api-docs.json>
 - Health: <http://localhost:5001/health>
+- Readiness (Node + MySQL): <http://localhost:5001/ready>
 
 Demo Admin local: `admin@example.com` / `123456`. Sau login, lấy `[DEV-ONLY ADMIN OTP]` từ app log rồi gọi `POST /api/auth/admin/verify-otp`.
 
 Xem [documentation index](docs/README.md), đặc biệt [Remote Docker RAG](docs/setup/remote-rag-e2e.md) và [independent test plan](docs/testing/week3-remote-test-plan.md).
 
-Trạng thái: **POST-MIGRATION HARDENING COMPLETE — READY FOR INDEPENDENT RETEST**. Reader-only restore, Qdrant startup race và canonical cloud release đã được kiểm chứng; đây vẫn là integration readiness, không phải production readiness.
+Trạng thái: **NODEJS/CORE CONSOLIDATION COMPLETE — PYTHON/RAG HANDOFF REMAINS**. Đây là integration/demo readiness, không phải production readiness.
