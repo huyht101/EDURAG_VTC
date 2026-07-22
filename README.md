@@ -21,9 +21,9 @@ Copy-Item .env.example .env
 
 Base Compose luôn ép `RAG_MODE=mock`; `.env.example` cũng dùng mock. Đây là runtime stub tối thiểu cho local/Part 2 regression, không phải bằng chứng Python integration:
 
-```powershell
-npm run docker:mock:up
-```
+                                                                                                ```powershell
+                                                                                                npm run docker:mock:up
+                                                                                                ```
 
 Remote Python là integration path chính và chỉ được bật chủ động bởi Compose override:
 
