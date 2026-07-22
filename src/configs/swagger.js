@@ -15,6 +15,47 @@ const response = (description, schemaRef = 'SuccessResponse', example) => ({
   }
 });
 
+const originalFileResponse = (description) => ({
+  description,
+  headers: {
+    'Content-Disposition': {
+      description: 'Always attachment; cross-origin JavaScript cannot read this header until Node exposes it through CORS.',
+      schema: { type: 'string', example: 'attachment; filename="document.pdf"' }
+    },
+    'Content-Length': {
+      description: 'Full file size. Byte Range/206 is not implemented.',
+      schema: { type: 'integer', minimum: 1 }
+    }
+  },
+  content: {
+    'application/pdf': { schema: { type: 'string', format: 'binary' } },
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': {
+      schema: { type: 'string', format: 'binary' }
+    },
+    'text/plain': { schema: { type: 'string', format: 'binary' } }
+  }
+});
+
+const citationSourceExample = {
+  success: true,
+  message: 'OK',
+  data: {
+    id: 43,
+    messageId: 42,
+    documentId: 12,
+    chunkId: 88,
+    citationOrder: 1,
+    documentTitle: 'Tài liệu demo',
+    pageNumber: 1,
+    sectionTitle: null,
+    sourceText: 'Structured source fragment.',
+    sourceLocator: null,
+    retrievalScore: 0.91,
+    rerankScore: null,
+    originalAvailable: true
+  }
+};
+
 const definition = {
   openapi: '3.0.3',
   info: {
@@ -64,7 +105,10 @@ const definition = {
         type: 'object',
         required: ['email', 'password', 'fullName', 'role'],
         properties: {
-          email: { type: 'string', format: 'email' },
+          email: {
+            type: 'string', format: 'email',
+            description: 'Format-only validation for both roles; runtime does not enforce @student.edu.vn or a Teacher domain.'
+          },
           password: { type: 'string', format: 'password', minLength: 8 },
           fullName: { type: 'string' },
           phone: { type: 'string', nullable: true },
@@ -150,6 +194,28 @@ const definition = {
           }
         },
         example: { content: 'Tài liệu mô tả nội dung chính nào?' }
+      },
+      CitationSnapshot: {
+        type: 'object',
+        required: ['id', 'messageId', 'citationOrder', 'documentTitle', 'sourceText'],
+        properties: {
+          id: { type: 'integer' },
+          messageId: { type: 'integer' },
+          documentId: { type: 'integer', nullable: true },
+          chunkId: { type: 'integer', nullable: true },
+          citationOrder: { type: 'integer', minimum: 1 },
+          documentTitle: { type: 'string' },
+          pageNumber: { type: 'integer', minimum: 1, nullable: true },
+          sectionTitle: { type: 'string', nullable: true },
+          sourceText: { type: 'string' },
+          sourceLocator: {
+            type: 'object', nullable: true,
+            description: 'Opaque optional object. Current Python runtime does not emit locator/boxes and no coordinate schema is defined.'
+          },
+          retrievalScore: { type: 'number', nullable: true },
+          rerankScore: { type: 'number', nullable: true }
+        },
+        description: 'Immutable public snapshot. vectorNodeId remains an internal mapping key and is not serialized.'
       },
       ProcessingChunkManifestItem: {
         type: 'object',
@@ -346,7 +412,7 @@ const definition = {
       delete: { tags: ['Documents'], summary: 'Soft-delete document through operation job', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 202: response('Delete operation accepted.'), 503: response('RAG operation failed.', 'ErrorResponse') } }
     },
     '/api/documents/{id}/file': {
-      get: { tags: ['Documents'], summary: 'Stream original file for owner/Admin', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 200: { description: 'File stream.' }, 404: response('Unavailable.', 'ErrorResponse') } }
+      get: { tags: ['Documents'], summary: 'Download original file for owner/Admin', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 200: originalFileResponse('Original PDF/DOCX/TXT attachment stream; no derived preview and no Range/206.'), 404: response('Unavailable.', 'ErrorResponse') } }
     },
     '/api/documents/jobs/{jobId}': {
       get: { tags: ['Document Processing'], summary: 'Processing job status for owner/Admin', security: [{ bearerAuth: [] }], parameters: [{ name: 'jobId', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 200: response('Processing job.', 'SuccessResponse', { success: true, message: 'OK', data: { id: 34, documentId: 12, jobType: 'INGEST', status: 'SUCCEEDED', currentStage: 'COMPLETED', attemptCount: 1, totalChunks: 8 } }), 404: response('Not found.', 'ErrorResponse') } }
@@ -369,17 +435,17 @@ const definition = {
       delete: { tags: ['Chat Sessions'], summary: 'Soft-delete own session', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 204: { description: 'Deleted.' } } }
     },
     '/api/chat/sessions/{id}/messages': {
-      get: { tags: ['Chat Messages'], summary: 'List paginated session messages', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }, { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0, default: 0 } }, { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 50 } }], responses: { 200: response('History.') } },
-      post: { tags: ['Chat Messages'], summary: 'Send question and wait for RAG answer', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/ChatMessageBody' }, examples: { simple: { summary: 'Swagger/simple request; server generates clientRequestId', value: { content: 'Tài liệu mô tả nội dung chính nào?' } }, safeRetry: { summary: 'Advanced retry with client-controlled idempotency UUID', value: { content: 'Tài liệu mô tả nội dung chính nào?', clientRequestId: '35ad0d0e-a423-4b06-a643-9a8391a6a4da' } } } } } }, responses: { 200: response('Assistant result with the final clientRequestId.', 'SuccessResponse', { success: true, message: 'Chat response completed.', data: { duplicate: false, clientRequestId: '35ad0d0e-a423-4b06-a643-9a8391a6a4da', userMessageId: 41, assistantMessage: { id: 42, status: 'COMPLETED', content: 'Câu trả lời có nguồn.', noAnswer: false, citations: [{ id: 43, vectorNodeId: '6f9ad988-e3bf-45a0-911d-c03345b05d67', citationOrder: 1, sourceText: 'Structured source fragment.' }] } } }), 409: response('clientRequestId belongs to another session.', 'ErrorResponse'), 502: response('RAG response invalid, including a sourced answer without a verifiable structured citation.', 'ErrorResponse'), 503: response('RAG unavailable or timed out.', 'ErrorResponse') } }
+      get: { tags: ['Chat Messages'], summary: 'List paginated session messages', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }, { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0, default: 0 } }, { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 50 } }], responses: { 200: response('History ordered by messageOrder; PENDING/COMPLETED/FAILED messages are included.', 'SuccessResponse', { success: true, message: 'OK', data: { session: { id: 9, title: 'Demo chat', lastMessageAt: null, createdAt: '2026-07-22T08:00:00.000Z', updatedAt: '2026-07-22T08:00:00.000Z' }, offset: 0, limit: 50, total: 1, messages: [{ id: 41, sessionId: 9, senderType: 'USER', messageOrder: 1, content: 'Tài liệu mô tả nội dung chính nào?', status: 'COMPLETED', noAnswer: false, clientRequestId: '35ad0d0e-a423-4b06-a643-9a8391a6a4da', errorCode: null, completedAt: '2026-07-22T08:30:00.000Z', createdAt: '2026-07-22T08:30:00.000Z', citations: [] }] } }) } },
+      post: { tags: ['Chat Messages'], summary: 'Send text question with idempotent response', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/ChatMessageBody' }, examples: { simple: { summary: 'Swagger/simple request; server generates clientRequestId', value: { content: 'Tài liệu mô tả nội dung chính nào?' } }, safeRetry: { summary: 'Advanced retry with client-controlled idempotency UUID', value: { content: 'Tài liệu mô tả nội dung chính nào?', clientRequestId: '35ad0d0e-a423-4b06-a643-9a8391a6a4da' } } } } } }, responses: { 200: response('New requests wait for final completion; duplicate requests return the current PENDING/COMPLETED/FAILED pair.', 'SuccessResponse', { success: true, message: 'Chat response completed.', data: { duplicate: false, clientRequestId: '35ad0d0e-a423-4b06-a643-9a8391a6a4da', userMessageId: 41, assistantMessage: { id: 42, status: 'COMPLETED', content: 'Câu trả lời có nguồn.', noAnswer: false, citations: [{ id: 43, messageId: 42, documentId: 12, chunkId: 88, citationOrder: 1, documentTitle: 'Tài liệu demo', pageNumber: 1, sectionTitle: null, sourceText: 'Structured source fragment.', sourceLocator: null, retrievalScore: 0.91, rerankScore: null }] } } }), 409: response('clientRequestId belongs to another session.', 'ErrorResponse'), 502: response('RAG response invalid, including a sourced answer without a verifiable structured citation.', 'ErrorResponse'), 503: response('RAG unavailable or timed out.', 'ErrorResponse') } }
     },
     '/api/citations/{id}': {
-      get: { tags: ['Citations'], summary: 'Authorized immutable citation snapshot', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 200: response('Citation.'), 404: response('Not found.', 'ErrorResponse') } }
+      get: { tags: ['Citations'], summary: 'Authorized immutable citation snapshot', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 200: response('Citation snapshot with original availability.', 'SuccessResponse', citationSourceExample), 404: response('Not found.', 'ErrorResponse') } }
     },
     '/api/citations/{id}/source': {
-      get: { tags: ['Citations'], summary: 'Citation snapshot and original availability', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 200: response('Source snapshot.') } }
+      get: { tags: ['Citations'], summary: 'Citation snapshot and original availability', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 200: response('Source snapshot.', 'SuccessResponse', citationSourceExample), 404: response('Not found.', 'ErrorResponse') } }
     },
     '/api/citations/{id}/file': {
-      get: { tags: ['Citations'], summary: 'Stream authorized original source', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 200: { description: 'File stream.' }, 409: response('Original unavailable; snapshot remains.', 'ErrorResponse') } }
+      get: { tags: ['Citations'], summary: 'Download authorized original source', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 200: originalFileResponse('Original PDF/DOCX/TXT attachment stream; no derived preview and no Range/206.'), 409: response('Original unavailable; snapshot remains.', 'ErrorResponse') } }
     },
     '/api/admin/dashboard/summary': {
       get: { tags: ['Admin Dashboard'], summary: 'Basic LLM-calls-only summary', security: [{ bearerAuth: [] }], parameters: [{ name: 'from', in: 'query', schema: { type: 'string', format: 'date-time' } }, { name: 'to', in: 'query', schema: { type: 'string', format: 'date-time' } }], responses: { 200: response('Dashboard summary.'), 403: response('ADMIN required.', 'ErrorResponse') } }
@@ -407,7 +473,7 @@ const operationDescriptions = {
   'GET /api/documents/{id}': 'Actor: document owner TEACHER hoặc ADMIN. Đọc metadata và latest job; storage_key không được public.',
   'PATCH /api/documents/{id}': 'Actor: document owner TEACHER hoặc ADMIN. Chỉ đổi title; file gốc immutable và muốn thay nội dung phải upload document mới.',
   'DELETE /api/documents/{id}': 'Actor: document owner TEACHER hoặc ADMIN. Tạo async DELETE_VECTORS job rồi soft-delete business document; poll job status. Chat/citation snapshot không bị xóa.',
-  'GET /api/documents/{id}/file': 'Actor: document owner TEACHER hoặc ADMIN. Stream original file khi local upload còn tồn tại; portable corpus restore không gồm original files nên có thể trả FILE_NOT_FOUND.',
+  'GET /api/documents/{id}/file': 'Actor: document owner TEACHER hoặc ADMIN. Stream original PDF/DOCX/TXT as attachment khi local upload còn tồn tại. Không có derived preview hoặc byte Range/206; nếu corpus original chưa được materialize về upload volume thì trả FILE_NOT_FOUND.',
   'GET /api/documents/jobs/{jobId}': 'Actor: owner của document hoặc ADMIN. Poll trạng thái QUEUED/RUNNING/SUCCEEDED/FAILED/CANCELLED; document chỉ dùng cho retrieval sau khi INGEST SUCCEEDED và processingStatus READY.',
   'POST /api/documents/{id}/hide': 'Actor: document owner TEACHER hoặc ADMIN. Tạo async SET_RETRIEVAL job để loại document khỏi retrieval nhưng giữ vectors và citation/history; poll job status.',
   'POST /api/documents/{id}/unhide': 'Actor: document owner TEACHER hoặc ADMIN. Tạo async SET_RETRIEVAL job để bật lại READY document; poll job status trước khi chat.',
@@ -416,11 +482,11 @@ const operationDescriptions = {
   'POST /api/chat/sessions': 'Actor: ACTIVE authenticated user. Tạo session thuộc chính user; title optional và chưa gọi Python/RAG.',
   'GET /api/chat/sessions/{id}': 'Actor: session owner. Đọc session detail kèm paginated messages/citations; endpoint read-only và không mở quyền ADMIN đọc session người khác.',
   'DELETE /api/chat/sessions/{id}': 'Actor: session owner. Soft-delete session; messages, citations và usage vẫn được giữ trong MySQL nhưng session không còn xuất hiện qua public history APIs.',
-  'GET /api/chat/sessions/{id}/messages': 'Actor: session owner. Đọc messages theo message_order với offset/limit; assistant message gồm citation snapshots, không bao gồm usage rows.',
-  'POST /api/chat/sessions/{id}/messages': 'Actor: session owner. Persist USER + ASSISTANT PENDING trước network call, chờ Python/LLM rồi persist answer/citations/usage. clientRequestId optional; no_answer=true là success hợp lệ. no_answer=false bắt buộc có ít nhất một structured citation map được tới READY + VISIBLE chunk, nếu không assistant FAILED. Timeout/upstream failure có thể lâu hơn API thông thường.',
+  'GET /api/chat/sessions/{id}/messages': 'Actor: session owner. Đọc messages theo message_order với offset/limit; PENDING/COMPLETED/FAILED đều xuất hiện và assistant message gồm citation snapshots, không bao gồm usage rows.',
+  'POST /api/chat/sessions/{id}/messages': 'Actor: session owner. Supported contract là JSON text, không có multipart/image. Request mới persist USER + ASSISTANT PENDING, chờ Python/LLM và success trả assistant COMPLETED. Duplicate clientRequestId trả pair hiện hữu nên có thể PENDING/COMPLETED/FAILED; PENDING được theo dõi qua history. Không có SSE/WebSocket. no_answer=true là success hợp lệ; normal answer bắt buộc có verified structured citation.',
   'GET /api/citations/{id}': 'Actor: owner của chat session chứa citation. Đọc immutable citation snapshot; không phụ thuộc document hiện còn visible hoặc original file còn tồn tại.',
-  'GET /api/citations/{id}/source': 'Actor: owner của chat session chứa citation. Đọc source-text snapshot và cờ originalAvailable; đây không phải stream file.',
-  'GET /api/citations/{id}/file': 'Actor: owner của chat session chứa citation và current source authorization hợp lệ. Stream original file; restored portable corpus có thể trả ORIGINAL_SOURCE_UNAVAILABLE trong khi snapshot vẫn đọc được.',
+  'GET /api/citations/{id}/source': 'Actor: owner của chat session chứa citation. Đọc source-text snapshot và cờ originalAvailable; sourceLocator là opaque optional object và current Python không tạo locator/boxes. Đây không phải stream file.',
+  'GET /api/citations/{id}/file': 'Actor: owner của chat session chứa citation và current source authorization hợp lệ. Stream original as attachment; không có Range/206. Portable corpus thiếu original có thể trả ORIGINAL_SOURCE_UNAVAILABLE trong khi snapshot vẫn đọc được.',
   'GET /api/admin/dashboard/summary': 'Actor: ADMIN. Đọc document/chat/citation và LLM usage aggregates theo time range; không gọi đây là tổng OCR/embedding/Qdrant cost.'
 };
 

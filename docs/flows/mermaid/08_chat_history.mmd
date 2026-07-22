@@ -22,3 +22,4 @@ flowchart TB
   N1[MySQL is the durable chat-history source]
   N2[Python receives only a bounded history window for the current question]
   N3[Pagination uses offset and limit, maximum 100]
+  N4[Messages use senderType and include PENDING, COMPLETED and FAILED rows]

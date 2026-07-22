@@ -72,6 +72,18 @@ async function testCors() {
     const allowed = await fetch(url, { headers: { origin: 'http://frontend.test' } });
     assert.equal(allowed.status, 200);
     assert.equal(allowed.headers.get('access-control-allow-origin'), 'http://frontend.test');
+    assert.equal(allowed.headers.get('access-control-allow-credentials'), null);
+    assert.equal(allowed.headers.get('access-control-expose-headers'), null);
+    const preflight = await fetch(url, {
+      method: 'OPTIONS',
+      headers: {
+        origin: 'http://frontend.test',
+        'access-control-request-method': 'GET',
+        'access-control-request-headers': 'authorization'
+      }
+    });
+    assert.equal(preflight.status, 204);
+    assert.match(preflight.headers.get('access-control-allow-headers') || '', /Authorization/i);
     const previousError = console.error;
     console.error = () => {};
     try {

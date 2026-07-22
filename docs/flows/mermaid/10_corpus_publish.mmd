@@ -1,0 +1,83 @@
+%% 10 Corpus publish | Host-side immutable release flow
+flowchart TB
+  subgraph Upload[Normal document upload - separate runtime workflow]
+    U1[POST /api/documents]
+    U2[Node stores original and MySQL document/job]
+    U3[Python parses, embeds and updates Qdrant]
+    U4[Callback makes accepted local state READY]
+    U1 --> U2 --> U3 --> U4
+  end
+
+  U4 -. local state may diverge from current cloud release .-> Local[(Local Corpus state<br/>MySQL + uploads + Qdrant)]
+
+  subgraph DryRun[Read-only publish plan]
+    D1[npm run corpus:publish -- --dry-run]
+    D2[Read-only MySQL dump, Qdrant scroll and upload stat]
+    D3[Validate local eligibility, consistency, paths, secrets and privacy hints]
+    D4[Return redacted plan with provisional identity]
+    D1 --> D2 --> D3 --> D4
+  end
+  Local --> D2
+  D4 -. no writer stop, snapshot, staging, cloud call or pointer mutation .-> Operator[Operator reviews PII, secrets, rights and scope]
+
+  subgraph Publish[Confirmed immutable publish]
+    P1[npm run corpus:publish -- --confirm-reviewed]
+    P2{Config and exact confirmation valid?}
+    P3[Freeze app and RAG writers]
+    P4[Export scoped MySQL without auth tokens]
+    P5[Collect exact originals from upload volume]
+    P6[Create and download Qdrant collection snapshot]
+    P7{Cross-store counts, mapping, checksum, path, secret and privacy checks pass?}
+    P8[Build complete manifest and content-v2 identity]
+    P8B{Private target can be verified?}
+    P9{Release objects already exist?}
+    P10[Upload artifacts with create-only precondition]
+    P11[Verify existing object metadata and content]
+    P12[Upload manifest last]
+    P13{Download and verify complete immutable release?}
+    P14[Update local current pointer]
+    P15[CORPUS_PUBLISH_OK]
+    F[Publish fails; previous current pointer remains]
+    C[Finally: resume writers and clean normal staging]
+
+    P1 --> P2
+    P2 -->|No| F
+    P2 -->|Yes| P3
+    P3 --> P4
+    P3 --> P5
+    P3 --> P6
+    P4 --> P7
+    P5 --> P7
+    P6 --> P7
+    P7 -->|No| F
+    P7 -->|Yes| P8 --> P8B
+    P8B -->|No| F
+    P8B -->|Yes| P9
+    P9 -->|Absent| P10 --> P12
+    P9 -->|Same immutable content| P11 --> P12
+    P9 -->|Collision with different content| F
+    P12 --> P13
+    P13 -->|No| F
+    P13 -->|Yes| P14 --> P15
+    F --> C
+    P15 --> C
+  end
+
+  Operator --> P1
+  Local --> P4
+  Local --> P5
+  Local --> P6
+  P10 --> Release[(Immutable release artifacts)]
+  P11 --> Release
+  P12 --> Release
+  P14 --> Pointer[(bootstrap/corpus-release.json<br/>current pointer)]
+
+  P3 -. SIGINT or SIGTERM .-> S[Signal guard best-effort resumes writers]
+  S --> SX[Process exits with pointer unchanged;<br/>signal-time staging cleanup is not guaranteed]
+
+  subgraph Notes[Implemented scope and limitations]
+    N1[Dry-run is read-only: no writer stop, snapshot, staging, cloud call or pointer change]
+    N2[Release excludes source code, Docker images/containers, secrets, credentials, auth tokens, logs and cache]
+    N3[Local pointer changes only after immutable artifacts and manifest pass read-back verification]
+    N4[Cross-store publish/restore uses verification and compensating recovery;<br/>it is not one distributed atomic transaction]
+  end

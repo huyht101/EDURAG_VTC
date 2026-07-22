@@ -9,6 +9,7 @@ Tài liệu hiện hành của NodeJS/Core. Khi có khác biệt, ưu tiên runt
 | Chạy full Docker, cloud restore và Swagger | [Remote Docker RAG](setup/remote-rag-e2e.md) |
 | Hiểu system ownership | [System overview](architecture/system-overview.md) |
 | Hiểu cloud corpus release | [Corpus portability](architecture/corpus-portability.md) |
+| Tích hợp Web/Mobile | [Frontend integration contract](api/frontend-integration.md) |
 | Tra public role/workflow | [Public API](api/public-api.md); endpoint detail ở Swagger |
 | Tích hợp NodeJS–Python | [Internal RAG contract](api/internal-rag-contract.md) |
 | Theo dõi debt phía Python | [Python/Data-RAG handoff](architecture/python-rag-handoff.md) |

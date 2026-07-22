@@ -65,6 +65,8 @@ npm run corpus:verify
 
 `--dry-run` không được kết hợp với `--confirm-reviewed`; thiếu confirmation hoặc option lạ đều fail. Publish interruption trước pointer có thể để lại immutable incomplete package làm cleanup candidate, nhưng release hiện hành không đổi và retry không được silently overwrite.
 
+Flow canonical: [Corpus publish](../flows/mermaid/10_corpus_publish.mmd). Signal guard hiện best-effort resume writers trước khi thoát; do handler gọi process exit trực tiếp, cleanup staging riêng cho signal chưa được bảo đảm như normal/error `finally`. Pointer cũ vẫn không đổi nếu publish chưa verify hoàn tất.
+
 ## Restore và giới hạn
 
 Restore download/stage/verify toàn bộ trước apply và chỉ chạy khi local `EMPTY`. Trong apply, tool giữ writer pause, tạo in-memory recovery dump cho empty MySQL state, phục hồi exact empty Qdrant config và xóa đúng originals vừa materialize nếu bước sau thất bại. Đây là coordinated recovery, không phải distributed transaction; rollback failure trả `CORPUS_RESTORE_ROLLBACK_FAILED` và không được tự merge/overwrite tiếp. Không có hidden `--force` hoặc replace-local command; thay corpus phải dùng project/volumes disposable được operator xác nhận ngoài tool.

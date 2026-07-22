@@ -35,6 +35,30 @@ assert.match(chatPost.requestBody.content['application/json'].examples.safeRetry
 assert(chatPost.responses[200].content['application/json'].example.data.clientRequestId);
 assert(chatPost.responses[200].content['application/json'].example.data.assistantMessage.citations.length > 0);
 assert.match(chatPost.description, /structured citation/i);
+assert.deepEqual(Object.keys(chatPost.requestBody.content), ['application/json']);
+assert.match(chatPost.description, /không (nhận|có) multipart\/image/i);
+assert(!Object.hasOwn(
+  chatPost.responses[200].content['application/json'].example.data.assistantMessage.citations[0],
+  'vectorNodeId'
+));
+assert.match(chatPost.responses[200].description, /PENDING\/COMPLETED\/FAILED/);
+
+const chatHistory = spec.paths['/api/chat/sessions/{id}/messages'].get.responses[200]
+  .content['application/json'].example.data;
+assert(Array.isArray(chatHistory.messages));
+assert(Object.hasOwn(chatHistory.messages[0], 'senderType'));
+assert(!Object.hasOwn(chatHistory.messages[0], 'role'));
+
+const documentFile = spec.paths['/api/documents/{id}/file'].get.responses[200];
+assert(documentFile.headers['Content-Disposition']);
+assert(documentFile.headers['Content-Length']);
+assert.match(documentFile.description, /no Range\/206/i);
+assert.match(spec.components.schemas.RegisterBody.properties.email.description, /does not enforce @student\.edu\.vn/i);
+assert.match(spec.components.schemas.CitationSnapshot.description, /not serialized/i);
+assert.deepEqual(
+  spec.paths['/api/citations/{id}/source'].get.responses[200].content['application/json'].example,
+  spec.paths['/api/citations/{id}'].get.responses[200].content['application/json'].example
+);
 
 assert(spec.paths['/ready'].get.responses[503]);
 for (const path of [

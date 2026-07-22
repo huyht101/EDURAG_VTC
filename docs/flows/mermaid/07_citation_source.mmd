@@ -9,7 +9,7 @@ sequenceDiagram
   RAG-->>Node: Structured answer with source fragments and optional scores
   Node->>DB: Resolve vector_node_id to document_chunks and documents
   loop Each source fragment
-    Node->>Node: Build immutable title, page, section, text and locator snapshot
+    Node->>Node: Build immutable title, page, section, text and optional locator snapshot
     Note over Node: One parent chunk may produce multiple citation fragments
   end
   Node->>DB: Insert ordered citations in the assistant-completion transaction
@@ -27,14 +27,15 @@ sequenceDiagram
     alt ADMIN or uploader and storage_key exists
       Node->>Store: Open file using internal storage_key
       Store-->>Node: File stream
-      Node-->>Client: Stream file without exposing storage_key
+      Node-->>Client: Attachment stream with Content-Length; no Range support
     else Normal session owner and document is READY and VISIBLE
       Node->>Store: Open file using internal storage_key
       Store-->>Node: File stream
-      Node-->>Client: Stream file without exposing storage_key
+      Node-->>Client: Attachment stream with Content-Length; no Range support
     else Original file is not authorized or unavailable by state
       Node-->>Client: 409 original source unavailable
     end
   end
 
   Note over Node,Store: If the database storage_key exists but the physical file is missing, the file endpoint returns 404 while the citation snapshot remains available
+  Note over RAG,Client: Current Python emits no source_locator or boxes; FE highlight falls back to sourceText search

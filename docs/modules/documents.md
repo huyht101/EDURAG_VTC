@@ -6,6 +6,8 @@ ADMIN quản lý toàn bộ document; TEACHER chỉ document mình upload; STUDE
 
 Upload hỗ trợ PDF/DOCX/TXT, giới hạn bằng `FILE_MAX_SIZE_BYTES`, kiểm tra extension/MIME/signature và lưu generated relative storage key. Public DTO không chứa storage key. Original file immutable; thay nội dung bằng upload document mới.
 
+File endpoint trả original dạng `attachment` với `Content-Length` và filesystem stream. Runtime không convert DOCX/TXT thành preview, chưa hỗ trợ byte Range/`206` và dùng cùng upload-size limit cho ba định dạng. Chi tiết FE: [Frontend integration contract](../api/frontend-integration.md).
+
 Transaction đầu tạo `documents` và `document_processing_jobs`; dispatch Python diễn ra sau commit. DB failure xóa file vừa lưu. Remote dispatch failure giữ document/file, đánh dấu job/document `FAILED` để kiểm tra hoặc retry thủ công; không hứa durable retry.
 
 Callback complete manifest dùng internal Bearer, job/attempt stale guard và transaction. Hide không xóa vectors; unhide chỉ cho `READY + HIDDEN`; delete soft-delete và giữ file/chunks/jobs/chat/citation/usage.

@@ -24,6 +24,7 @@ These diagrams describe the implemented NodeJS/Core MVP behavior and its remaini
 | [07 Citation/source](mermaid/07_citation_source.mmd) | Chat/RAG | MVP implemented |
 | [08 Chat history](mermaid/08_chat_history.mmd) | Chat/RAG | MVP implemented |
 | [09 Usage/dashboard](mermaid/09_usage_dashboard.mmd) | Usage/Admin | Basic summary implemented |
+| [10 Corpus publish](mermaid/10_corpus_publish.mmd) | Host-side Corpus tooling | Immutable publish and pointer-last guards implemented; signal-time staging cleanup limitation shown |
 
 No diagram is deferred. Current limitations are recorded in the open-questions note; release evidence stays in the readiness document.
 

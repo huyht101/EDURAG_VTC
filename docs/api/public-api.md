@@ -1,6 +1,6 @@
 # Public API conventions
 
-Swagger `/api-docs` và OpenAPI `/api-docs.json` là nguồn endpoint/request/response chi tiết. File này chỉ mô tả actor, ownership và workflow.
+Swagger `/api-docs` và OpenAPI `/api-docs.json` là nguồn endpoint/request/response chi tiết. File này chỉ mô tả actor, ownership và workflow. Web/Mobile dùng [Frontend integration contract](frontend-integration.md) cho chat response, source viewer, CORS và các limitation hiện tại.
 
 ## Authentication và response
 
