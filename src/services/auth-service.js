@@ -9,6 +9,7 @@ const TOKEN_TYPES = require('../constants/token-types');
 const withTransaction = require('../database/transaction');
 const userRepo = require('../repositories/user-repository');
 const tokenRepo = require('../repositories/token-repository');
+const emailService = require('./email-service');
 const appError = require('../utils/app-error');
 
 const OTP_EXPIRES_MINUTES = 10;
@@ -170,6 +171,7 @@ async function requestPasswordReset(email) {
   });
 
   deliverDevelopmentSecret('PASSWORD RESET TOKEN', rawToken, RESET_TOKEN_EXPIRES_MINUTES);
+  await emailService.sendPasswordResetEmail(user.email, rawToken);
   return true;
 }
 

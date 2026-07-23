@@ -35,6 +35,14 @@ function sensitive(identifier) {
   });
 }
 
+function chat(identifier) {
+  return createRateLimiter({
+    identifier,
+    windowMs: 60 * 1000, // 1 phút
+    limit: 15           // Tối đa 15 request mỗi phút
+  });
+}
+
 module.exports = {
   createRateLimiter,
   authRateLimiters: {
@@ -43,5 +51,6 @@ module.exports = {
     adminOtp: sensitive('auth-admin-otp'),
     forgotPassword: sensitive('auth-forgot-password'),
     resetPassword: sensitive('auth-reset-password')
-  }
+  },
+  chatLimiter: chat('chat-limit')
 };

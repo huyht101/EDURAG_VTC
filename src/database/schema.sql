@@ -273,7 +273,25 @@ CREATE TABLE IF NOT EXISTS `llm_usage_logs` (
   CONSTRAINT `chk_llm_usage_operation` CHECK (operation_type IN ('QUERY_REWRITE','ANSWER_GENERATION','REFINE','OTHER')),
   CONSTRAINT `chk_llm_usage_status` CHECK (status IN ('SUCCEEDED','FAILED')),
   CONSTRAINT `chk_llm_usage_cost` CHECK (estimated_cost IS NULL OR estimated_cost >= 0)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Một hàng cho mỗi LLM call; nhiều hàng có thể thuộc cùng assistant message/RAG request.';
+CREATE TABLE IF NOT EXISTS `subjects` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `code` VARCHAR(32) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL,
+  `name` VARCHAR(150) NOT NULL,
+  `department` VARCHAR(150) NULL DEFAULT NULL,
+  `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  CONSTRAINT `pk_subjects` PRIMARY KEY (`id`),
+  CONSTRAINT `uq_subjects_code` UNIQUE (`code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Danh mục Môn học hệ thống.';
+
+CREATE TABLE IF NOT EXISTS `teacher_subjects` (
+  `teacher_id` BIGINT UNSIGNED NOT NULL,
+  `subject_id` INT UNSIGNED NOT NULL,
+  `assigned_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  CONSTRAINT `pk_teacher_subjects` PRIMARY KEY (`teacher_id`, `subject_id`),
+  CONSTRAINT `fk_teacher_subjects_teacher` FOREIGN KEY (`teacher_id`) REFERENCES `users` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
+  CONSTRAINT `fk_teacher_subjects_subject` FOREIGN KEY (`subject_id`) REFERENCES `subjects` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Phân quyền Môn học được quản lý cho Giảng viên.';
 
 START TRANSACTION;
 

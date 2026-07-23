@@ -94,11 +94,53 @@ async function updateUserStatus(req, res, next) {
   }
 }
 
+/**
+ * POST /api/admin/users/:id/reset-password
+ */
+async function adminResetPassword(req, res, next) {
+  try {
+    const targetId = req.params.id;
+    const { newPassword } = req.body;
+    if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 8) {
+      return res.status(400).json({ error: 'Mật khẩu mới không hợp lệ (tối thiểu 8 ký tự).' });
+    }
+    await userService.adminResetPassword(targetId, newPassword);
+    return res.ok('Đặt lại mật khẩu người dùng thành công.', {});
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * POST /api/admin/students/import
+ */
+async function importStudents(req, res, next) {
+  try {
+    const excelService = require('../services/excel-service');
+    let rawContent = req.body.fileContent;
+    if (!rawContent && req.body.students && Array.isArray(req.body.students)) {
+      const result = await userService.importStudentsBulk(req.body.students);
+      return res.ok('Import danh sách sinh viên hoàn tất.', result);
+    }
+    if (!rawContent || typeof rawContent !== 'string') {
+      return res.status(400).json({ error: 'Nội dung file (fileContent) hoặc mảng sinh viên (students) là bắt buộc.' });
+    }
+    const parsedRows = excelService.parseCsvOrExcel(rawContent);
+    const students = parsedRows.map((r) => excelService.normalizeStudentRow(r));
+    const result = await userService.importStudentsBulk(students);
+    return res.ok('Import danh sách sinh viên hoàn tất.', result);
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   getMyProfile,
   updateMyProfile,
   changeMyPassword,
   listUsers,
   getUserById,
-  updateUserStatus
+  updateUserStatus,
+  adminResetPassword,
+  importStudents
 };
