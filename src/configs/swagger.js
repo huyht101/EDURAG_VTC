@@ -372,7 +372,7 @@ const definition = {
     },
     '/api/documents': {
       get: {
-        tags: ['Documents'], summary: 'List documents for TEACHER owner or ADMIN', security: [{ bearerAuth: [] }],
+        tags: ['Documents'], summary: 'List documents for STUDENT, TEACHER or ADMIN', security: [{ bearerAuth: [] }],
         parameters: [
           { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0 } },
           { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100 } },
@@ -468,7 +468,7 @@ const operationDescriptions = {
   'GET /api/admin/users': 'Actor: ADMIN. Đọc danh sách user có pagination/filter; không dành cho TEACHER/STUDENT.',
   'GET /api/admin/users/{id}': 'Actor: ADMIN. Đọc account/profile detail của user theo id; không trả password/token hash.',
   'PUT /api/admin/users/{id}/status': 'Actor: ADMIN. Thực hiện approve/reject/reopen/lock/unlock theo transition hợp lệ; lock tăng auth_version.',
-  'GET /api/documents': 'Actor: TEACHER hoặc ADMIN. TEACHER chỉ thấy document mình upload, ADMIN thấy toàn bộ; mặc định không list DELETED.',
+  'GET /api/documents': 'Actor: STUDENT, TEACHER hoặc ADMIN. TEACHER chỉ thấy document mình upload, ADMIN và STUDENT thấy toàn bộ; mặc định không list DELETED.',
   'POST /api/documents': 'Actor: TEACHER hoặc ADMIN. Validate và lưu PDF/DOCX/TXT (DOCX phải là bounded OOXML archive), tạo document + INGEST job rồi dispatch Python. HTTP 202 chỉ là accepted; tiếp theo poll GET /api/documents/jobs/{jobId} đến SUCCEEDED và kiểm tra document READY.',
   'GET /api/documents/{id}': 'Actor: document owner TEACHER hoặc ADMIN. Đọc metadata và latest job; storage_key không được public.',
   'PATCH /api/documents/{id}': 'Actor: document owner TEACHER hoặc ADMIN. Chỉ đổi title; file gốc immutable và muốn thay nội dung phải upload document mới.',

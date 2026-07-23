@@ -10,9 +10,11 @@ const ROLES = require('../constants/roles');
 
 const managers = [ROLES.TEACHER, ROLES.ADMIN];
 
+// GET /api/documents is accessible by STUDENT, TEACHER, and ADMIN
+router.get('/', authMiddleware, roleMiddleware([ROLES.STUDENT, ROLES.TEACHER, ROLES.ADMIN]), validateRequest(validateDocumentQuery, 'query'), documentController.list);
+
 router.use(authMiddleware, roleMiddleware(managers));
 router.post('/', documentUpload, documentController.upload);
-router.get('/', validateRequest(validateDocumentQuery, 'query'), documentController.list);
 router.get('/jobs/:jobId', documentController.jobDetail);
 router.get('/:id/file', documentController.streamFile);
 router.post('/:id/hide', documentController.hide);

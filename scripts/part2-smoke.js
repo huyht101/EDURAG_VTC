@@ -26,6 +26,9 @@ for (const name of required) {
   if (!process.env[name]) throw new Error(`${name} is required for part2 smoke tests.`);
 }
 
+const rateLimitMiddleware = require('../src/middlewares/rate-limit-middleware');
+rateLimitMiddleware.chatLimiter = (req, res, next) => next();
+
 const app = require('../src/app');
 const pool = require('../src/configs/db');
 const withTransaction = require('../src/database/transaction');
@@ -203,7 +206,7 @@ async function main() {
         fullName: 'Weak Password', role: 'TEACHER'
       })
     }, 400);
-    const studentEmail = `student.${suffix}@smoke.test`;
+    const studentEmail = `student.${suffix}@student.smoke.test`;
     const studentPassword = 'StudentPass@2026';
     await request('/api/auth/register', {
       method: 'POST', headers: { 'content-type': 'application/json' },
@@ -270,7 +273,7 @@ async function main() {
       body: JSON.stringify({ email: teacher2.email, password: teacher2.password })
     })).payload.data.token;
 
-    await request('/api/documents', { headers: auth(studentToken) }, 403);
+    await request('/api/documents', { headers: auth(studentToken) });
     await request('/api/documents', { headers: auth(process.env.RAG_INTERNAL_TOKEN) }, 401);
 
     const invalidForm = new FormData();
