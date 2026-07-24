@@ -1,5 +1,4 @@
 const STATUSES = require('../constants/statuses');
-const { escapeHtml } = require('../utils/sanitize');
 
 function validateUpdateProfile(body) {
   if (!body || Object.keys(body).length === 0) return { error: 'Dữ liệu cập nhật trống.' };
@@ -7,21 +6,6 @@ function validateUpdateProfile(body) {
   if (Object.keys(body).some((key) => !allowed.includes(key))) {
     return { error: 'Profile chứa trường không được phép cập nhật.' };
   }
-
-  // Escape HTML để chống Stored XSS
-  if (body.fullName !== undefined && body.fullName !== null) {
-    body.fullName = escapeHtml(body.fullName);
-  }
-  if (body.academicTitle !== undefined && body.academicTitle !== null) {
-    body.academicTitle = escapeHtml(body.academicTitle);
-  }
-  if (body.degree !== undefined && body.degree !== null) {
-    body.degree = escapeHtml(body.degree);
-  }
-  if (body.department !== undefined && body.department !== null) {
-    body.department = escapeHtml(body.department);
-  }
-
   if (Object.prototype.hasOwnProperty.call(body, 'fullName')
     && (typeof body.fullName !== 'string' || !body.fullName.trim()
       || body.fullName.trim().length > 150)) {

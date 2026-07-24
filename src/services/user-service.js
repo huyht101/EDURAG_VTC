@@ -1,4 +1,3 @@
-const crypto = require('crypto');
 const bcrypt = require('bcrypt');
 
 const ROLES = require('../constants/roles');
@@ -13,35 +12,6 @@ function bcryptRounds() {
     throw new Error('BCRYPT_ROUNDS must be an integer from 10 to 15.');
   }
   return rounds;
-}
-
-function generateRandomPassword() {
-  const lowercase = 'abcdefghijklmnopqrstuvwxyz';
-  const uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-  const digits = '0123456789';
-  const special = '@$!%*?&';
-
-  const pick = (charset) => charset[crypto.randomInt(charset.length)];
-  const chars = [
-    pick(lowercase),
-    pick(uppercase),
-    pick(digits),
-    pick(special)
-  ];
-
-  const allChars = lowercase + uppercase + digits + special;
-  for (let i = 0; i < 8; i += 1) {
-    chars.push(pick(allChars));
-  }
-
-  for (let i = chars.length - 1; i > 0; i -= 1) {
-    const j = crypto.randomInt(i + 1);
-    const temp = chars[i];
-    chars[i] = chars[j];
-    chars[j] = temp;
-  }
-
-  return chars.join('');
 }
 
 async function getMyProfile(userId, role) {
@@ -86,18 +56,22 @@ async function updateMyProfile(userId, role, data) {
   });
 }
 
-async function changeMyPassword(userId, { oldPassword, newPassword }) {
-  if (oldPassword === newPassword) {
-    throw appError(400, 'SAME_AS_OLD_PASSWORD', 'Mật khẩu mới không được trùng với mật khẩu hiện tại.');
-  }
-  const newHash = await bcrypt.hash(newPassword, bcryptRounds());
-  await withTransaction(async (connection) => {
-    const currentHash = await userRepo.findPasswordHashById(userId, connection, true);
+async function changeMyPassword(userId, { oldPassword, newPassword }, dependencies = {}) {
+  const transaction = dependencies.withTransaction || withTransaction;
+  const users = dependencies.userRepo || userRepo;
+  const comparePassword = dependencies.comparePassword || bcrypt.compare;
+  const hashPassword = dependencies.hashPassword || ((password) => bcrypt.hash(password, bcryptRounds()));
+  await transaction(async (connection) => {
+    const currentHash = await users.findPasswordHashById(userId, connection, true);
     if (!currentHash) throw appError(404, 'USER_NOT_FOUND', 'Không tìm thấy người dùng.');
-    if (!(await bcrypt.compare(oldPassword, currentHash))) {
+    if (!(await comparePassword(oldPassword, currentHash))) {
       throw appError(400, 'INCORRECT_OLD_PASSWORD', 'Mật khẩu hiện tại không chính xác.');
     }
-    await userRepo.updatePasswordAndIncrementVersion(userId, newHash, connection);
+    if (await comparePassword(newPassword, currentHash)) {
+      throw appError(400, 'SAME_AS_OLD_PASSWORD', 'Mật khẩu mới không được trùng với mật khẩu hiện tại.');
+    }
+    const newHash = await hashPassword(newPassword);
+    await users.updatePasswordAndIncrementVersion(userId, newHash, connection);
   });
   return true;
 }
@@ -144,74 +118,11 @@ async function updateUserStatus(targetId, { status, reviewNote, lockReason }, ad
   });
 }
 
-async function adminResetPassword(targetUserId, newPassword) {
-  const newHash = await bcrypt.hash(newPassword, bcryptRounds());
-  return withTransaction(async (connection) => {
-    const user = await userRepo.findUserByIdForUpdate(targetUserId, connection);
-    if (!user) throw appError(404, 'USER_NOT_FOUND', 'Không tìm thấy người dùng.');
-    await userRepo.updatePasswordAndIncrementVersion(targetUserId, newHash, connection);
-    return true;
-  });
-}
-
-async function importStudentsBulk(studentsList) {
-  if (!Array.isArray(studentsList)) {
-    throw appError(400, 'INVALID_INPUT', 'Danh sách sinh viên phải là một mảng.');
-  }
-  if (studentsList.length > 500) {
-    throw appError(400, 'IMPORT_TOO_LARGE', 'Tối đa 500 sinh viên mỗi lần import.');
-  }
-
-  const results = { imported: 0, importedList: [], failed: [] };
-  const studentRole = await userRepo.findRoleByCode(ROLES.STUDENT);
-  if (!studentRole) throw new Error('STUDENT role is missing.');
-
-  for (let i = 0; i < studentsList.length; i += 1) {
-    const item = studentsList[i];
-    try {
-      const generatedPassword = generateRandomPassword();
-      const passwordHash = await bcrypt.hash(generatedPassword, bcryptRounds());
-
-      await withTransaction(async (connection) => {
-        if (await userRepo.checkDuplicate({ email: item.email, studentCode: item.studentCode }, connection)) {
-          throw new Error('Email hoặc Mã sinh viên đã tồn tại.');
-        }
-        const userId = await userRepo.createUser({
-          roleId: studentRole.id,
-          fullName: item.fullName,
-          email: item.email,
-          passwordHash: passwordHash,
-          phone: item.phone || null,
-          status: STATUSES.ACTIVE
-        }, connection);
-        await userRepo.createStudentProfile({
-          userId,
-          studentCode: item.studentCode,
-          dateOfBirth: item.dateOfBirth
-        }, connection);
-      });
-
-      results.imported += 1;
-      results.importedList.push({
-        email: item.email,
-        studentCode: item.studentCode,
-        password: generatedPassword
-      });
-    } catch (err) {
-      results.failed.push({ email: item.email, studentCode: item.studentCode, error: err.message });
-    }
-  }
-
-  return results;
-}
-
 module.exports = {
   getMyProfile,
   updateMyProfile,
   changeMyPassword,
   listUsers,
   getUserById,
-  updateUserStatus,
-  adminResetPassword,
-  importStudentsBulk
+  updateUserStatus
 };

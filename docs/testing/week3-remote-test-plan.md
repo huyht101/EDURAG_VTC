@@ -17,6 +17,7 @@ Copy-Item .env.example .env
 npm run check
 npm run test:node-consolidation
 npm run test:openapi
+npm run test:library
 npm run test:docs
 npm run test:contract
 npm run test:corpus

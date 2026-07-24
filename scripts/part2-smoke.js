@@ -26,9 +26,6 @@ for (const name of required) {
   if (!process.env[name]) throw new Error(`${name} is required for part2 smoke tests.`);
 }
 
-const rateLimitMiddleware = require('../src/middlewares/rate-limit-middleware');
-rateLimitMiddleware.chatLimiter = (req, res, next) => next();
-
 const app = require('../src/app');
 const pool = require('../src/configs/db');
 const withTransaction = require('../src/database/transaction');
@@ -80,10 +77,11 @@ async function recursiveFileCount(directory) {
 }
 
 async function cleanupSmokeSuffix(suffix) {
+  const emailMarker = `%${suffix}%`;
   const storageKeys = await withTransaction(async (connection) => {
     const [users] = await connection.execute(
       'SELECT id FROM users WHERE email LIKE ?',
-      [`%${suffix}@smoke.test`]
+      [emailMarker]
     );
     const userIds = users.map((row) => row.id);
     if (!userIds.length) return [];
@@ -120,6 +118,11 @@ async function cleanupSmokeSuffix(suffix) {
     }
     await connection.execute(`DELETE FROM auth_tokens WHERE user_id IN (${userMarks})`, userIds);
     await connection.execute(`DELETE FROM users WHERE id IN (${userMarks})`, userIds);
+    const [remaining] = await connection.execute(
+      'SELECT COUNT(*) AS total FROM users WHERE email LIKE ?',
+      [emailMarker]
+    );
+    assert.equal(Number(remaining[0].total), 0, 'Smoke cleanup must remove every user sharing the test marker.');
     return documents.map((row) => row.storage_key).filter(Boolean);
   });
   await Promise.all(storageKeys.map((storageKey) => documentFileService.remove(storageKey).catch(() => {})));
@@ -206,7 +209,7 @@ async function main() {
         fullName: 'Weak Password', role: 'TEACHER'
       })
     }, 400);
-    const studentEmail = `student.${suffix}@student.smoke.test`;
+    const studentEmail = `student.${suffix}@smoke.test`;
     const studentPassword = 'StudentPass@2026';
     await request('/api/auth/register', {
       method: 'POST', headers: { 'content-type': 'application/json' },
@@ -273,7 +276,15 @@ async function main() {
       body: JSON.stringify({ email: teacher2.email, password: teacher2.password })
     })).payload.data.token;
 
-    await request('/api/documents', { headers: auth(studentToken) });
+    await request('/api/documents', { headers: auth(studentToken) }, 403);
+    await request('/api/documents', {
+      method: 'POST', headers: auth(studentToken), body: new FormData()
+    }, 403);
+    await request('/api/library/documents', { headers: auth(teacher1Token) }, 403);
+    await request('/api/library/documents', { headers: auth(adminToken) }, 403);
+    await request('/api/library/documents?visibilityStatus=DELETED', {
+      headers: auth(studentToken)
+    }, 400);
     await request('/api/documents', { headers: auth(process.env.RAG_INTERNAL_TOKEN) }, 401);
 
     const invalidForm = new FormData();
@@ -310,6 +321,29 @@ async function main() {
     const documentId = uploaded.document.id;
     const jobId = uploaded.job.id;
     assert.equal(uploaded.document.processingStatus, 'PROCESSING');
+    await request(`/api/documents/${documentId}`, { headers: auth(studentToken) }, 403);
+    await request(`/api/documents/${documentId}/file`, { headers: auth(studentToken) }, 403);
+    await request(`/api/documents/jobs/${jobId}`, { headers: auth(studentToken) }, 403);
+    await request(`/api/documents/${documentId}`, {
+      method: 'PATCH',
+      headers: auth(studentToken, { 'content-type': 'application/json' }),
+      body: JSON.stringify({ title: 'Forbidden Student Update' })
+    }, 403);
+    await request(`/api/documents/${documentId}/hide`, {
+      method: 'POST', headers: auth(studentToken)
+    }, 403);
+    await request(`/api/documents/${documentId}/unhide`, {
+      method: 'POST', headers: auth(studentToken)
+    }, 403);
+    await request(`/api/documents/${documentId}`, {
+      method: 'DELETE', headers: auth(studentToken)
+    }, 403);
+    const processingLibrary = (await request('/api/library/documents?search=Smoke%20Document', {
+      headers: auth(studentToken)
+    })).payload.data.documents;
+    assert(!processingLibrary.some((document) => Number(document.id) === Number(documentId)));
+    await request(`/api/library/documents/${documentId}`, { headers: auth(studentToken) }, 404);
+    await request(`/api/library/documents/${documentId}/source`, { headers: auth(studentToken) }, 404);
     await request(`/api/documents/jobs/${jobId}`, { headers: auth(teacher1Token) });
 
     await request(`/api/documents/${documentId}`, { headers: auth(teacher2Token) }, 404);
@@ -365,6 +399,29 @@ async function main() {
 
     const detail = (await request(`/api/documents/${documentId}`, { headers: auth(teacher1Token) })).payload.data;
     assert.equal(detail.document.processingStatus, 'READY');
+    const libraryPage = (await request('/api/library/documents?search=Smoke%20Document&limit=10', {
+      headers: auth(studentToken)
+    })).payload.data;
+    const libraryDocument = libraryPage.documents.find(
+      (document) => Number(document.id) === Number(documentId)
+    );
+    assert(libraryDocument, 'READY + VISIBLE document must appear in Student Library.');
+    assert.deepEqual(
+      Object.keys(libraryDocument).sort(),
+      ['createdAt', 'fileSize', 'fileType', 'id', 'originalAvailable', 'pageCount', 'title']
+    );
+    assert.equal(libraryDocument.originalAvailable, true);
+    const libraryDetail = (await request(`/api/library/documents/${documentId}`, {
+      headers: auth(studentToken)
+    })).payload.data.document;
+    assert.deepEqual(Object.keys(libraryDetail).sort(), Object.keys(libraryDocument).sort());
+    const librarySource = await fetch(`${base}/api/library/documents/${documentId}/source`, {
+      headers: auth(studentToken),
+      signal: AbortSignal.timeout(15_000)
+    });
+    assert.equal(librarySource.status, 200);
+    assert.match(librarySource.headers.get('content-disposition') || '', /attachment/i);
+    assert.equal(await librarySource.text(), 'verified source text');
     await request(`/api/documents/${documentId}`, {
       method: 'PATCH', headers: auth(teacher1Token, { 'content-type': 'application/json' }),
       body: JSON.stringify({ title: 'Smoke Document Updated' })
@@ -377,6 +434,8 @@ async function main() {
     assert.equal(await fileResponse.text(), 'verified source text');
 
     await request(`/api/documents/${documentId}/hide`, { method: 'POST', headers: auth(teacher1Token) }, 202);
+    await request(`/api/library/documents/${documentId}`, { headers: auth(studentToken) }, 404);
+    await request(`/api/library/documents/${documentId}/source`, { headers: auth(studentToken) }, 404);
     await request(`/api/documents/${documentId}/unhide`, { method: 'POST', headers: auth(teacher1Token) }, 202);
 
     process.env.RAG_MOCK_SOURCE_VECTOR_NODE_ID = vectorNodeId;
@@ -461,6 +520,13 @@ async function main() {
 
     const storedDocument = await documentRepo.findById(documentId);
     await documentFileService.remove(storedDocument.storage_key);
+    const missingLibraryOriginal = (await request(`/api/library/documents/${documentId}`, {
+      headers: auth(studentToken)
+    })).payload.data.document;
+    assert.equal(missingLibraryOriginal.originalAvailable, false);
+    await request(`/api/library/documents/${documentId}/source`, {
+      headers: auth(studentToken)
+    }, 409);
     const missingOriginalCitation = (await request(`/api/citations/${citationId}/source`, {
       headers: auth(studentToken)
     })).payload.data;
@@ -468,12 +534,15 @@ async function main() {
     await request(`/api/documents/${documentId}/file`, { headers: auth(teacher1Token) }, 404);
 
     await request(`/api/documents/${documentId}/hide`, { method: 'POST', headers: auth(teacher1Token) }, 202);
+    await request(`/api/library/documents/${documentId}`, { headers: auth(studentToken) }, 404);
+    await request(`/api/library/documents/${documentId}/source`, { headers: auth(studentToken) }, 404);
     const hiddenCitation = (await request(`/api/citations/${citationId}/source`, {
       headers: auth(studentToken)
     })).payload.data;
     assert.equal(hiddenCitation.originalAvailable, false);
     await request(`/api/citations/${citationId}/file`, { headers: auth(studentToken) }, 409);
     await request(`/api/documents/${documentId}`, { method: 'DELETE', headers: auth(teacher1Token) }, 202);
+    await request(`/api/library/documents/${documentId}`, { headers: auth(studentToken) }, 404);
     await request(`/api/citations/${citationId}`, { headers: auth(studentToken) });
     await request(`/api/chat/sessions/${session.id}/messages`, { headers: auth(studentToken) });
 
@@ -541,6 +610,9 @@ async function main() {
       headers: auth(adminToken)
     })).payload.data;
     assert.equal(failedDetail.document.processingStatus, 'FAILED');
+    await request(`/api/library/documents/${remoteFailure.payload.data.documentId}`, {
+      headers: auth(studentToken)
+    }, 404);
     process.env.RAG_MODE = 'mock';
 
     const dashboard = (await request('/api/admin/dashboard/summary', { headers: auth(adminToken) })).payload.data;

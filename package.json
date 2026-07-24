@@ -13,6 +13,7 @@
     "test:corpus:partial": "node scripts/corpus-partial-state-test.js",
     "test:corpus:live": "node scripts/restored-corpus-live-smoke.js",
     "test:contract": "node scripts/rag-contract-test.js",
+    "test:library": "node scripts/library-contract-test.js",
     "test:node-consolidation": "node scripts/node-consolidation-test.js",
     "test:part2": "node scripts/part2-smoke.js",
     "docker:mock:config": "docker compose config --quiet",

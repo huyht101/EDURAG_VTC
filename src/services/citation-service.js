@@ -36,8 +36,7 @@ function snapshot(context) {
     sourceText: context.source_text_snapshot,
     sourceLocator: context.source_locator_snapshot,
     retrievalScore: context.retrieval_score,
-    rerankScore: context.rerank_score,
-    fileUrl: `/api/citations/${context.id}/file`
+    rerankScore: context.rerank_score
   };
 }
 

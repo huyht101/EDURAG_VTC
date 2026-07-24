@@ -25,6 +25,7 @@ Các endpoint register/login/OTP/forgot/reset có per-process in-memory rate lim
 | Auth/Profile | Own account | Own account | Own account + OTP login |
 | Admin users | Không | Không | List/detail/status workflow |
 | Document management | Không | Document do mình upload | Mọi document |
+| Student Library | Read-only `READY + VISIBLE` | Không | Không |
 | Chat | Session của mình | Session của mình | Session của mình |
 | Citation/source | Citation thuộc session của mình | Citation thuộc session của mình | Citation thuộc session của mình |
 | Dashboard | Không | Không | Basic `LLM_CALLS_ONLY` summary |
@@ -42,6 +43,10 @@ Student đăng ký thành `ACTIVE`; Teacher thành `PENDING` và cần Admin rev
 `POST /api/documents` nhận `multipart/form-data` với `file` và optional `title`; hỗ trợ PDF/DOCX/TXT. DOCX phải là bounded OOXML ZIP có core members, không chỉ mang ZIP magic bytes. Response `202` chỉ xác nhận document/job đã được tạo và dispatch, chưa có nghĩa document `READY`.
 
 Client poll `GET /api/documents/jobs/{jobId}`. Chỉ khi job `SUCCEEDED` và document `READY + VISIBLE` thì document mới thuộc retrieval corpus. Hide tắt retrieval nhưng giữ vectors; delete soft-delete và giữ chat/citation history. Original file không immutable-update: thay nội dung bằng upload document mới.
+
+### Student Document Library
+
+Student dùng namespace read-only riêng: `GET /api/library/documents`, `GET /api/library/documents/{id}` và `GET /api/library/documents/{id}/source`. Server luôn khóa scope vào document `READY + VISIBLE`; Teacher/Admin không được cấp namespace này và Student vẫn bị cấm toàn bộ `/api/documents`. DTO library không chứa owner, storage key, filename lưu trữ, checksum, deletion hoặc processing/job metadata. Original hợp lệ được stream dạng attachment; record đủ điều kiện nhưng thiếu file trả `409 ORIGINAL_SOURCE_UNAVAILABLE`.
 
 ### Chat
 

@@ -29,6 +29,6 @@ File I/O và HTTP tới Python không nằm trong MySQL transaction. MySQL và Q
 
 - ADMIN: quản lý mọi document và xem dashboard.
 - TEACHER: quản lý document có `uploaded_by` là chính mình.
-- STUDENT: không dùng Document Management; được chat và xem citation/source thuộc session của mình.
+- STUDENT: không dùng Document Management; có Student Library read-only riêng cho document `READY + VISIBLE`, được chat và xem citation/source thuộc session của mình.
 - Citation snapshot/source luôn thuộc session owner; ADMIN không bypass public chat ownership.
 - Mọi ACTIVE user có thể chat trên kho retrieval `READY + VISIBLE`; chưa có subject/course/class scope.

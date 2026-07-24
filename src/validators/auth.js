@@ -1,6 +1,5 @@
 // Vanilla JavaScript Validation for Authentication Requests
 const ROLES = require('../constants/roles');
-const { escapeHtml } = require('../utils/sanitize');
 
 // Helper to check email format
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -14,20 +13,6 @@ const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$
  */
 function validateRegister(body) {
   if (!body) return { error: 'Dữ liệu yêu cầu trống.' };
-
-  // Escape HTML để chống Stored XSS
-  if (body.fullName !== undefined && body.fullName !== null) {
-    body.fullName = escapeHtml(body.fullName);
-  }
-  if (body.academicTitle !== undefined && body.academicTitle !== null) {
-    body.academicTitle = escapeHtml(body.academicTitle);
-  }
-  if (body.degree !== undefined && body.degree !== null) {
-    body.degree = escapeHtml(body.degree);
-  }
-  if (body.department !== undefined && body.department !== null) {
-    body.department = escapeHtml(body.department);
-  }
 
   const {
     email, password, fullName, phone, role, studentCode, dateOfBirth,
@@ -64,9 +49,6 @@ function validateRegister(body) {
   }
 
   if (role === ROLES.STUDENT) {
-    if (!email.toLowerCase().includes('@student')) {
-      return { error: 'Email sinh viên phải là email trường thuộc tên miền sinh viên (@student...).' };
-    }
     if (typeof studentCode !== 'string' || !studentCode.trim() || studentCode.trim().length > 32) {
       return { error: 'Mã sinh viên là bắt buộc đối với Sinh viên.' };
     }

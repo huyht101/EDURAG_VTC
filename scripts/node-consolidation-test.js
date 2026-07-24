@@ -29,6 +29,9 @@ const messageRepo = require('../src/repositories/chat-message-repository');
 const tokenRepo = require('../src/repositories/token-repository');
 const { MockRagClient } = require('../src/clients/rag-client');
 const dbPool = require('../src/configs/db');
+const userService = require('../src/services/user-service');
+const { validateRegister } = require('../src/validators/auth');
+const { validateUpdateProfile } = require('../src/validators/user');
 
 async function listen(application) {
   return new Promise((resolve, reject) => {
@@ -427,6 +430,117 @@ function testCitationContract() {
   assert.deepEqual(noAnswer.sources, []);
 }
 
+async function testChangePasswordOrdering() {
+  const currentHash = 'current-password-hash';
+  const baseUsers = {
+    async findPasswordHashById() { return currentHash; },
+    async updatePasswordAndIncrementVersion() {
+      throw new Error('Password must not update in a rejected case.');
+    }
+  };
+  const transaction = async (work) => work({});
+  const compare = async (candidate, hash) => {
+    assert.equal(hash, currentHash);
+    return candidate === 'CurrentPass@2026';
+  };
+
+  await assert.rejects(
+    () => userService.changeMyPassword(
+      7,
+      { oldPassword: 'WrongPass@2026', newPassword: 'WrongPass@2026' },
+      { withTransaction: transaction, userRepo: baseUsers, comparePassword: compare }
+    ),
+    (error) => error.code === 'INCORRECT_OLD_PASSWORD'
+  );
+  await assert.rejects(
+    () => userService.changeMyPassword(
+      7,
+      { oldPassword: 'CurrentPass@2026', newPassword: 'CurrentPass@2026' },
+      { withTransaction: transaction, userRepo: baseUsers, comparePassword: compare }
+    ),
+    (error) => error.code === 'SAME_AS_OLD_PASSWORD'
+  );
+
+  let updated = 0;
+  await userService.changeMyPassword(
+    7,
+    { oldPassword: 'CurrentPass@2026', newPassword: 'NewPass@2026' },
+    {
+      withTransaction: transaction,
+      comparePassword: compare,
+      hashPassword: async (password) => {
+        assert.equal(password, 'NewPass@2026');
+        return 'new-password-hash';
+      },
+      userRepo: {
+        async findPasswordHashById() { return currentHash; },
+        async updatePasswordAndIncrementVersion(id, hash) {
+          assert.equal(id, 7);
+          assert.equal(hash, 'new-password-hash');
+          updated += 1;
+        }
+      }
+    }
+  );
+  assert.equal(updated, 1, 'Successful password change must update hash/auth_version once.');
+}
+
+function testInputRoundTripAndStudentEmail() {
+  const registration = {
+    email: 'student@example.com',
+    password: 'ValidPass@2026',
+    fullName: 'A&B',
+    role: 'STUDENT',
+    studentCode: 'SV001',
+    dateOfBirth: '2004-01-02'
+  };
+  assert.equal(validateRegister(registration), null);
+  assert.equal(registration.fullName, 'A&B', 'Register validation must not HTML-encode input.');
+  const profile = { fullName: 'A&B', department: 'R&D' };
+  assert.equal(validateUpdateProfile(profile), null);
+  assert.deepEqual(profile, { fullName: 'A&B', department: 'R&D' });
+}
+
+async function testDevelopmentResetDeliveryGate() {
+  const previousNodeEnv = process.env.NODE_ENV;
+  const previousFlag = process.env.AUTH_DEV_DELIVERY_LOG_SECRETS;
+  process.env.NODE_ENV = 'production';
+  process.env.AUTH_DEV_DELIVERY_LOG_SECRETS = 'false';
+  const warnings = [];
+  const previousWarn = console.warn;
+  console.warn = (...values) => warnings.push(values.join(' '));
+  let saved = 0;
+  try {
+    const result = await authService.requestPasswordReset('student@example.com', {
+      userRepo: {
+        async findUserByEmail() { return { id: 7, email: 'student@example.com' }; }
+      },
+      tokenRepo: {
+        async deleteExpiredTokens() {},
+        async revokeTokensByUserAndType() {},
+        async saveToken() { saved += 1; }
+      },
+      withTransaction: async (work) => work({})
+    });
+    assert.equal(result, true);
+    assert.equal(saved, 1);
+    assert.equal(warnings.length, 0, 'Reset secret must not be logged when development flag is disabled.');
+    assert.equal(
+      await authService.requestPasswordReset('missing@example.com', {
+        userRepo: { async findUserByEmail() { return null; } }
+      }),
+      true,
+      'Unknown email must preserve the same public success path.'
+    );
+  } finally {
+    console.warn = previousWarn;
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousNodeEnv;
+    if (previousFlag === undefined) delete process.env.AUTH_DEV_DELIVERY_LOG_SECRETS;
+    else process.env.AUTH_DEV_DELIVERY_LOG_SECRETS = previousFlag;
+  }
+}
+
 async function main() {
   assert.equal(
     await bcrypt.compare('123456', '$2b$12$bMzMUHcWiX7.t.YAVHaFq.nMbxN/zHbowX3kWo/jH2Q2esR/o8I8K'),
@@ -444,6 +558,9 @@ async function main() {
   await testPendingRecoveryAndMockDisposition();
   await testGracefulShutdown();
   testCitationContract();
+  await testChangePasswordOrdering();
+  testInputRoundTripAndStudentEmail();
+  await testDevelopmentResetDeliveryGate();
   console.log('NODE_CONSOLIDATION_OK');
 }
 

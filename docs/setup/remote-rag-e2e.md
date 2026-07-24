@@ -125,7 +125,7 @@ Corpus đã restore cho phép chat/citation ngay, không cần upload lại. Upl
 | `npm run docker:remote:down` | Xóa containers/network, giữ named volumes. |
 | `npm run docker:remote:reset` | **Destructive:** xóa volumes của configured remote project. |
 
-`Ctrl+C` best-effort stop containers và giữ volumes. Abrupt kill, Docker crash hoặc mất điện không bảo đảm signal cleanup; lần chạy sau reuse volumes và verify state. Đặt `REMOTE_DEV_ALL_LOGS=true` trong `.env` nếu cần attach cả MySQL/Qdrant logs.
+`Ctrl+C` best-effort stop containers và giữ volumes. Abrupt kill, Docker crash hoặc mất điện không bảo đảm signal cleanup; lần chạy sau reuse volumes và verify state. Đặt `REMOTE_DEV_ALL_LOGS=true` trong `.env` nếu cần attach cả MySQL/Qdrant logs, hoặc dùng `REMOTE_DEV_SERVICES=app,rag-service` để chọn rõ các service cần theo dõi.
 
 ## 6. Lỗi thường gặp
 

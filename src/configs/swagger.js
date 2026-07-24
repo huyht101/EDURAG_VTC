@@ -69,6 +69,7 @@ const definition = {
     { name: 'Profile', description: 'ACTIVE user đọc/cập nhật profile và đổi password của chính mình.' },
     { name: 'Admin - Users', description: 'ADMIN quản lý trạng thái và tra cứu tài khoản.' },
     { name: 'Documents', description: 'TEACHER quản lý tài liệu mình upload; ADMIN quản lý toàn bộ.' },
+    { name: 'Student Library', description: 'STUDENT đọc danh mục tài liệu READY + VISIBLE qua namespace read-only riêng.' },
     { name: 'Document Processing', description: 'Theo dõi processing job bất đồng bộ sau upload/hide/unhide/delete.' },
     { name: 'Chat Sessions', description: 'ACTIVE user quản lý các chat session thuộc chính mình.' },
     { name: 'Chat Messages', description: 'ACTIVE user đọc history và gửi câu hỏi trong session của chính mình.' },
@@ -180,6 +181,60 @@ const definition = {
       DocumentUpdateBody: {
         type: 'object', required: ['title'],
         properties: { title: { type: 'string', minLength: 1, maxLength: 255 } }
+      },
+      LibraryDocument: {
+        type: 'object',
+        required: [
+          'id', 'title', 'fileType', 'fileSize', 'pageCount', 'createdAt', 'originalAvailable'
+        ],
+        properties: {
+          id: { type: 'integer' },
+          title: { type: 'string' },
+          fileType: { type: 'string', enum: ['PDF', 'DOCX', 'TXT'] },
+          fileSize: { type: 'integer', minimum: 0 },
+          pageCount: {
+            type: 'integer', minimum: 1, nullable: true,
+            description: 'Reserved nullable field; CURRENT storage does not maintain an authoritative page count.'
+          },
+          createdAt: { type: 'string', format: 'date-time' },
+          originalAvailable: { type: 'boolean' }
+        }
+      },
+      LibraryPageResponse: {
+        type: 'object',
+        required: ['success', 'message', 'data'],
+        properties: {
+          success: { type: 'boolean', example: true },
+          message: { type: 'string' },
+          data: {
+            type: 'object',
+            required: ['offset', 'limit', 'total', 'documents'],
+            properties: {
+              offset: { type: 'integer', minimum: 0 },
+              limit: { type: 'integer', minimum: 1, maximum: 100 },
+              total: { type: 'integer', minimum: 0 },
+              documents: {
+                type: 'array',
+                items: { $ref: '#/components/schemas/LibraryDocument' }
+              }
+            }
+          }
+        }
+      },
+      LibraryDocumentResponse: {
+        type: 'object',
+        required: ['success', 'message', 'data'],
+        properties: {
+          success: { type: 'boolean', example: true },
+          message: { type: 'string' },
+          data: {
+            type: 'object',
+            required: ['document'],
+            properties: {
+              document: { $ref: '#/components/schemas/LibraryDocument' }
+            }
+          }
+        }
       },
       ChatSessionBody: {
         type: 'object', properties: { title: { type: 'string', minLength: 1, maxLength: 255 } }
@@ -372,7 +427,7 @@ const definition = {
     },
     '/api/documents': {
       get: {
-        tags: ['Documents'], summary: 'List documents for STUDENT, TEACHER or ADMIN', security: [{ bearerAuth: [] }],
+        tags: ['Documents'], summary: 'List documents for TEACHER owner or ADMIN', security: [{ bearerAuth: [] }],
         parameters: [
           { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0 } },
           { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100 } },
@@ -403,6 +458,81 @@ const definition = {
           400: response('Invalid file.', 'ErrorResponse'),
           413: response('File too large.', 'ErrorResponse'),
           503: response('Remote RAG dispatch failed; document/job are marked FAILED.', 'ErrorResponse')
+        }
+      }
+    },
+    '/api/library/documents': {
+      get: {
+        tags: ['Student Library'],
+        summary: 'List READY and VISIBLE library documents (STUDENT)',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0, default: 0 } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } },
+          { name: 'search', in: 'query', schema: { type: 'string', maxLength: 255 } }
+        ],
+        responses: {
+          200: response('Student Library page.', 'LibraryPageResponse', {
+            success: true,
+            message: 'OK',
+            data: {
+              offset: 0,
+              limit: 20,
+              total: 1,
+              documents: [{
+                id: 12,
+                title: 'Tài liệu demo',
+                fileType: 'PDF',
+                fileSize: 123456,
+                pageCount: null,
+                createdAt: '2026-07-22T08:00:00.000Z',
+                originalAvailable: true
+              }]
+            }
+          }),
+          400: response('Unsupported management filter or invalid pagination.', 'ErrorResponse'),
+          403: response('STUDENT role required.', 'ErrorResponse')
+        }
+      }
+    },
+    '/api/library/documents/{id}': {
+      get: {
+        tags: ['Student Library'],
+        summary: 'Read one READY and VISIBLE library document (STUDENT)',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
+        responses: {
+          200: response('Student Library document.', 'LibraryDocumentResponse', {
+            success: true,
+            message: 'OK',
+            data: {
+              document: {
+                id: 12,
+                title: 'Tài liệu demo',
+                fileType: 'PDF',
+                fileSize: 123456,
+                pageCount: null,
+                createdAt: '2026-07-22T08:00:00.000Z',
+                originalAvailable: true
+              }
+            }
+          }),
+          403: response('STUDENT role required.', 'ErrorResponse'),
+          404: response('Document is absent or no longer READY + VISIBLE.', 'ErrorResponse')
+        }
+      }
+    },
+    '/api/library/documents/{id}/source': {
+      get: {
+        tags: ['Student Library'],
+        summary: 'Download one READY and VISIBLE library original (STUDENT)',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
+        responses: {
+          200: originalFileResponse('Original PDF/DOCX/TXT attachment; no Range/206.'),
+          403: response('STUDENT role required.', 'ErrorResponse'),
+          404: response('Document is absent or no longer READY + VISIBLE.', 'ErrorResponse'),
+          409: response('Eligible document exists but its original file is unavailable.', 'ErrorResponse')
         }
       }
     },
@@ -468,8 +598,11 @@ const operationDescriptions = {
   'GET /api/admin/users': 'Actor: ADMIN. Đọc danh sách user có pagination/filter; không dành cho TEACHER/STUDENT.',
   'GET /api/admin/users/{id}': 'Actor: ADMIN. Đọc account/profile detail của user theo id; không trả password/token hash.',
   'PUT /api/admin/users/{id}/status': 'Actor: ADMIN. Thực hiện approve/reject/reopen/lock/unlock theo transition hợp lệ; lock tăng auth_version.',
-  'GET /api/documents': 'Actor: STUDENT, TEACHER hoặc ADMIN. TEACHER chỉ thấy document mình upload, ADMIN và STUDENT thấy toàn bộ; mặc định không list DELETED.',
+  'GET /api/documents': 'Actor: TEACHER hoặc ADMIN. TEACHER chỉ thấy document mình upload, ADMIN thấy toàn bộ; mặc định không list DELETED. STUDENT dùng namespace /api/library riêng.',
   'POST /api/documents': 'Actor: TEACHER hoặc ADMIN. Validate và lưu PDF/DOCX/TXT (DOCX phải là bounded OOXML archive), tạo document + INGEST job rồi dispatch Python. HTTP 202 chỉ là accepted; tiếp theo poll GET /api/documents/jobs/{jobId} đến SUCCEEDED và kiểm tra document READY.',
+  'GET /api/library/documents': 'Actor: STUDENT. Danh sách read-only luôn bị server khóa vào document READY + VISIBLE; client chỉ điều khiển offset/limit và optional title search, không thể filter owner, processing, visibility, deletion hoặc job state.',
+  'GET /api/library/documents/{id}': 'Actor: STUDENT. Trả DTO allowlist của document READY + VISIBLE; trạng thái khác hoặc id không tồn tại cùng trả 404 để không lộ lifecycle nội bộ.',
+  'GET /api/library/documents/{id}/source': 'Actor: STUDENT. Stream original của document vẫn READY + VISIBLE dưới dạng attachment. Record không đủ điều kiện trả 404; record hợp lệ nhưng original bị thiếu trả 409 ORIGINAL_SOURCE_UNAVAILABLE.',
   'GET /api/documents/{id}': 'Actor: document owner TEACHER hoặc ADMIN. Đọc metadata và latest job; storage_key không được public.',
   'PATCH /api/documents/{id}': 'Actor: document owner TEACHER hoặc ADMIN. Chỉ đổi title; file gốc immutable và muốn thay nội dung phải upload document mới.',
   'DELETE /api/documents/{id}': 'Actor: document owner TEACHER hoặc ADMIN. Tạo async DELETE_VECTORS job rồi soft-delete business document; poll job status. Chat/citation snapshot không bị xóa.',

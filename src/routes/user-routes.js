@@ -58,20 +58,4 @@ router.put(
   userController.updateUserStatus
 );
 
-// POST /api/admin/users/:id/reset-password
-router.post(
-  '/admin/users/:id/reset-password',
-  authMiddleware,
-  roleMiddleware([ROLES.ADMIN]),
-  userController.adminResetPassword
-);
-
-// POST /api/admin/students/import
-router.post(
-  '/admin/students/import',
-  authMiddleware,
-  roleMiddleware([ROLES.ADMIN]),
-  userController.importStudents
-);
-
 module.exports = router;
