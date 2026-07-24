@@ -56,9 +56,11 @@ async function main() {
     return;
   }
 
-  const services = process.env.REMOTE_DEV_ALL_LOGS === 'true'
-    ? ['db', 'qdrant', 'app', 'rag-service']
-    : ['app', 'rag-service'];
+  const services = process.env.REMOTE_DEV_SERVICES
+    ? process.env.REMOTE_DEV_SERVICES.split(',').map((s) => s.trim()).filter(Boolean)
+    : (process.env.REMOTE_DEV_ALL_LOGS === 'true'
+      ? ['db', 'qdrant', 'app', 'rag-service']
+      : ['app', 'rag-service']);
   console.log(`REMOTE_DEV_ATTACHED services=${services.join(',')} (Ctrl+C stops containers; volumes are retained)`);
   logProcess = spawnCompose(['logs', '--follow', '--tail', '100', ...services]);
   const testShutdownDelay = Number(process.env.REMOTE_DEV_TEST_SHUTDOWN_AFTER_ATTACH_MS || 0);

@@ -56,15 +56,22 @@ async function updateMyProfile(userId, role, data) {
   });
 }
 
-async function changeMyPassword(userId, { oldPassword, newPassword }) {
-  const newHash = await bcrypt.hash(newPassword, bcryptRounds());
-  await withTransaction(async (connection) => {
-    const currentHash = await userRepo.findPasswordHashById(userId, connection, true);
+async function changeMyPassword(userId, { oldPassword, newPassword }, dependencies = {}) {
+  const transaction = dependencies.withTransaction || withTransaction;
+  const users = dependencies.userRepo || userRepo;
+  const comparePassword = dependencies.comparePassword || bcrypt.compare;
+  const hashPassword = dependencies.hashPassword || ((password) => bcrypt.hash(password, bcryptRounds()));
+  await transaction(async (connection) => {
+    const currentHash = await users.findPasswordHashById(userId, connection, true);
     if (!currentHash) throw appError(404, 'USER_NOT_FOUND', 'Không tìm thấy người dùng.');
-    if (!(await bcrypt.compare(oldPassword, currentHash))) {
+    if (!(await comparePassword(oldPassword, currentHash))) {
       throw appError(400, 'INCORRECT_OLD_PASSWORD', 'Mật khẩu hiện tại không chính xác.');
     }
-    await userRepo.updatePasswordAndIncrementVersion(userId, newHash, connection);
+    if (await comparePassword(newPassword, currentHash)) {
+      throw appError(400, 'SAME_AS_OLD_PASSWORD', 'Mật khẩu mới không được trùng với mật khẩu hiện tại.');
+    }
+    const newHash = await hashPassword(newPassword);
+    await users.updatePasswordAndIncrementVersion(userId, newHash, connection);
   });
   return true;
 }

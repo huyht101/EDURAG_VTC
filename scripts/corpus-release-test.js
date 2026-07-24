@@ -10,6 +10,7 @@ const {
   classifyBootstrapState,
   countTableRows,
   downloadAndVerifyRelease,
+  inspectCorpus,
   inspectPublishSource,
   inspectReadOnlyPublishSource,
   parseCommandLine,
@@ -32,6 +33,7 @@ const {
   validateReleaseManifest
 } = require('./lib/corpus-release');
 const corpusRuntime = require('./lib/corpus-runtime');
+const { approvedCorpusConfig } = require('./restored-corpus-live-smoke');
 
 const config = Object.freeze({
   projectId: 'test-project',
@@ -39,11 +41,19 @@ const config = Object.freeze({
   objectPrefix: 'portable-corpus/v1',
   credentialsFile: path.join(os.tmpdir(), 'not-used.json')
 });
+const temporaryDirectories = new Set();
+
+async function cleanupTemporaryDirectories() {
+  await Promise.all([...temporaryDirectories].map(
+    (directory) => fsp.rm(directory, { recursive: true, force: true })
+  ));
+  temporaryDirectories.clear();
+}
 
 function manifestInput() {
   const mysql = Buffer.from('mysql-data');
   const qdrant = Buffer.from('qdrant-data');
-  const original = Buffer.from('approved-original');
+  const original = Buffer.from('unit-fixture-original');
   return {
     buffers: { mysql, qdrant, original },
     input: {
@@ -80,6 +90,7 @@ async function stagedRelease() {
   const fixture = manifestInput();
   const manifest = buildReleaseManifest(fixture.input);
   const temporary = await fsp.mkdtemp(path.join(os.tmpdir(), 'edurag-release-test-stage-'));
+  temporaryDirectories.add(temporary);
   const files = new Map();
   const artifacts = [manifest.artifacts.mysql, manifest.artifacts.qdrant, ...manifest.artifacts.documents];
   const buffers = [fixture.buffers.mysql, fixture.buffers.qdrant, fixture.buffers.original];
@@ -257,6 +268,14 @@ async function main() {
   };
   const identity = sourceFingerprint(identityInput);
   assert.equal(sourceFingerprint(identityInput), identity, 'Complete content identity must be deterministic.');
+  assert.equal(sourceFingerprint({
+    ...identityInput,
+    exportedAtUtc: '2099-01-01T00:00:00.000Z',
+    temporaryDirectory: 'C:\\runtime-specific\\export',
+    databaseConnectionId: 999,
+    qdrantSnapshotName: 'runtime-specific.snapshot',
+    schemaAutoIncrement: 123456
+  }), identity, 'Logical identity must ignore runtime/export metadata that is not corpus content.');
   assert.notEqual(sourceFingerprint({ ...identityInput, mysqlContentSha256: '4'.repeat(64) }), identity);
   assert.notEqual(sourceFingerprint({ ...identityInput, qdrantContentSha256: '5'.repeat(64) }), identity);
   const changedDocuments = new Map(identityInput.documents);
@@ -282,6 +301,11 @@ async function main() {
   );
   assert.notEqual(transportVariant.artifacts.qdrant.sha256, valid.artifacts.qdrant.sha256);
   assert.equal(buildReleaseManifest(fixture.input).releaseId, valid.releaseId);
+  assert.equal(
+    buildReleaseManifest({ ...fixture.input, createdAtUtc: '2099-01-01T00:00:00.000Z' }).releaseId,
+    valid.releaseId,
+    'Release identity must not depend on manifest creation time.'
+  );
   const mysqlChanged = buildReleaseManifest({ ...fixture.input, sourceFingerprint: 'b'.repeat(64) });
   assert.notEqual(mysqlChanged.releaseId, valid.releaseId, 'Scoped content changes must change release identity.');
   assert.equal(valid.artifacts.documents[0].file, undefined, 'Local staging path leaked into release manifest.');
@@ -390,6 +414,23 @@ async function main() {
   assert.deepEqual(parseCommandLine(['publish', '--confirm-reviewed']), {
     command: 'publish', dryRun: false, confirmReviewed: true
   });
+  assert.throws(
+    () => approvedCorpusConfig({}, { releaseId: 'v1-aabbccddeeff001122334455' }),
+    /BLOCKED BY DATA APPROVAL/
+  );
+  assert.deepEqual(
+    approvedCorpusConfig({
+      CORPUS_APPROVED_BUNDLE_CONFIRMED: 'true',
+      CORPUS_APPROVED_RELEASE_ID: 'v1-aabbccddeeff001122334455',
+      CORPUS_APPROVED_DOCUMENT_ID: '9',
+      CORPUS_APPROVED_QUERY: 'Reviewed corpus question'
+    }, { releaseId: 'v1-aabbccddeeff001122334455' }),
+    {
+      releaseId: 'v1-aabbccddeeff001122334455',
+      documentId: 9,
+      query: 'Reviewed corpus question'
+    }
+  );
   for (const invalid of [
     ['publish'],
     ['publish', '--confirm-review'],
@@ -467,6 +508,31 @@ async function main() {
   assert.equal(dryRunStore.objects.size, 0, 'Dry-run must not upload cloud objects.');
   assert.equal(dryRunStore.privacyChecks, 0, 'Dry-run must not call GCS bucket APIs.');
   assert.equal(dryRunPointerWrites, 0, 'Dry-run must not update the release pointer.');
+
+  const inspectLogs = [];
+  const previousLog = console.log;
+  console.log = (message) => inspectLogs.push(String(message));
+  let inspected;
+  try {
+    inspected = await inspectCorpus({
+      readPointer: async () => ({
+        pointerSchemaVersion: POINTER_SCHEMA_VERSION,
+        releaseId: valid.releaseId,
+        manifestSha256: 'f'.repeat(64),
+        publishedAtUtc: '2026-07-21T00:00:00.000Z'
+      }),
+      servicesRunning: () => new Set(),
+      inspectLocalState: async () => { throw new Error('local services are not running'); }
+    });
+  } finally {
+    console.log = previousLog;
+  }
+  assert.equal(inspected.mode, 'LOCAL_ONLY');
+  assert.equal(inspected.mutation, false);
+  assert.equal(inspected.credential, 'NOT_READ');
+  assert.equal(inspected.remote, 'NOT_CHECKED_LOCAL_ONLY');
+  assert.equal(inspected.local, 'NOT_RUNNING');
+  assert(inspectLogs.some((line) => line.includes('"mode":"LOCAL_ONLY"')));
 
   const objectStore = new FakeObjectStore();
   let pointer;
@@ -805,6 +871,7 @@ async function main() {
 
   const pointerKey = manifestObjectKey(config, pointer.releaseId);
   assert(objectStore.objects.has(pointerKey), 'complete release must contain a manifest object');
+  await cleanupTemporaryDirectories();
   console.log(
     'CORPUS_RELEASE_TEST_OK manifest=validated publish=create-only+manifest-last+idempotent '
     + 'restore=staged+empty+compatible+rollback bootstrap=empty+local-retained+partial-safe+required-strict '
@@ -812,7 +879,8 @@ async function main() {
   );
 }
 
-main().catch((error) => {
+main().catch(async (error) => {
+  await cleanupTemporaryDirectories();
   console.error(`CORPUS_RELEASE_TEST_FAILED: ${error.code || 'ERROR'} ${error.message}`);
   process.exit(1);
 });

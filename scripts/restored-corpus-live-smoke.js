@@ -12,10 +12,27 @@ const {
   delay,
   fetchWithTimeout
 } = require('./remote-test-utils');
+const selectedRelease = require('../bootstrap/corpus-release.json');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DEMO_ADMIN_EMAIL = 'admin@example.com';
 const DEMO_ADMIN_PASSWORD = '123456';
+
+function approvedCorpusConfig(environment = process.env, pointer = selectedRelease) {
+  assert.equal(
+    environment.CORPUS_APPROVED_BUNDLE_CONFIRMED,
+    'true',
+    'Live corpus lifecycle is BLOCKED BY DATA APPROVAL. Confirm only after reviewing the source bundle.'
+  );
+  const releaseId = String(environment.CORPUS_APPROVED_RELEASE_ID || '').trim();
+  assert.match(releaseId, /^v1-[0-9a-f]{24}$/, 'CORPUS_APPROVED_RELEASE_ID is required.');
+  assert.equal(releaseId, pointer.releaseId, 'Approved release ID must match bootstrap/corpus-release.json.');
+  const documentId = Number(environment.CORPUS_APPROVED_DOCUMENT_ID);
+  assert(Number.isSafeInteger(documentId) && documentId > 0, 'CORPUS_APPROVED_DOCUMENT_ID is required.');
+  const query = String(environment.CORPUS_APPROVED_QUERY || '').trim();
+  assert(query, 'CORPUS_APPROVED_QUERY is required for the reviewed corpus.');
+  return { releaseId, documentId, query };
+}
 
 async function httpRequest(baseUrl, requestPath, options = {}, expected = [200]) {
   const response = await fetchWithTimeout(
@@ -79,6 +96,7 @@ async function databaseCounts(pool) {
 }
 
 async function main() {
+  const approved = approvedCorpusConfig();
   const { nodePort } = await runPreflight();
   const baseUrl = `http://127.0.0.1:${nodePort}`;
   const pool = mysql.createPool({
@@ -95,9 +113,9 @@ async function main() {
     const token = await adminToken(baseUrl);
     const beforeCounts = await databaseCounts(pool);
     const beforeStores = await reconcileRuntime();
-    assert.equal(beforeCounts.documents, 1, 'Restored corpus must contain exactly one demo document.');
-    assert.equal(beforeCounts.chunks, 2, 'Restored corpus chunk count differs from the canonical bundle.');
-    assert.equal(beforeStores.points.length, 2, 'Restored Qdrant point count differs from the canonical bundle.');
+    assert(beforeCounts.documents > 0, 'Approved restored corpus contains no documents.');
+    assert(beforeCounts.chunks > 0, 'Approved restored corpus contains no chunks.');
+    assert(beforeStores.points.length > 0, 'Approved restored corpus contains no Qdrant points.');
 
     const verifyExisting = process.env.RESTORED_CORPUS_VERIFY_EXISTING === 'true';
     let result;
@@ -141,7 +159,7 @@ async function main() {
         method: 'POST',
         headers: bearer(token, { 'content-type': 'application/json' }),
         body: JSON.stringify({
-          content: 'Theo tài liệu đã khôi phục, Oishi là thương hiệu thuộc quốc gia nào? Hãy trích dẫn nguồn.'
+          content: approved.query
         }),
         timeoutMs: Number(process.env.RAG_QUERY_TIMEOUT_MS || 180000) + 15000
       })).payload.data;
@@ -153,8 +171,10 @@ async function main() {
     assert(result.assistantMessage?.content, 'Assistant answer is empty.');
     assert(result.assistantMessage.citations?.length > 0, 'Live restored query returned no citation.');
 
-    const citation = result.assistantMessage.citations.find((item) => Number(item.documentId) === 1);
-    assert(citation, 'No citation maps to restored document 1.');
+    const citation = result.assistantMessage.citations.find(
+      (item) => Number(item.documentId) === approved.documentId
+    );
+    assert(citation, `No citation maps to approved document ${approved.documentId}.`);
     const detail = (await httpRequest(baseUrl, `/api/citations/${citation.id}`, {
       headers: bearer(token)
     })).payload.data;
@@ -165,7 +185,7 @@ async function main() {
     const expectOriginal = process.env.RESTORED_CORPUS_EXPECT_ORIGINAL === 'true';
     assert.equal(detail.originalAvailable, expectOriginal, 'Restored original availability differs from expectation.');
 
-    const documentFile = await httpRequest(baseUrl, '/api/documents/1/file', {
+    const documentFile = await httpRequest(baseUrl, `/api/documents/${approved.documentId}/file`, {
       headers: bearer(token)
     }, expectOriginal ? [200] : [404]);
     const citationFile = await httpRequest(baseUrl, `/api/citations/${citation.id}/file`, {
@@ -174,7 +194,7 @@ async function main() {
     if (expectOriginal) {
       const [[document]] = await pool.execute(
         'SELECT checksum_sha256 FROM documents WHERE id = ?',
-        [1]
+        [approved.documentId]
       );
       assert(document?.checksum_sha256, 'Restored document checksum metadata is missing.');
       for (const fileResponse of [documentFile, citationFile]) {
@@ -193,8 +213,8 @@ async function main() {
         `SELECT c.vector_node_id_snapshot, c.source_text_snapshot, dc.id AS chunk_id
          FROM citations c
          JOIN document_chunks dc ON dc.vector_node_id = c.vector_node_id_snapshot
-         WHERE c.id = ? AND dc.document_id = 1`,
-        [citation.id]
+         WHERE c.id = ? AND dc.document_id = ?`,
+        [citation.id, approved.documentId]
       ).then(([rows]) => rows),
       pool.execute(
         `SELECT operation_type, provider, model, status
@@ -222,7 +242,8 @@ async function main() {
 
     console.log(JSON.stringify({
       status: 'RESTORED_CORPUS_LIVE_OK',
-      documentId: 1,
+      releaseId: approved.releaseId,
+      documentId: approved.documentId,
       chunks: afterCounts.chunks,
       points: afterStores.points.length,
       ingestJobs: afterCounts.ingestJobs,
@@ -244,4 +265,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { adminToken, databaseCounts, httpRequest, main };
+module.exports = { adminToken, approvedCorpusConfig, databaseCounts, httpRequest, main };

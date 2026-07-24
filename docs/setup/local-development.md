@@ -32,6 +32,7 @@ Disposition: **RUNTIME RETAINED WITH EVIDENCE** vì `docker:mock:*` và `test:pa
 ```powershell
 npm run check
 npm run test:openapi
+npm run test:library
 npm run test:contract
 npm run test:part2
 ```

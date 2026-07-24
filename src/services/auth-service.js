@@ -149,8 +149,11 @@ async function verifyAdminOtp({ email, otpCode }) {
   return authResult(user);
 }
 
-async function requestPasswordReset(email) {
-  const user = await userRepo.findUserByEmail(email.trim().toLowerCase());
+async function requestPasswordReset(email, dependencies = {}) {
+  const users = dependencies.userRepo || userRepo;
+  const tokens = dependencies.tokenRepo || tokenRepo;
+  const transaction = dependencies.withTransaction || withTransaction;
+  const user = await users.findUserByEmail(email.trim().toLowerCase());
   if (!user) return true;
 
   const secret = crypto.randomBytes(32).toString('hex');
@@ -158,10 +161,10 @@ async function requestPasswordReset(email) {
   const tokenHash = hashToken(user.id, TOKEN_TYPES.PASSWORD_RESET, secret);
   const expiresAt = new Date(Date.now() + RESET_TOKEN_EXPIRES_MINUTES * 60 * 1000);
 
-  await withTransaction(async (connection) => {
-    await tokenRepo.deleteExpiredTokens(100, connection);
-    await tokenRepo.revokeTokensByUserAndType(user.id, TOKEN_TYPES.PASSWORD_RESET, connection);
-    await tokenRepo.saveToken({
+  await transaction(async (connection) => {
+    await tokens.deleteExpiredTokens(100, connection);
+    await tokens.revokeTokensByUserAndType(user.id, TOKEN_TYPES.PASSWORD_RESET, connection);
+    await tokens.saveToken({
       userId: user.id,
       tokenType: TOKEN_TYPES.PASSWORD_RESET,
       tokenHash,

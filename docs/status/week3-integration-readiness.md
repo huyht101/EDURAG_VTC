@@ -2,11 +2,11 @@
 
 ## Current status
 
-**CORPUS REMEDIATED — NODEJS SECURITY/RELIABILITY HARDENED — PYTHON HANDOFF REQUIRED**
+**NODE CORPUS TOOLING HARDENED — LIVE/CANONICAL CORPUS BLOCKED BY DATA APPROVAL — PYTHON HANDOFF REQUIRED**
 
 Đây là development/integration readiness, chưa production-ready. Lượt hardening hiện tại không publish/restore cloud thật, không ingest/re-embed và không gọi paid provider.
 
-## Implemented in current worktree
+## Implemented in current branch
 
 - Corpus identity v2 bao phủ canonical scoped MySQL data, Qdrant vectors/payload và originals; timestamp/temp path/export order/DDL auto-increment không tham gia identity.
 - `auto` chỉ restore khi MySQL/Qdrant/uploads đều `EMPTY`; `PRESENT`/partial/in-progress được giữ, `UNKNOWN/ERROR` không bị coi là empty. `required` vẫn strict; `off` không truy cập cloud.
@@ -22,11 +22,14 @@
 
 | Gate | Result |
 |---|---|
-| `test:corpus` | PASS — fake transport/staged fixtures; zero cloud mutation |
+| `test:corpus` | Unit simulation only — fake transport/staged fixtures; validation/rollback/zero cloud mutation |
+| `test:corpus:partial` | Phải chạy trên project `edurag_corpus_partial_*` mới; từ chối resource có sẵn và cleanup đúng namespace |
+| Approved corpus source | **BLOCKED BY DATA APPROVAL** |
+| Canonical `content-v2` release | **BLOCKED BY DATA APPROVAL**; pointer không phải approval |
+| Live restore/query/citation | **NOT RUN** trong lượt hiện tại nếu chưa có approved bundle/credential |
 | `test:contract` | PASS — Node boundary fixtures/mock transport, không phải remote runtime |
 | `test:node-consolidation` | PASS — Node runtime units/local HTTP |
 | `test:part2` | PASS — real Node/MySQL HTTP with deterministic RAG mock; includes concurrent idempotency |
-| Historical Reader-only GCS restore/API and Qdrant acceptance | PASS ở lượt trước; không chạy lại vì task này cấm cloud mutation/heavy acceptance |
 | Paid provider calls in current work | 0 |
 
 Full syntax/OpenAPI/docs/audit/Compose verification phải được ghi theo kết quả cuối của worktree, không suy ra từ historical live evidence.

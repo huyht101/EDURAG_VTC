@@ -49,4 +49,4 @@ Index tập trung vào role/status, token state/expiry, document owner/retrieval
 
 ## Giới hạn và hướng mở rộng
 
-MVP dùng local storage, một vector mapping/chunk, PDF/DOCX/TXT và offset/limit. Subject scope, document versions, multi-model mapping, object storage, OCR/PPTX, refresh sessions, audit logs và full AI pricing chỉ được thêm bằng migration khi có nghiệp vụ thật.
+MVP dùng local storage, một vector mapping/chunk, PDF/DOCX/TXT và offset/limit. Subject scope, document versions, multi-model mapping, object storage, OCR/PPTX, refresh sessions, audit logs và full AI pricing chỉ được thêm bằng migration khi có nghiệp vụ thật. DDL minh họa subject/course được giữ riêng tại [`optional-subject-course-schema.sql`](../examples/optional-subject-course-schema.sql) dưới dạng OPTIONAL/LATER reference; file này không thuộc bootstrap hoặc contract canonical.

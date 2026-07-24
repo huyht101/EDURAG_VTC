@@ -1,13 +1,13 @@
 # Remote Docker RAG
 
-Hướng dẫn canonical cho NodeJS, MySQL 8.4, Python RAG và Qdrant trên cùng Docker network, kèm cloud corpus bootstrap.
+Hướng dẫn canonical cho topology NodeJS, MySQL 8.4, Python RAG và Qdrant trên cùng Docker network, kèm optional selected-release bootstrap.
 
 ## 1. Chuẩn bị
 
 - Node.js 20+, Docker Desktop và Docker Compose.
 - Root `.env` tạo từ `.env.example`.
 - Gemini/LlamaParse credentials cho live RAG.
-- Reader-capable `secrets/gcs.json` để fresh machine restore canonical corpus. Writer key chỉ dành cho manager publish.
+- Reader-capable `secrets/gcs.json` để fresh machine restore selected release sau khi bundle đã được phê duyệt. Writer key chỉ dành cho manager publish.
 
 ```powershell
 npm ci
@@ -46,7 +46,7 @@ Foreground orchestration:
 
 Node gọi `http://rag-service:8000`; Python callback `http://app:5000`; Qdrant là `http://qdrant:6333`. Node mount uploads read/write, Python mount cùng volume read-only. GCS key không được mount/inject.
 
-Expected log trên fresh reader-enabled volumes:
+Expected log trên fresh reader-enabled volumes khi selected bundle đã được phê duyệt và cấu hình:
 
 ```text
 CORPUS_RESTORE_OK
@@ -69,7 +69,7 @@ npm run corpus:verify
 npm run corpus:restore
 ```
 
-Manager dùng writer credential trên source quiescent. Xem plan trước:
+`inspect` là local-only. `verify` và `restore` đọc selected remote release/credential; chỉ chạy trong isolated project sau data approval. Manager dùng writer credential trên source quiescent đã được phê duyệt. Xem plan trước:
 
 ```powershell
 npm run corpus:publish -- --dry-run
@@ -79,17 +79,18 @@ npm run corpus:verify
 
 `--confirm-reviewed` xác nhận operator đã kiểm tra PII/personal data, secret, quyền chia sẻ và project scope; không phải automated PII scanner. Policy đơn giản này chỉ dùng với private/internal bucket. Publish/restore không ingest, parse hoặc document-embed. `publish` create-only và pointer-last; `restore` không overwrite incompatible stores/files. Xem [Cloud corpus portability](../architecture/corpus-portability.md).
 
-Dry-run là read-only và yêu cầu MySQL/Qdrant đã chạy: không start/stop writer, không tạo snapshot/staging, không đọc cloud credential và không gọi GCS. Publish thật pause app/Python xuyên suốt frozen export + upload/read-back/pointer update, rồi resume trong `finally`; `Ctrl+C` có signal guard best-effort. Restore stage/verify trước apply và có recovery về empty state; không có implicit replace-local.
+`corpus:inspect` là local-only: không đọc credential, không gọi GCS/provider/writer và không verify remote release. Dry-run là read-only và yêu cầu MySQL/Qdrant đã chạy: không start/stop writer, không tạo snapshot/staging, không đọc cloud credential và không gọi GCS. Publish thật pause app/Python xuyên suốt frozen export + upload/read-back/pointer update, rồi resume trong `finally`; `Ctrl+C` có signal guard best-effort. Restore stage/verify trước apply và có recovery về empty state; không có implicit replace-local.
 
 Workflow manager chuẩn:
 
-1. Dùng viewer credential và chạy `npm run docker:remote:dev`.
-2. `auto` restore selected release nếu local empty; nếu local existing thì giữ local.
-3. Upload/process document mới và poll đến `READY`.
-4. Nhấn `Ctrl+C`; containers dừng, volumes được giữ.
-5. Chuyển sang writer credential qua kênh an toàn.
-6. Chạy dry-run, review exact originals/PII/secret/quyền chia sẻ/project scope.
-7. Chạy publish với `--confirm-reviewed`, sau đó `npm run corpus:verify`.
+1. Xác nhận source/bundle đã được owner phê duyệt; pointer hoặc local files không tự tạo approval.
+2. Dùng viewer credential và chạy `npm run docker:remote:dev`.
+3. `auto` restore selected release nếu local empty; nếu local existing thì giữ local.
+4. Upload/process document mới và poll đến `READY`.
+5. Nhấn `Ctrl+C`; containers dừng, volumes được giữ.
+6. Chuyển sang writer credential qua kênh an toàn.
+7. Chạy dry-run, review exact originals/PII/secret/quyền chia sẻ/project scope.
+8. Chạy publish với `--confirm-reviewed`, sau đó `npm run corpus:verify`.
 
 Local divergence trong development là hợp lệ. Public corpus hoặc compliance audit cần policy riêng; không dùng confirmation flag này để hạ guard cho public bucket.
 
@@ -111,7 +112,7 @@ Demo Admin: `admin@example.com` / `123456` (local only).
 3. Gọi `POST /api/auth/admin/verify-otp`.
 4. Dùng `data.token` tại Swagger **Authorize**. Không dùng internal token cho public API.
 
-Corpus đã restore cho phép chat/citation ngay, không cần upload lại. Upload document mới vẫn là async: response `202`, sau đó poll `GET /api/documents/jobs/{jobId}` đến terminal status. Chat request đơn giản chỉ cần `content`; `clientRequestId` optional và server tự sinh UUID.
+Approved corpus đã restore có thể dùng cho chat/citation mà không upload lại. Nếu bundle chưa được phê duyệt, không chạy live corpus acceptance và không gọi pointer là canonical. Upload document mới vẫn là async: response `202`, sau đó poll `GET /api/documents/jobs/{jobId}` đến terminal status. Chat request đơn giản chỉ cần `content`; `clientRequestId` optional và server tự sinh UUID.
 
 ## 5. Lifecycle
 
@@ -125,7 +126,7 @@ Corpus đã restore cho phép chat/citation ngay, không cần upload lại. Upl
 | `npm run docker:remote:down` | Xóa containers/network, giữ named volumes. |
 | `npm run docker:remote:reset` | **Destructive:** xóa volumes của configured remote project. |
 
-`Ctrl+C` best-effort stop containers và giữ volumes. Abrupt kill, Docker crash hoặc mất điện không bảo đảm signal cleanup; lần chạy sau reuse volumes và verify state. Đặt `REMOTE_DEV_ALL_LOGS=true` trong `.env` nếu cần attach cả MySQL/Qdrant logs.
+`Ctrl+C` best-effort stop containers và giữ volumes. Abrupt kill, Docker crash hoặc mất điện không bảo đảm signal cleanup; lần chạy sau reuse volumes và verify state. Đặt `REMOTE_DEV_ALL_LOGS=true` trong `.env` nếu cần attach cả MySQL/Qdrant logs, hoặc dùng `REMOTE_DEV_SERVICES=app,rag-service` để chọn rõ các service cần theo dõi.
 
 ## 6. Lỗi thường gặp
 
