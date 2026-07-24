@@ -138,6 +138,27 @@ Vì server chưa có image contract, hiện không có MIME/extension/magic-byte
 
 ## Source viewer và original file
 
+### Library/citation navigation
+
+`STUDENT`, `TEACHER` và `ADMIN` dùng `/api/library` để đọc public document. `/api/documents` chỉ là management API; Student không được chuyển sang management source khi Library từ chối.
+
+Luồng FE khi người dùng mở citation:
+
+1. Gọi `GET /api/citations/{citationId}` bằng user Bearer token.
+2. Đọc `documentId`, `documentTitle`, `pageNumber` (1-based khi có), `sourceText` và optional `sourceLocator`.
+3. Gọi `GET /api/library/documents/{documentId}` rồi `GET /api/library/documents/{documentId}/source`, cùng Bearer token.
+4. Dùng `fetch` nhận `Blob`/`ArrayBuffer`; không gắn URL source được bảo vệ trực tiếp vào viewer nếu viewer không gửi `Authorization`.
+5. Với PDF, tạo object URL từ Blob, mở best-effort tại `pageNumber`, rồi `URL.revokeObjectURL()` khi đóng viewer hoặc thay file.
+
+Fallback và lỗi:
+
+- Không có bounding box/locator ổn định: mở đúng page nếu có và hiển thị/search `sourceText`; precise highlight vẫn OPTIONAL/LATER.
+- `originalAvailable=false`, `409 ORIGINAL_SOURCE_UNAVAILABLE`, hoặc original bị thiếu: vẫn hiển thị immutable citation snapshot.
+- Document `HIDDEN`/`DELETED`: Library detail/source trả `404`; không nới scope và không retry qua `/api/documents` hay management source.
+- `401`: xử lý session/login; `403`: hiển thị lỗi quyền, không đổi sang management API.
+- DOCX/TXT hiện là authenticated stream/download; Node không cung cấp DOCX preview hoặc generated HTML/PDF.
+- `sourceLocator` là optional opaque object. FE không suy đoán coordinate unit, origin hay single/array boxes cho đến khi contract Python–Node–FE được chốt.
+
 Node không convert DOCX/TXT sang PDF/HTML và không lưu generated preview. File endpoints stream original dưới dạng `attachment`; citation source endpoint trả JSON snapshot để FE dùng fallback.
 
 | File/source | Endpoint | Response | Auth và state |

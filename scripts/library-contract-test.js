@@ -3,8 +3,10 @@
 const assert = require('assert/strict');
 const { PassThrough } = require('stream');
 
+const libraryController = require('../src/controllers/library-controller');
 const libraryRepo = require('../src/repositories/library-repository');
 const libraryService = require('../src/services/library-service');
+const localStorage = require('../src/storage/local-storage');
 const { validateLibraryQuery } = require('../src/validators/library');
 
 const readyDocument = {
@@ -144,11 +146,52 @@ async function testSupportedSourceTypes() {
   }
 }
 
+async function testStorageBoundaryAndStreamErrors() {
+  for (const storageKey of [
+    '../outside.txt',
+    'documents/../outside.txt',
+    '/absolute/outside.txt',
+    'documents//outside.txt'
+  ]) {
+    assert.throws(
+      () => localStorage.resolveStorageKey(storageKey),
+      (error) => error.status === 400 && error.code === 'INVALID_STORAGE_KEY'
+    );
+  }
+
+  const originalOpenSource = libraryService.openSource;
+  const stream = new PassThrough();
+  const response = new PassThrough();
+  response.setHeader = () => {};
+  response.attachment = () => {};
+  const expectedError = new Error('CONTROLLED_STREAM_READ_ERROR');
+  let observedError;
+  libraryService.openSource = async () => ({
+    stream,
+    size: 6,
+    filename: 'source.txt',
+    mimeType: 'text/plain'
+  });
+  try {
+    await libraryController.streamSource(
+      { params: { id: '12' } },
+      response,
+      (error) => { observedError = error; }
+    );
+    stream.emit('error', expectedError);
+    assert.equal(observedError, expectedError);
+    stream.end('source');
+  } finally {
+    libraryService.openSource = originalOpenSource;
+  }
+}
+
 async function main() {
   await testRepositoryScope();
   await testDtoAndFixedQueryScope();
   await testDetailAndSourceStates();
   await testSupportedSourceTypes();
+  await testStorageBoundaryAndStreamErrors();
   console.log('LIBRARY_CONTRACT_OK scope=READY+VISIBLE dto=allowlist source=authorized-state');
 }
 

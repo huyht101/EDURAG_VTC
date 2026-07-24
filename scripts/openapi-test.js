@@ -84,6 +84,10 @@ assert.match(documentFile.description, /no Range\/206/i);
 assert.match(spec.components.schemas.RegisterBody.properties.email.description, /does not enforce @student\.edu\.vn/i);
 assert.match(spec.components.schemas.CitationSnapshot.description, /not serialized/i);
 assert(!Object.hasOwn(spec.components.schemas.CitationSnapshot.properties, 'fileUrl'));
+assert(spec.components.schemas.CitationSnapshot.required.includes('documentId'));
+for (const internal of ['vectorNodeId', 'storageKey', 'jobId']) {
+  assert(!Object.hasOwn(spec.components.schemas.CitationSnapshot.properties, internal));
+}
 assert.deepEqual(
   spec.paths['/api/citations/{id}/source'].get.responses[200].content['application/json'].example,
   spec.paths['/api/citations/{id}'].get.responses[200].content['application/json'].example

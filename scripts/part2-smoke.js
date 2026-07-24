@@ -12,6 +12,29 @@ const jwt = require('jsonwebtoken');
 const DEMO_ADMIN_EMAIL = 'admin@example.com';
 const DEMO_ADMIN_PASSWORD = '123456';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const LIBRARY_SOURCE_FIXTURES = [
+  {
+    fileType: 'PDF',
+    filename: 'library-source.pdf',
+    mimeType: 'application/pdf',
+    bytes: Buffer.from('%PDF-1.7\nEDURAG PDF source bytes\n%%EOF\n')
+  },
+  {
+    fileType: 'DOCX',
+    filename: 'library-source.docx',
+    mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    bytes: Buffer.from(
+      'UEsDBBQAAAAAAGx5+FwcQqjh7gAAAO4AAAATAAAAW0NvbnRlbnRfVHlwZXNdLnhtbDxUeXBlcyB4bWxucz0iaHR0cDovL3NjaGVtYXMub3BlbnhtbGZvcm1hdHMub3JnL3BhY2thZ2UvMjAwNi9jb250ZW50LXR5cGVzIj48RGVmYXVsdCBFeHRlbnNpb249InJlbHMiIENvbnRlbnRUeXBlPSJhcHBsaWNhdGlvbi92bmQub3BlbnhtbGZvcm1hdHMtcGFja2FnZS5yZWxhdGlvbnNoaXBzK3htbCIvPjxEZWZhdWx0IEV4dGVuc2lvbj0ieG1sIiBDb250ZW50VHlwZT0iYXBwbGljYXRpb24veG1sIi8+PC9UeXBlcz5QSwMEFAAAAAAAbHn4XGF7L0PyAAAA8gAAAAsAAABfcmVscy8ucmVsczxSZWxhdGlvbnNoaXBzIHhtbG5zPSJodHRwOi8vc2NoZW1hcy5vcGVueG1sZm9ybWF0cy5vcmcvcGFja2FnZS8yMDA2L3JlbGF0aW9uc2hpcHMiPjxSZWxhdGlvbnNoaXAgSWQ9InJJZDEiIFR5cGU9Imh0dHA6Ly9zY2hlbWFzLm9wZW54bWxmb3JtYXRzLm9yZy9vZmZpY2VEb2N1bWVudC8yMDA2L3JlbGF0aW9uc2hpcHMvb2ZmaWNlRG9jdW1lbnQiIFRhcmdldD0id29yZC9kb2N1bWVudC54bWwiLz48L1JlbGF0aW9uc2hpcHM+UEsDBBQAAAAAAGx5+FxG0CYzqgAAAKoAAAARAAAAd29yZC9kb2N1bWVudC54bWw8dzpkb2N1bWVudCB4bWxuczp3PSJodHRwOi8vc2NoZW1hcy5vcGVueG1sZm9ybWF0cy5vcmcvd29yZHByb2Nlc3NpbmdtbC8yMDA2L21haW4iPjx3OmJvZHk+PHc6cD48dzpyPjx3OnQ+RURVUkFHIERPQ1ggc291cmNlIGJ5dGVzPC93OnQ+PC93OnI+PC93OnA+PC93OmJvZHk+PC93OmRvY3VtZW50PlBLAQIUABQAAAAAAGx5+FwcQqjh7gAAAO4AAAATAAAAAAAAAAAAAACAAQAAAABbQ29udGVudF9UeXBlc10ueG1sUEsBAhQAFAAAAAAAbHn4XGF7L0PyAAAA8gAAAAsAAAAAAAAAAAAAAIABHwEAAF9yZWxzLy5yZWxzUEsBAhQAFAAAAAAAbHn4XEbQJjOqAAAAqgAAABEAAAAAAAAAAAAAAIABOgIAAHdvcmQvZG9jdW1lbnQueG1sUEsFBgAAAAADAAMAuQAAABMDAAAAAA==',
+      'base64'
+    )
+  },
+  {
+    fileType: 'TXT',
+    filename: 'library-source.txt',
+    mimeType: 'text/plain',
+    bytes: Buffer.from('EDURAG TXT source bytes\n', 'utf8')
+  }
+];
 process.env.NODE_ENV = 'development';
 process.env.AUTH_DEV_DELIVERY_LOG_SECRETS = 'true';
 process.env.RAG_MODE = 'mock';
@@ -449,6 +472,61 @@ async function main() {
       assert.match(librarySource.headers.get('content-disposition') || '', /attachment/i);
       assert.equal(await librarySource.text(), 'verified source text');
     }
+    for (const fixture of LIBRARY_SOURCE_FIXTURES) {
+      const fixtureForm = new FormData();
+      fixtureForm.append(
+        'file',
+        new Blob([fixture.bytes], { type: fixture.mimeType }),
+        fixture.filename
+      );
+      fixtureForm.append('title', `Library ${fixture.fileType} bytes`);
+      const fixtureUpload = (await request('/api/documents', {
+        method: 'POST',
+        headers: auth(teacher1Token),
+        body: fixtureForm
+      }, 202)).payload.data;
+      const fixtureText = `verified ${fixture.fileType} source`;
+      await request('/api/internal/rag/processing-callback', {
+        method: 'POST',
+        headers: internalHeaders,
+        body: JSON.stringify({
+          eventType: 'SUCCEEDED',
+          jobId: fixtureUpload.job.id,
+          documentId: fixtureUpload.document.id,
+          attemptCount: 1,
+          chunks: [{
+            chunkIndex: 0,
+            vectorNodeId: crypto.randomUUID(),
+            chunkText: fixtureText,
+            contentHash: crypto.createHash('sha256').update(fixtureText).digest('hex'),
+            pageNumber: 1
+          }]
+        })
+      });
+      const fixtureDetail = (await request(
+        `/api/library/documents/${fixtureUpload.document.id}`,
+        { headers: auth(studentToken) }
+      )).payload.data.document;
+      assert.equal(fixtureDetail.fileType, fixture.fileType);
+      assert.equal(fixtureDetail.originalAvailable, true);
+      const fixtureSource = await fetch(
+        `${base}/api/library/documents/${fixtureUpload.document.id}/source`,
+        { headers: auth(studentToken), signal: AbortSignal.timeout(15_000) }
+      );
+      assert.equal(fixtureSource.status, 200);
+      assert.equal(Number(fixtureSource.headers.get('content-length')), fixture.bytes.length);
+      assert.match(fixtureSource.headers.get('content-type') || '', new RegExp(`^${fixture.mimeType}`));
+      const disposition = fixtureSource.headers.get('content-disposition') || '';
+      assert.match(disposition, /attachment/i);
+      assert(disposition.includes(fixture.filename));
+      assert(!/documents[\\/]/i.test(disposition));
+      const received = Buffer.from(await fixtureSource.arrayBuffer());
+      assert.equal(
+        crypto.createHash('sha256').update(received).digest('hex'),
+        crypto.createHash('sha256').update(fixture.bytes).digest('hex')
+      );
+      assert.deepEqual(received, fixture.bytes);
+    }
     await request(`/api/documents/${documentId}`, { headers: auth(adminToken) });
     await request(`/api/documents/jobs/${jobId}`, { headers: auth(adminToken) });
     const adminFile = await fetch(`${base}/api/documents/${documentId}/file`, {
@@ -558,6 +636,24 @@ async function main() {
       headers: auth(studentToken)
     })).payload.data;
     assert.equal(availableCitation.originalAvailable, true);
+    assert.equal(Number(availableCitation.documentId), Number(documentId));
+    assert.equal(availableCitation.documentTitle, 'Smoke Document Updated');
+    assert.equal(availableCitation.pageNumber, 1);
+    assert.equal(availableCitation.sourceText, 'Mock source fragment.');
+    for (const internalField of ['vectorNodeId', 'storageKey', 'storage_key', 'jobId']) {
+      assert(!Object.hasOwn(availableCitation, internalField));
+    }
+    const linkedLibraryDetail = (await request(
+      `/api/library/documents/${availableCitation.documentId}`,
+      { headers: auth(studentToken) }
+    )).payload.data.document;
+    assert.equal(Number(linkedLibraryDetail.id), Number(availableCitation.documentId));
+    const linkedLibrarySource = await fetch(
+      `${base}/api/library/documents/${availableCitation.documentId}/source`,
+      { headers: auth(studentToken), signal: AbortSignal.timeout(15_000) }
+    );
+    assert.equal(linkedLibrarySource.status, 200);
+    assert.equal(await linkedLibrarySource.text(), 'verified source text');
     await request(`/api/citations/${citationId}`, { headers: auth(adminToken) }, 404);
 
     const storedDocument = await documentRepo.findById(documentId);
@@ -577,6 +673,9 @@ async function main() {
       headers: auth(studentToken)
     })).payload.data;
     assert.equal(missingOriginalCitation.originalAvailable, false);
+    assert.equal(Number(missingOriginalCitation.documentId), Number(documentId));
+    assert.equal(missingOriginalCitation.pageNumber, 1);
+    assert.equal(missingOriginalCitation.sourceText, 'Mock source fragment.');
     await request(`/api/documents/${documentId}/file`, { headers: auth(teacher1Token) }, 404);
 
     await request(`/api/documents/${documentId}/hide`, { method: 'POST', headers: auth(teacher1Token) }, 202);
@@ -586,10 +685,19 @@ async function main() {
       headers: auth(studentToken)
     })).payload.data;
     assert.equal(hiddenCitation.originalAvailable, false);
+    assert.equal(Number(hiddenCitation.documentId), Number(documentId));
+    assert.equal(hiddenCitation.pageNumber, 1);
+    assert.equal(hiddenCitation.sourceText, 'Mock source fragment.');
     await request(`/api/citations/${citationId}/file`, { headers: auth(studentToken) }, 409);
     await request(`/api/documents/${documentId}`, { method: 'DELETE', headers: auth(teacher1Token) }, 202);
     await request(`/api/library/documents/${documentId}`, { headers: auth(studentToken) }, 404);
-    await request(`/api/citations/${citationId}`, { headers: auth(studentToken) });
+    const deletedCitation = (await request(`/api/citations/${citationId}`, {
+      headers: auth(studentToken)
+    })).payload.data;
+    assert.equal(deletedCitation.originalAvailable, false);
+    assert.equal(Number(deletedCitation.documentId), Number(documentId));
+    assert.equal(deletedCitation.pageNumber, 1);
+    assert.equal(deletedCitation.sourceText, 'Mock source fragment.');
     await request(`/api/chat/sessions/${session.id}/messages`, { headers: auth(studentToken) });
 
     const noAnswerSession = (await request('/api/chat/sessions', {

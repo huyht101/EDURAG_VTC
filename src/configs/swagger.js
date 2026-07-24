@@ -252,11 +252,15 @@ const definition = {
       },
       CitationSnapshot: {
         type: 'object',
-        required: ['id', 'messageId', 'citationOrder', 'documentTitle', 'sourceText'],
+        required: ['id', 'messageId', 'documentId', 'citationOrder', 'documentTitle', 'sourceText'],
         properties: {
           id: { type: 'integer' },
           messageId: { type: 'integer' },
-          documentId: { type: 'integer', nullable: true },
+          documentId: {
+            type: 'integer',
+            nullable: true,
+            description: 'Stable document linkage used for Document Library navigation; key is always serialized.'
+          },
           chunkId: { type: 'integer', nullable: true },
           citationOrder: { type: 'integer', minimum: 1 },
           documentTitle: { type: 'string' },
