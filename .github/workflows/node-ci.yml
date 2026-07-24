@@ -23,6 +23,7 @@ jobs:
       - run: cp .env.example .env
       - run: npm run check
       - run: npm run test:node-consolidation
+      - run: npm run test:library
       - run: npm run test:openapi
       - run: npm run test:docs
       - run: npm run test:contract

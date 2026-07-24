@@ -281,6 +281,8 @@ async function main() {
       method: 'POST', headers: auth(studentToken), body: new FormData()
     }, 403);
     await request('/api/library/documents', {}, 401);
+    await request('/api/library/documents/1', {}, 401);
+    await request('/api/library/documents/1/source', {}, 401);
     await request('/api/library/documents', { headers: auth(studentToken) });
     await request('/api/library/documents', { headers: auth(teacher1Token) });
     await request('/api/library/documents', { headers: auth(adminToken) });
@@ -565,9 +567,11 @@ async function main() {
         headers: auth(token)
       })).payload.data.document;
       assert.equal(missingLibraryOriginal.originalAvailable, false);
-      await request(`/api/library/documents/${documentId}/source`, {
+      const missingSource = await request(`/api/library/documents/${documentId}/source`, {
         headers: auth(token)
       }, 409);
+      assert.equal(missingSource.payload.errorCode, 'ORIGINAL_SOURCE_UNAVAILABLE');
+      assert(!JSON.stringify(missingSource.payload).includes(process.env.UPLOAD_DIR));
     }
     const missingOriginalCitation = (await request(`/api/citations/${citationId}/source`, {
       headers: auth(studentToken)

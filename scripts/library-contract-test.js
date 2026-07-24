@@ -109,10 +109,46 @@ async function testDetailAndSourceStates() {
   );
 }
 
+async function testSupportedSourceTypes() {
+  const variants = [
+    { fileType: 'PDF', filename: 'source.pdf', mimeType: 'application/pdf' },
+    {
+      fileType: 'DOCX',
+      filename: 'source.docx',
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    },
+    { fileType: 'TXT', filename: 'source.txt', mimeType: 'text/plain' }
+  ];
+  const files = {
+    async exists() { return true; },
+    async open() {
+      const stream = new PassThrough();
+      stream.end('source');
+      return { stream, size: 6 };
+    }
+  };
+  for (const variant of variants) {
+    const repository = {
+      async findEligibleById() {
+        return {
+          ...readyDocument,
+          file_type: variant.fileType,
+          original_filename: variant.filename,
+          mime_type: variant.mimeType
+        };
+      }
+    };
+    const source = await libraryService.openSource(12, { repository, fileService: files });
+    assert.equal(source.filename, variant.filename);
+    assert.equal(source.mimeType, variant.mimeType);
+  }
+}
+
 async function main() {
   await testRepositoryScope();
   await testDtoAndFixedQueryScope();
   await testDetailAndSourceStates();
+  await testSupportedSourceTypes();
   console.log('LIBRARY_CONTRACT_OK scope=READY+VISIBLE dto=allowlist source=authorized-state');
 }
 
