@@ -50,7 +50,7 @@ Thumbs.db
 
 # Local, read-only implementation references
 week2_nodejs_core_ref/
-docsdocs/handoff
+docs/handoff
 
 # Keep python-service source trackable; ignore only generated packages/import archives.
 /artifacts/
