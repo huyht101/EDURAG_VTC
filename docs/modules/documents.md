@@ -4,7 +4,7 @@
 
 ADMIN quản lý toàn bộ document; TEACHER chỉ document mình upload; STUDENT không dùng management API. Route nằm dưới `/api/documents`, chi tiết trong OpenAPI.
 
-STUDENT có Student Document Library read-only riêng dưới `/api/library/documents`. List/detail/source chỉ resolve document `READY + VISIBLE`; filter này do repository cố định, không lấy từ query client. List chỉ nhận offset/limit và optional title search. DTO library là allowlist gồm `id`, `title`, `fileType`, `fileSize`, nullable `pageCount`, `createdAt`, `originalAvailable`; không trả owner, storage path, stored filename, checksum, lifecycle hoặc processing-job metadata. Teacher/Admin không dùng namespace này.
+STUDENT, TEACHER và ADMIN có Document Library read-only chung dưới `/api/library/documents`. Ba role nhận cùng public DTO và có thể đọc tài liệu đủ điều kiện của người khác. List/detail/source chỉ resolve document `READY + VISIBLE`, chưa deleted; filter này do repository cố định, không lấy từ query client. List chỉ nhận offset/limit và optional title search. DTO library là allowlist gồm `id`, `title`, `fileType`, `fileSize`, nullable `pageCount`, `createdAt`, `originalAvailable`; không trả owner, storage path, stored filename, checksum, lifecycle hoặc processing-job metadata.
 
 Upload hỗ trợ PDF/DOCX/TXT, giới hạn bằng `FILE_MAX_SIZE_BYTES`, kiểm tra extension/MIME/signature và lưu generated relative storage key. Public DTO không chứa storage key. Original file immutable; thay nội dung bằng upload document mới.
 
@@ -16,6 +16,6 @@ Transaction đầu tạo `documents` và `document_processing_jobs`; dispatch Py
 
 Callback complete manifest dùng internal Bearer, job/attempt stale guard và transaction. Hide không xóa vectors; unhide chỉ cho `READY + HIDDEN`; delete soft-delete và giữ file/chunks/jobs/chat/citation/usage.
 
-Mock mode vẫn giữ upload ở `PROCESSING` cho tới callback, nhưng hoàn tất hide/unhide/delete synchronously để test orchestration. Remote upload/callback/hide/unhide/delete đã PASS trên isolated development topology; đây không phải production-readiness claim.
+Mock mode vẫn giữ upload ở `PROCESSING` cho tới callback, nhưng hoàn tất hide/unhide/delete synchronously để test orchestration. Mock/isolated regression không phải bằng chứng live Python/provider hoặc production readiness; trạng thái live phải được báo theo lần chạy thực tế.
 
 Flows: [document flow notes](../flows/notes/document-flows.md).

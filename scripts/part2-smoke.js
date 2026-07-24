@@ -280,8 +280,10 @@ async function main() {
     await request('/api/documents', {
       method: 'POST', headers: auth(studentToken), body: new FormData()
     }, 403);
-    await request('/api/library/documents', { headers: auth(teacher1Token) }, 403);
-    await request('/api/library/documents', { headers: auth(adminToken) }, 403);
+    await request('/api/library/documents', {}, 401);
+    await request('/api/library/documents', { headers: auth(studentToken) });
+    await request('/api/library/documents', { headers: auth(teacher1Token) });
+    await request('/api/library/documents', { headers: auth(adminToken) });
     await request('/api/library/documents?visibilityStatus=DELETED', {
       headers: auth(studentToken)
     }, 400);
@@ -347,6 +349,22 @@ async function main() {
     await request(`/api/documents/jobs/${jobId}`, { headers: auth(teacher1Token) });
 
     await request(`/api/documents/${documentId}`, { headers: auth(teacher2Token) }, 404);
+    await request(`/api/documents/${documentId}/file`, { headers: auth(teacher2Token) }, 404);
+    await request(`/api/documents/jobs/${jobId}`, { headers: auth(teacher2Token) }, 404);
+    await request(`/api/documents/${documentId}`, {
+      method: 'PATCH',
+      headers: auth(teacher2Token, { 'content-type': 'application/json' }),
+      body: JSON.stringify({ title: 'Forbidden Cross-owner Update' })
+    }, 404);
+    await request(`/api/documents/${documentId}/hide`, {
+      method: 'POST', headers: auth(teacher2Token)
+    }, 404);
+    await request(`/api/documents/${documentId}/unhide`, {
+      method: 'POST', headers: auth(teacher2Token)
+    }, 404);
+    await request(`/api/documents/${documentId}`, {
+      method: 'DELETE', headers: auth(teacher2Token)
+    }, 404);
     await request('/api/documents', { headers: auth(adminToken) });
     await request('/api/internal/rag/processing-callback', {
       method: 'POST', headers: auth(teacher1Token, { 'content-type': 'application/json' }),
@@ -399,29 +417,48 @@ async function main() {
 
     const detail = (await request(`/api/documents/${documentId}`, { headers: auth(teacher1Token) })).payload.data;
     assert.equal(detail.document.processingStatus, 'READY');
-    const libraryPage = (await request('/api/library/documents?search=Smoke%20Document&limit=10', {
-      headers: auth(studentToken)
-    })).payload.data;
-    const libraryDocument = libraryPage.documents.find(
-      (document) => Number(document.id) === Number(documentId)
-    );
-    assert(libraryDocument, 'READY + VISIBLE document must appear in Student Library.');
+    const libraryTokens = [studentToken, teacher2Token, adminToken];
+    const libraryDocuments = [];
+    for (const token of libraryTokens) {
+      const page = (await request('/api/library/documents?search=Smoke%20Document&limit=10', {
+        headers: auth(token)
+      })).payload.data;
+      const document = page.documents.find((item) => Number(item.id) === Number(documentId));
+      assert(document, 'READY + VISIBLE document must appear in Document Library for every role.');
+      libraryDocuments.push(document);
+    }
+    const [libraryDocument] = libraryDocuments;
     assert.deepEqual(
       Object.keys(libraryDocument).sort(),
       ['createdAt', 'fileSize', 'fileType', 'id', 'originalAvailable', 'pageCount', 'title']
     );
     assert.equal(libraryDocument.originalAvailable, true);
-    const libraryDetail = (await request(`/api/library/documents/${documentId}`, {
-      headers: auth(studentToken)
-    })).payload.data.document;
-    assert.deepEqual(Object.keys(libraryDetail).sort(), Object.keys(libraryDocument).sort());
-    const librarySource = await fetch(`${base}/api/library/documents/${documentId}/source`, {
-      headers: auth(studentToken),
+    for (const [index, token] of libraryTokens.entries()) {
+      assert.deepEqual(libraryDocuments[index], libraryDocument);
+      const libraryDetail = (await request(`/api/library/documents/${documentId}`, {
+        headers: auth(token)
+      })).payload.data.document;
+      assert.deepEqual(libraryDetail, libraryDocument);
+      const librarySource = await fetch(`${base}/api/library/documents/${documentId}/source`, {
+        headers: auth(token),
+        signal: AbortSignal.timeout(15_000)
+      });
+      assert.equal(librarySource.status, 200);
+      assert.match(librarySource.headers.get('content-disposition') || '', /attachment/i);
+      assert.equal(await librarySource.text(), 'verified source text');
+    }
+    await request(`/api/documents/${documentId}`, { headers: auth(adminToken) });
+    await request(`/api/documents/jobs/${jobId}`, { headers: auth(adminToken) });
+    const adminFile = await fetch(`${base}/api/documents/${documentId}/file`, {
+      headers: auth(adminToken),
       signal: AbortSignal.timeout(15_000)
     });
-    assert.equal(librarySource.status, 200);
-    assert.match(librarySource.headers.get('content-disposition') || '', /attachment/i);
-    assert.equal(await librarySource.text(), 'verified source text');
+    assert.equal(adminFile.status, 200);
+    assert.equal(await adminFile.text(), 'verified source text');
+    await request(`/api/documents/${documentId}`, {
+      method: 'PATCH', headers: auth(adminToken, { 'content-type': 'application/json' }),
+      body: JSON.stringify({ title: 'Smoke Document Admin Reviewed' })
+    });
     await request(`/api/documents/${documentId}`, {
       method: 'PATCH', headers: auth(teacher1Token, { 'content-type': 'application/json' }),
       body: JSON.stringify({ title: 'Smoke Document Updated' })
@@ -433,6 +470,9 @@ async function main() {
     assert.equal(fileResponse.status, 200);
     assert.equal(await fileResponse.text(), 'verified source text');
 
+    await request(`/api/documents/${documentId}/hide`, { method: 'POST', headers: auth(adminToken) }, 202);
+    await request(`/api/library/documents/${documentId}`, { headers: auth(teacher2Token) }, 404);
+    await request(`/api/documents/${documentId}/unhide`, { method: 'POST', headers: auth(adminToken) }, 202);
     await request(`/api/documents/${documentId}/hide`, { method: 'POST', headers: auth(teacher1Token) }, 202);
     await request(`/api/library/documents/${documentId}`, { headers: auth(studentToken) }, 404);
     await request(`/api/library/documents/${documentId}/source`, { headers: auth(studentToken) }, 404);
@@ -520,13 +560,15 @@ async function main() {
 
     const storedDocument = await documentRepo.findById(documentId);
     await documentFileService.remove(storedDocument.storage_key);
-    const missingLibraryOriginal = (await request(`/api/library/documents/${documentId}`, {
-      headers: auth(studentToken)
-    })).payload.data.document;
-    assert.equal(missingLibraryOriginal.originalAvailable, false);
-    await request(`/api/library/documents/${documentId}/source`, {
-      headers: auth(studentToken)
-    }, 409);
+    for (const token of libraryTokens) {
+      const missingLibraryOriginal = (await request(`/api/library/documents/${documentId}`, {
+        headers: auth(token)
+      })).payload.data.document;
+      assert.equal(missingLibraryOriginal.originalAvailable, false);
+      await request(`/api/library/documents/${documentId}/source`, {
+        headers: auth(token)
+      }, 409);
+    }
     const missingOriginalCitation = (await request(`/api/citations/${citationId}/source`, {
       headers: auth(studentToken)
     })).payload.data;

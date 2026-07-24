@@ -21,19 +21,19 @@ Copy-Item .env.example .env
 
 Base Compose luôn ép `RAG_MODE=mock`; `.env.example` cũng dùng mock. Đây là runtime stub tối thiểu cho local/Part 2 regression, không phải bằng chứng Python integration:
 
-                                                                                                ```powershell
-                                                                                                npm run docker:mock:up
-                                                                                                ```
+```powershell
+npm run docker:mock:up
+```
 
 Remote Python là integration path chính và chỉ được bật chủ động bởi Compose override:
 
-Full remote stack và cloud corpus bootstrap:
+Full remote stack và optional selected-release bootstrap:
 
 ```powershell
 npm run docker:remote:dev
 ```
 
-`Ctrl+C` dừng containers nhưng giữ named volumes. Fresh volumes cần reader-capable GCS credential để restore canonical corpus; `CORPUS_BOOTSTRAP=auto` vẫn cho stack khởi động rỗng khi thiếu key.
+`Ctrl+C` dừng containers nhưng giữ named volumes. Fresh volumes cần reader-capable GCS credential để restore release được pointer chọn; pointer không phải bằng chứng source data đã được phê duyệt. `CORPUS_BOOTSTRAP=auto` vẫn cho stack khởi động rỗng khi thiếu key. Live corpus acceptance chỉ chạy sau explicit data approval.
 
 - Swagger: <http://localhost:5001/api-docs>
 - OpenAPI: <http://localhost:5001/api-docs.json>

@@ -69,7 +69,7 @@ const definition = {
     { name: 'Profile', description: 'ACTIVE user đọc/cập nhật profile và đổi password của chính mình.' },
     { name: 'Admin - Users', description: 'ADMIN quản lý trạng thái và tra cứu tài khoản.' },
     { name: 'Documents', description: 'TEACHER quản lý tài liệu mình upload; ADMIN quản lý toàn bộ.' },
-    { name: 'Student Library', description: 'STUDENT đọc danh mục tài liệu READY + VISIBLE qua namespace read-only riêng.' },
+    { name: 'Document Library', description: 'STUDENT, TEACHER và ADMIN đọc cùng public DTO cho tài liệu READY + VISIBLE qua namespace read-only riêng.' },
     { name: 'Document Processing', description: 'Theo dõi processing job bất đồng bộ sau upload/hide/unhide/delete.' },
     { name: 'Chat Sessions', description: 'ACTIVE user quản lý các chat session thuộc chính mình.' },
     { name: 'Chat Messages', description: 'ACTIVE user đọc history và gửi câu hỏi trong session của chính mình.' },
@@ -456,6 +456,7 @@ const definition = {
             }
           }),
           400: response('Invalid file.', 'ErrorResponse'),
+          403: response('TEACHER or ADMIN role required.', 'ErrorResponse'),
           413: response('File too large.', 'ErrorResponse'),
           503: response('Remote RAG dispatch failed; document/job are marked FAILED.', 'ErrorResponse')
         }
@@ -463,8 +464,8 @@ const definition = {
     },
     '/api/library/documents': {
       get: {
-        tags: ['Student Library'],
-        summary: 'List READY and VISIBLE library documents (STUDENT)',
+        tags: ['Document Library'],
+        summary: 'List READY and VISIBLE library documents',
         security: [{ bearerAuth: [] }],
         parameters: [
           { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0, default: 0 } },
@@ -472,7 +473,7 @@ const definition = {
           { name: 'search', in: 'query', schema: { type: 'string', maxLength: 255 } }
         ],
         responses: {
-          200: response('Student Library page.', 'LibraryPageResponse', {
+          200: response('Document Library page.', 'LibraryPageResponse', {
             success: true,
             message: 'OK',
             data: {
@@ -491,18 +492,19 @@ const definition = {
             }
           }),
           400: response('Unsupported management filter or invalid pagination.', 'ErrorResponse'),
-          403: response('STUDENT role required.', 'ErrorResponse')
+          401: response('User Bearer token is missing or invalid.', 'ErrorResponse'),
+          403: response('Authenticated role is not permitted.', 'ErrorResponse')
         }
       }
     },
     '/api/library/documents/{id}': {
       get: {
-        tags: ['Student Library'],
-        summary: 'Read one READY and VISIBLE library document (STUDENT)',
+        tags: ['Document Library'],
+        summary: 'Read one READY and VISIBLE library document',
         security: [{ bearerAuth: [] }],
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
         responses: {
-          200: response('Student Library document.', 'LibraryDocumentResponse', {
+          200: response('Document Library document.', 'LibraryDocumentResponse', {
             success: true,
             message: 'OK',
             data: {
@@ -517,41 +519,43 @@ const definition = {
               }
             }
           }),
-          403: response('STUDENT role required.', 'ErrorResponse'),
+          401: response('User Bearer token is missing or invalid.', 'ErrorResponse'),
+          403: response('Authenticated role is not permitted.', 'ErrorResponse'),
           404: response('Document is absent or no longer READY + VISIBLE.', 'ErrorResponse')
         }
       }
     },
     '/api/library/documents/{id}/source': {
       get: {
-        tags: ['Student Library'],
-        summary: 'Download one READY and VISIBLE library original (STUDENT)',
+        tags: ['Document Library'],
+        summary: 'Download one READY and VISIBLE library original',
         security: [{ bearerAuth: [] }],
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
         responses: {
           200: originalFileResponse('Original PDF/DOCX/TXT attachment; no Range/206.'),
-          403: response('STUDENT role required.', 'ErrorResponse'),
+          401: response('User Bearer token is missing or invalid.', 'ErrorResponse'),
+          403: response('Authenticated role is not permitted.', 'ErrorResponse'),
           404: response('Document is absent or no longer READY + VISIBLE.', 'ErrorResponse'),
           409: response('Eligible document exists but its original file is unavailable.', 'ErrorResponse')
         }
       }
     },
     '/api/documents/{id}': {
-      get: { tags: ['Documents'], summary: 'Document detail', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 200: response('Document detail.'), 404: response('Not found or not owned.', 'ErrorResponse') } },
-      patch: { tags: ['Documents'], summary: 'Update immutable document title only', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], requestBody: jsonBody({ $ref: '#/components/schemas/DocumentUpdateBody' }), responses: { 200: response('Updated.'), 409: response('Deleted document.', 'ErrorResponse') } },
-      delete: { tags: ['Documents'], summary: 'Soft-delete document through operation job', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 202: response('Delete operation accepted.'), 503: response('RAG operation failed.', 'ErrorResponse') } }
+      get: { tags: ['Documents'], summary: 'Document detail', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 200: response('Document detail.'), 403: response('TEACHER or ADMIN role required.', 'ErrorResponse'), 404: response('Not found or not owned.', 'ErrorResponse') } },
+      patch: { tags: ['Documents'], summary: 'Update immutable document title only', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], requestBody: jsonBody({ $ref: '#/components/schemas/DocumentUpdateBody' }), responses: { 200: response('Updated.'), 403: response('TEACHER or ADMIN role required.', 'ErrorResponse'), 404: response('Not found or not owned.', 'ErrorResponse'), 409: response('Deleted document.', 'ErrorResponse') } },
+      delete: { tags: ['Documents'], summary: 'Soft-delete document through operation job', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 202: response('Delete operation accepted.'), 403: response('TEACHER or ADMIN role required.', 'ErrorResponse'), 404: response('Not found or not owned.', 'ErrorResponse'), 503: response('RAG operation failed.', 'ErrorResponse') } }
     },
     '/api/documents/{id}/file': {
-      get: { tags: ['Documents'], summary: 'Download original file for owner/Admin', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 200: originalFileResponse('Original PDF/DOCX/TXT attachment stream; no derived preview and no Range/206.'), 404: response('Unavailable.', 'ErrorResponse') } }
+      get: { tags: ['Documents'], summary: 'Download original file for owner/Admin', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 200: originalFileResponse('Original PDF/DOCX/TXT attachment stream; no derived preview and no Range/206.'), 403: response('TEACHER or ADMIN role required.', 'ErrorResponse'), 404: response('Unavailable or not owned.', 'ErrorResponse') } }
     },
     '/api/documents/jobs/{jobId}': {
-      get: { tags: ['Document Processing'], summary: 'Processing job status for owner/Admin', security: [{ bearerAuth: [] }], parameters: [{ name: 'jobId', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 200: response('Processing job.', 'SuccessResponse', { success: true, message: 'OK', data: { id: 34, documentId: 12, jobType: 'INGEST', status: 'SUCCEEDED', currentStage: 'COMPLETED', attemptCount: 1, totalChunks: 8 } }), 404: response('Not found.', 'ErrorResponse') } }
+      get: { tags: ['Document Processing'], summary: 'Processing job status for owner/Admin', security: [{ bearerAuth: [] }], parameters: [{ name: 'jobId', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 200: response('Processing job.', 'SuccessResponse', { success: true, message: 'OK', data: { id: 34, documentId: 12, jobType: 'INGEST', status: 'SUCCEEDED', currentStage: 'COMPLETED', attemptCount: 1, totalChunks: 8 } }), 403: response('TEACHER or ADMIN role required.', 'ErrorResponse'), 404: response('Not found or not owned.', 'ErrorResponse') } }
     },
     '/api/documents/{id}/hide': {
-      post: { tags: ['Documents'], summary: 'Disable retrieval without deleting vectors', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 202: response('Hide operation accepted.'), 409: response('Invalid transition.', 'ErrorResponse') } }
+      post: { tags: ['Documents'], summary: 'Disable retrieval without deleting vectors', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 202: response('Hide operation accepted.'), 403: response('TEACHER or ADMIN role required.', 'ErrorResponse'), 404: response('Not found or not owned.', 'ErrorResponse'), 409: response('Invalid transition.', 'ErrorResponse') } }
     },
     '/api/documents/{id}/unhide': {
-      post: { tags: ['Documents'], summary: 'Enable retrieval for READY document', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 202: response('Unhide operation accepted.'), 409: response('Invalid transition.', 'ErrorResponse') } }
+      post: { tags: ['Documents'], summary: 'Enable retrieval for READY document', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 202: response('Unhide operation accepted.'), 403: response('TEACHER or ADMIN role required.', 'ErrorResponse'), 404: response('Not found or not owned.', 'ErrorResponse'), 409: response('Invalid transition.', 'ErrorResponse') } }
     },
     '/api/internal/rag/processing-callback': {
       post: { tags: ['Internal RAG'], summary: 'Complete-manifest processing callback', security: [{ internalBearer: [] }], requestBody: jsonBody({ $ref: '#/components/schemas/ProcessingCallbackBody' }), responses: { 200: response('ACK, duplicate or stale ignored.'), 400: response('Invalid callback.', 'ErrorResponse'), 401: response('Invalid internal token.', 'ErrorResponse') } }
@@ -598,11 +602,11 @@ const operationDescriptions = {
   'GET /api/admin/users': 'Actor: ADMIN. Đọc danh sách user có pagination/filter; không dành cho TEACHER/STUDENT.',
   'GET /api/admin/users/{id}': 'Actor: ADMIN. Đọc account/profile detail của user theo id; không trả password/token hash.',
   'PUT /api/admin/users/{id}/status': 'Actor: ADMIN. Thực hiện approve/reject/reopen/lock/unlock theo transition hợp lệ; lock tăng auth_version.',
-  'GET /api/documents': 'Actor: TEACHER hoặc ADMIN. TEACHER chỉ thấy document mình upload, ADMIN thấy toàn bộ; mặc định không list DELETED. STUDENT dùng namespace /api/library riêng.',
+  'GET /api/documents': 'Actor: TEACHER hoặc ADMIN. TEACHER chỉ thấy document mình upload, ADMIN thấy toàn bộ; mặc định không list DELETED. STUDENT bị từ chối management API; cả ba role dùng /api/library để đọc public catalog.',
   'POST /api/documents': 'Actor: TEACHER hoặc ADMIN. Validate và lưu PDF/DOCX/TXT (DOCX phải là bounded OOXML archive), tạo document + INGEST job rồi dispatch Python. HTTP 202 chỉ là accepted; tiếp theo poll GET /api/documents/jobs/{jobId} đến SUCCEEDED và kiểm tra document READY.',
-  'GET /api/library/documents': 'Actor: STUDENT. Danh sách read-only luôn bị server khóa vào document READY + VISIBLE; client chỉ điều khiển offset/limit và optional title search, không thể filter owner, processing, visibility, deletion hoặc job state.',
-  'GET /api/library/documents/{id}': 'Actor: STUDENT. Trả DTO allowlist của document READY + VISIBLE; trạng thái khác hoặc id không tồn tại cùng trả 404 để không lộ lifecycle nội bộ.',
-  'GET /api/library/documents/{id}/source': 'Actor: STUDENT. Stream original của document vẫn READY + VISIBLE dưới dạng attachment. Record không đủ điều kiện trả 404; record hợp lệ nhưng original bị thiếu trả 409 ORIGINAL_SOURCE_UNAVAILABLE.',
+  'GET /api/library/documents': 'Actor: STUDENT, TEACHER hoặc ADMIN. Ba role nhận cùng public DTO; danh sách luôn bị server khóa vào document READY + VISIBLE, chưa deleted. Client chỉ điều khiển offset/limit và optional title search, không thể filter owner, processing, visibility, deletion hoặc job state.',
+  'GET /api/library/documents/{id}': 'Actor: STUDENT, TEACHER hoặc ADMIN. Trả cùng DTO allowlist của document READY + VISIBLE; trạng thái khác hoặc id không tồn tại cùng trả 404 để không lộ lifecycle nội bộ.',
+  'GET /api/library/documents/{id}/source': 'Actor: STUDENT, TEACHER hoặc ADMIN. Stream original của document vẫn READY + VISIBLE dưới dạng attachment. Record không đủ điều kiện trả 404; record hợp lệ nhưng original bị thiếu trả 409 ORIGINAL_SOURCE_UNAVAILABLE.',
   'GET /api/documents/{id}': 'Actor: document owner TEACHER hoặc ADMIN. Đọc metadata và latest job; storage_key không được public.',
   'PATCH /api/documents/{id}': 'Actor: document owner TEACHER hoặc ADMIN. Chỉ đổi title; file gốc immutable và muốn thay nội dung phải upload document mới.',
   'DELETE /api/documents/{id}': 'Actor: document owner TEACHER hoặc ADMIN. Tạo async DELETE_VECTORS job rồi soft-delete business document; poll job status. Chat/citation snapshot không bị xóa.',

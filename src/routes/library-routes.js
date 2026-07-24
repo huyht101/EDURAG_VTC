@@ -7,7 +7,7 @@ const validateRequest = require('../middlewares/validate-middleware');
 const { validateLibraryQuery } = require('../validators/library');
 const ROLES = require('../constants/roles');
 
-router.use(authMiddleware, roleMiddleware([ROLES.STUDENT]));
+router.use(authMiddleware, roleMiddleware([ROLES.STUDENT, ROLES.TEACHER, ROLES.ADMIN]));
 router.get('/', validateRequest(validateLibraryQuery, 'query'), controller.list);
 router.get('/:id/source', controller.streamSource);
 router.get('/:id', controller.detail);

@@ -15,7 +15,6 @@ const {
   RELEASE_SCHEMA_VERSION,
   assertPublishableDocuments,
   buildReleaseManifest,
-  credentialState,
   loadBundleDocuments,
   loadCloudConfig,
   manifestObjectKey,
@@ -1093,46 +1092,24 @@ function servicesRunning() {
 }
 
 async function inspectCorpus(options = {}) {
-  let config = null;
-  let configState = 'AVAILABLE';
-  try { config = options.config || loadCloudConfig(options); } catch (error) {
-    configState = error.code === 'GCS_CONFIG_MISSING' ? 'MISSING' : 'INVALID';
-  }
-  const pointer = await readPointer(options);
-  const credential = config ? credentialState(config.credentialsFile) : 'NOT_CONFIGURED';
-  let remote = pointer ? 'NOT_CHECKED' : 'NO_POINTER';
-  let release = null;
-  if (pointer && config && credential === 'AVAILABLE') {
-    let downloaded = null;
-    try {
-      downloaded = await downloadAndVerifyRelease({ ...options, config, pointer });
-      remote = 'VERIFIED';
-      release = releaseSummary(downloaded.manifest, pointer);
-    } catch (error) {
-      remote = error.code || 'UNAVAILABLE';
-    } finally {
-      if (downloaded?.ownsTemporary) {
-        await fsp.rm(downloaded.temporary, { recursive: true, force: true });
-      }
-    }
-  }
-  const running = servicesRunning();
+  const pointer = await (options.readPointer || readPointer)(options);
+  const running = (options.servicesRunning || servicesRunning)();
   let local = 'NOT_RUNNING';
   if (running.has('db') && running.has('qdrant')) {
-    const state = await inspectLocalState(null);
+    const state = await (options.inspectLocalState || inspectLocalState)(null);
     local = state.state;
   }
   const result = {
     status: 'CORPUS_INSPECT_OK',
+    mutation: false,
+    mode: 'LOCAL_ONLY',
     releaseId: pointer?.releaseId || null,
     pointer: pointer ? 'PRESENT' : 'MISSING',
     legacyRepositoryBundle: await fsp.access(path.join(LEGACY_BUNDLE_DIRECTORY, 'manifest.json'))
       .then(() => 'PRESENT').catch(() => 'ABSENT'),
-    config: configState,
-    credential,
-    remote,
-    local,
-    release
+    credential: 'NOT_READ',
+    remote: pointer ? 'NOT_CHECKED_LOCAL_ONLY' : 'NO_POINTER',
+    local
   };
   console.log(JSON.stringify(result));
   return result;

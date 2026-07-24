@@ -23,7 +23,7 @@ NodeJS/Python runtime không đọc GCS; chỉ host-side corpus tooling dùng cr
 
 Artifacts dùng create-only precondition và được download-back verify. `manifest.json` được upload cuối. Toàn bộ package được verify trước khi [`corpus-release.json`](../../bootstrap/corpus-release.json) đổi pointer. Retry cùng release chỉ skip object có metadata/content khớp; collision khác checksum/size phải fail, không overwrite.
 
-Release identity v2 băm canonical scoped MySQL data (gồm chat/messages/citation snapshots/usage, loại `auth_tokens`), nội dung Qdrant gồm vector + payload và checksum/size của mọi original. Identity không dùng export timestamp, temp path, dump order hoặc DDL `AUTO_INCREMENT`; cùng content cho cùng ID, thay đổi bất kỳ scoped store nào cho ID khác. Release v1 cũ vẫn được verify theo manifest cũ để backward compatibility.
+Release identity `content-v2` băm scoped MySQL business data (gồm chat/messages/citation snapshots/usage, loại `auth_tokens`), nội dung Qdrant gồm vector + payload và checksum/size của mọi original. Identity không dùng manifest/export timestamp, temp/export path, snapshot transport name hoặc DDL `AUTO_INCREMENT`. Document/vector IDs chỉ tham gia khi chúng là mapping content cần thiết để nối MySQL–Qdrant; process/container/connection ID không tham gia. Thay đổi bất kỳ scoped content store nào tạo ID khác. Release v1 cũ vẫn được verify theo manifest cũ để backward compatibility.
 
 Các guard luôn được giữ:
 
@@ -35,7 +35,16 @@ Các guard luôn được giữ:
 - auth-token rows bị loại khỏi dump;
 - restore không ghi đè non-empty/ambiguous local stores.
 
-Release hiện tại là `v1-be5f3fc5669b25984d2333ca`: schema 1.0.0, MySQL 8.4, Qdrant 1.18.2, collection `education_docs`, embedding `gemini-embedding-001` dimension 768; 1 document, 1 job, 2 chunks, 2 citations, 2 points và 1 original.
+`bootstrap/corpus-release.json` hiện chỉ là selected-release transport pointer. Repository không có approved-document registry và task hiện tại không có approved source bundle, vì vậy pointer không được gọi là canonical/approved evidence. Trạng thái canonical `content-v2` release và live restore/query/citation hiện là **BLOCKED BY DATA APPROVAL**.
+
+## Mức kiểm chứng
+
+| Mức | Bằng chứng được phép kết luận |
+|---|---|
+| `npm run test:corpus` | Unit/local simulation bằng fake object store và fixture tạm; kiểm tra validation, deterministic identity, rollback và zero external mutation. Không chứng minh live lifecycle. |
+| `npm run test:corpus:partial` | Failure/isolation test trên project `edurag_corpus_partial_*` mới, đã xác nhận không có resource cũ; chỉ test local MySQL/Qdrant và tự cleanup. |
+| `npm run test:corpus:live` | Live restore/query/citation; bị chặn trước mọi preflight/provider call nếu thiếu explicit approved-bundle confirmation, approved release ID/document/query. |
+| Canonical release | Chỉ được tạo/regenerate từ source đã được owner phê duyệt; unit fixture, local document hoặc pointer có sẵn không phải approval. |
 
 ## Bootstrap modes
 
@@ -59,7 +68,7 @@ npm run corpus:publish -- --confirm-reviewed
 npm run corpus:verify
 ```
 
-`--dry-run` yêu cầu MySQL/Qdrant hiện đang chạy và chỉ dùng read-only dump/scroll/stat. Nó không start/stop writer, không tạo/xóa Qdrant snapshot, không tạo staging artifact, không đọc credential, không gọi GCS và không đổi pointer hay persistent state. Plan gồm document ID, title/filename, processing/visibility, checksum, size và provisional release ID; final ID chỉ chốt sau frozen export.
+`npm run corpus:inspect` là local-only: chỉ đọc pointer trong repository và trạng thái local nếu service đang chạy; không đọc credential, không gọi GCS/provider/writer và không verify remote release. `--dry-run` yêu cầu MySQL/Qdrant hiện đang chạy và chỉ dùng read-only dump/scroll/stat. Nó không start/stop writer, không tạo/xóa Qdrant snapshot, không tạo staging artifact, không đọc credential, không gọi GCS và không đổi pointer hay persistent state. Plan gồm document ID, title/filename, processing/visibility, checksum, size và provisional release ID; final ID chỉ chốt sau frozen export.
 
 `--confirm-reviewed` là xác nhận rõ ràng của operator rằng đã review PII/personal data, credential/secret, quyền chia sẻ và project scope. Đây không phải automated PII scanner. Tool vẫn chạy heuristic secret/path scan và mọi integrity guard nêu trên. Không còn tracked-fixture hoặc approval registry theo `documentId + checksum`.
 

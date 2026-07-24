@@ -4,7 +4,7 @@ const assert = require('assert/strict');
 const spec = require('../src/configs/swagger');
 
 const expectedTags = [
-  'Authentication', 'Profile', 'Admin - Users', 'Documents', 'Student Library', 'Document Processing',
+  'Authentication', 'Profile', 'Admin - Users', 'Documents', 'Document Library', 'Document Processing',
   'Chat Sessions', 'Chat Messages', 'Citations', 'Admin Dashboard', 'Internal RAG'
 ];
 const actualTags = spec.tags.map((tag) => tag.name);
@@ -99,8 +99,9 @@ for (const path of [
 assert.match(spec.paths['/api/citations/{id}'].get.description, /owner của chat session/);
 
 const libraryList = spec.paths['/api/library/documents'].get;
-assert.equal(libraryList.tags[0], 'Student Library');
+assert.equal(libraryList.tags[0], 'Document Library');
 assert.match(libraryList.description, /READY \+ VISIBLE/);
+assert.match(libraryList.description, /STUDENT, TEACHER (?:hoặc|và) ADMIN/);
 assert.deepEqual(
   libraryList.parameters.map((parameter) => parameter.name),
   ['offset', 'limit', 'search']
@@ -113,7 +114,27 @@ assert.deepEqual(
 assert(spec.paths['/api/library/documents/{id}'].get.responses[404]);
 assert(spec.paths['/api/library/documents/{id}/source'].get.responses[404]);
 assert(spec.paths['/api/library/documents/{id}/source'].get.responses[409]);
-assert.match(spec.paths['/api/documents'].get.description, /STUDENT dùng namespace/);
+for (const path of [
+  '/api/library/documents',
+  '/api/library/documents/{id}',
+  '/api/library/documents/{id}/source'
+]) {
+  assert(spec.paths[path].get.responses[401], `${path} must document unauthenticated access.`);
+}
+assert.match(spec.paths['/api/documents'].get.description, /STUDENT bị từ chối/);
+for (const [method, path] of [
+  ['get', '/api/documents'],
+  ['post', '/api/documents'],
+  ['get', '/api/documents/{id}'],
+  ['patch', '/api/documents/{id}'],
+  ['delete', '/api/documents/{id}'],
+  ['get', '/api/documents/{id}/file'],
+  ['get', '/api/documents/jobs/{jobId}'],
+  ['post', '/api/documents/{id}/hide'],
+  ['post', '/api/documents/{id}/unhide']
+]) {
+  assert(spec.paths[path][method].responses[403], `${method.toUpperCase()} ${path} must document STUDENT denial.`);
+}
 
 const callback = spec.paths['/api/internal/rag/processing-callback'].post;
 assert.deepEqual(callback.security, [{ internalBearer: [] }]);

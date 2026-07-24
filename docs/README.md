@@ -6,7 +6,7 @@ Tài liệu hiện hành của NodeJS/Core. Khi có khác biệt, ưu tiên runt
 |---|---|
 | Chạy nhanh | [Root README](../README.md) |
 | Chạy mock/Node local | [Local development](setup/local-development.md) |
-| Chạy full Docker, cloud restore và Swagger | [Remote Docker RAG](setup/remote-rag-e2e.md) |
+| Chạy full Docker, optional approved cloud restore và Swagger | [Remote Docker RAG](setup/remote-rag-e2e.md) |
 | Hiểu system ownership | [System overview](architecture/system-overview.md) |
 | Hiểu cloud corpus release | [Corpus portability](architecture/corpus-portability.md) |
 | Tích hợp Web/Mobile | [Frontend integration contract](api/frontend-integration.md) |
@@ -25,5 +25,5 @@ Nguồn chi tiết duy nhất:
 - Public endpoint/request/response/error: `/api-docs` và `/api-docs.json`.
 - Database constraints/status/indexes: [`src/database/schema.sql`](../src/database/schema.sql).
 - Internal JSON boundary: [contract v0.1](api/internal-rag-contract.md).
-- Default cloud release: [`bootstrap/corpus-release.json`](../bootstrap/corpus-release.json).
+- Selected-release pointer (không phải approval evidence): [`bootstrap/corpus-release.json`](../bootstrap/corpus-release.json).
 - Credential placement: [`secrets/README.md`](../secrets/README.md).

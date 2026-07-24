@@ -1,7 +1,7 @@
 function validateLibraryQuery(query) {
   const allowed = ['offset', 'limit', 'search'];
   if (Object.keys(query).some((key) => !allowed.includes(key))) {
-    return { error: 'Student Library không hỗ trợ filter quản trị.' };
+    return { error: 'Document Library không hỗ trợ filter quản trị.' };
   }
   for (const field of ['offset', 'limit']) {
     if (query[field] !== undefined && !/^\d+$/.test(String(query[field]))) {

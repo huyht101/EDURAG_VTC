@@ -142,15 +142,15 @@ Node không convert DOCX/TXT sang PDF/HTML và không lưu generated preview. Fi
 
 | File/source | Endpoint | Response | Auth và state |
 |---|---|---|---|
-| Student Library metadata | `GET /api/library/documents`, `GET /api/library/documents/{id}` | JSON allowlist; list có offset/limit và optional title search | User JWT; chỉ STUDENT; server cố định `READY + VISIBLE`. |
-| Student Library original | `GET /api/library/documents/{id}/source` | Binary attachment, `Content-Length`, `Content-Disposition` | Chỉ STUDENT; `404` nếu không còn `READY + VISIBLE`, `409` nếu record hợp lệ nhưng original thiếu. |
+| Document Library metadata | `GET /api/library/documents`, `GET /api/library/documents/{id}` | JSON allowlist; list có offset/limit và optional title search | User JWT; STUDENT/TEACHER/ADMIN nhận cùng DTO; server cố định `READY + VISIBLE`. |
+| Document Library original | `GET /api/library/documents/{id}/source` | Binary attachment, `Content-Length`, `Content-Disposition` | STUDENT/TEACHER/ADMIN; `404` nếu không còn `READY + VISIBLE`, `409` nếu record hợp lệ nhưng original thiếu. |
 | PDF/DOCX/TXT original của document | `GET /api/documents/{id}/file` | `200`, MIME suy ra từ filename, `Content-Length`, `Content-Disposition: attachment` | User JWT; TEACHER uploader hoặc ADMIN. HIDDEN vẫn mở được; DELETED trả `404`. |
 | Citation snapshot | `GET /api/citations/{id}/source` hoặc `GET /api/citations/{id}` | JSON gồm snapshot và `originalAvailable` | User JWT và owner của chat session; snapshot vẫn tồn tại sau hide/delete. |
 | Original qua citation | `GET /api/citations/{id}/file` | Binary attachment như original | Session owner trước, sau đó current source authorization. Student thường nhận `409 ORIGINAL_SOURCE_UNAVAILABLE` khi source hidden/deleted/missing; uploader/Admin chỉ được hưởng quyền này trong session của chính họ. |
 
 Upload document dùng Multer memory storage và cùng giới hạn `FILE_MAX_SIZE_BYTES` cho PDF/DOCX/TXT; default là `20 MiB`. Sai định dạng/signature trả `400`; quá giới hạn trả `413 FILE_TOO_LARGE`.
 
-Student Library không dùng management DTO. Object public gồm `id`, `title`, `fileType`, `fileSize`, `pageCount` (hiện `null` vì Node chưa duy trì page count authoritative), `createdAt` và `originalAvailable`. Không dựa vào query client để quyết định owner, processing, visibility, deletion hoặc job state.
+Document Library không dùng management DTO. Object public giống nhau cho STUDENT/TEACHER/ADMIN, gồm `id`, `title`, `fileType`, `fileSize`, `pageCount` (hiện `null` vì Node chưa duy trì page count authoritative), `createdAt` và `originalAvailable`. Teacher/Admin có thể đọc public document của uploader khác qua Library nhưng management vẫn theo ownership. Không dựa vào query client để quyết định owner, processing, visibility, deletion hoặc job state.
 
 Download dùng filesystem stream và có `Content-Length`, nhưng chưa implement byte `Range`, `206`, `Accept-Ranges` hoặc cache policy riêng. FE nên hiển thị loading/progress theo `Content-Length`, không giả định seek server-side. PDF viewer có thể fetch blob rồi render phía client; DOCX/TXT cần client-side renderer/download hoặc hiển thị `sourceText`. Trả DOCX gốc không đồng nghĩa server có inline DOCX viewer.
 

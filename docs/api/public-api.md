@@ -25,7 +25,7 @@ Các endpoint register/login/OTP/forgot/reset có per-process in-memory rate lim
 | Auth/Profile | Own account | Own account | Own account + OTP login |
 | Admin users | Không | Không | List/detail/status workflow |
 | Document management | Không | Document do mình upload | Mọi document |
-| Student Library | Read-only `READY + VISIBLE` | Không | Không |
+| Document Library | Read-only `READY + VISIBLE` | Read-only `READY + VISIBLE` | Read-only `READY + VISIBLE` |
 | Chat | Session của mình | Session của mình | Session của mình |
 | Citation/source | Citation thuộc session của mình | Citation thuộc session của mình | Citation thuộc session của mình |
 | Dashboard | Không | Không | Basic `LLM_CALLS_ONLY` summary |
@@ -44,9 +44,9 @@ Student đăng ký thành `ACTIVE`; Teacher thành `PENDING` và cần Admin rev
 
 Client poll `GET /api/documents/jobs/{jobId}`. Chỉ khi job `SUCCEEDED` và document `READY + VISIBLE` thì document mới thuộc retrieval corpus. Hide tắt retrieval nhưng giữ vectors; delete soft-delete và giữ chat/citation history. Original file không immutable-update: thay nội dung bằng upload document mới.
 
-### Student Document Library
+### Document Library
 
-Student dùng namespace read-only riêng: `GET /api/library/documents`, `GET /api/library/documents/{id}` và `GET /api/library/documents/{id}/source`. Server luôn khóa scope vào document `READY + VISIBLE`; Teacher/Admin không được cấp namespace này và Student vẫn bị cấm toàn bộ `/api/documents`. DTO library không chứa owner, storage key, filename lưu trữ, checksum, deletion hoặc processing/job metadata. Original hợp lệ được stream dạng attachment; record đủ điều kiện nhưng thiếu file trả `409 ORIGINAL_SOURCE_UNAVAILABLE`.
+Student, Teacher và Admin dùng cùng namespace read-only: `GET /api/library/documents`, `GET /api/library/documents/{id}` và `GET /api/library/documents/{id}/source`. Ba role nhận cùng public DTO và có thể đọc tài liệu đủ điều kiện của người khác; server luôn khóa scope vào document `READY + VISIBLE`, chưa deleted. Student vẫn bị cấm toàn bộ `/api/documents`; quyền management của Teacher tiếp tục bị khóa theo `uploaded_by`, còn Admin quản lý toàn bộ. DTO library không chứa owner, storage key, filename lưu trữ, checksum, deletion hoặc processing/job metadata. Original hợp lệ được stream dạng attachment; record đủ điều kiện nhưng thiếu file trả `409 ORIGINAL_SOURCE_UNAVAILABLE`.
 
 ### Chat
 
@@ -65,7 +65,7 @@ Swagger simple example không cần `clientRequestId`; frontend chỉ nên giữ
 
 ### Citation và original file
 
-Citation là immutable snapshot từ structured source, không phải parsing ký hiệu `[1]`. `GET /api/citations/{id}/source` trả snapshot và `originalAvailable`; endpoint `/file` stream file vật lý khi còn tồn tại và được phép. Repository không commit original binary; canonical private cloud release hiện có một reviewed original có thể materialize vào local upload volume. Khi không có credential/file restore, citation snapshot vẫn dùng được và file endpoint có thể trả unavailable.
+Citation là immutable snapshot từ structured source, không phải parsing ký hiệu `[1]`. `GET /api/citations/{id}/source` trả snapshot và `originalAvailable`; endpoint `/file` stream file vật lý khi còn tồn tại và được phép. Repository không commit original binary. Pointer trong `bootstrap/` chỉ chọn release transport và không tự chứng minh dữ liệu đã được phê duyệt; khi chưa có approved corpus bundle, live restore/query/citation phải được báo `BLOCKED` hoặc `NOT RUN`. Khi không có file restore, citation snapshot vẫn dùng được và file endpoint có thể trả unavailable.
 
 Mọi citation endpoint trước hết yêu cầu owner của chat session chứa citation; ADMIN không bypass ownership này. Sau đó file stream còn áp dụng current source authorization. Truy cập citation ngoài session của mình trả `404` để hạn chế enumeration.
 
