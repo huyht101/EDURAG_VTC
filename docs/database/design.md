@@ -2,7 +2,7 @@
 
 ## Mục tiêu và ownership
 
-MySQL là nguồn chuẩn cho identity, document metadata/job/chunk source, chat, citation snapshot và LLM usage. NodeJS là thành phần duy nhất ghi MySQL. File storage giữ file gốc. Python/LlamaIndex ghi Qdrant và callback dữ liệu có cấu trúc về NodeJS; NodeJS không truy cập Qdrant.
+MySQL là nguồn chuẩn cho identity, document metadata/page count/preview job/chunk source, chat, citation snapshot và LLM usage. NodeJS là thành phần duy nhất ghi MySQL. File storage giữ original và generated DOCX PDF preview; public API chỉ trả authenticated relative endpoints, không trả storage key. Python/LlamaIndex ghi Qdrant và callback dữ liệu có cấu trúc về NodeJS; NodeJS không truy cập Qdrant.
 
 ## 12 bảng
 
@@ -27,7 +27,7 @@ User/profile token FK dùng CASCADE khi hard-delete user, nhưng MVP không hard
 - Hide/unhide: `SET_RETRIEVAL`; chỉ đổi MySQL visibility sau RAG ACK.
 - Delete: `DELETE_VECTORS`, rồi soft-delete `DELETED/deleted_at`; giữ file và MySQL history.
 
-Callback mang `jobId + attemptCount`. Duplicate terminal callback idempotent; attempt cũ không mutate. Không có distributed transaction MySQL–Qdrant hoặc durable retry scheduler.
+Callback mang `jobId + attemptCount`. ACK machine-readable chỉ cho activate current accepted attempt hoặc exact manifest replay; stale/conflict không mutate hoặc activate. Không có distributed transaction MySQL–Qdrant; DOCX preview có DB-backed worker riêng nhưng Python ingest durable recovery vẫn là handoff mở.
 
 ## Chunk và Qdrant mapping
 

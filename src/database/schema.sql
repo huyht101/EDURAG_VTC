@@ -13,6 +13,12 @@ CREATE DATABASE IF NOT EXISTS `edurag`
 
 USE `edurag`;
 
+CREATE TABLE IF NOT EXISTS `schema_migrations` (
+  `name` VARCHAR(255) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  `applied_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  CONSTRAINT `pk_schema_migrations` PRIMARY KEY (`name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Append-only NodeJS/Core schema migration ledger.';
+
 CREATE TABLE IF NOT EXISTS `roles` (
   `id` TINYINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `code` VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
@@ -98,6 +104,8 @@ CREATE TABLE IF NOT EXISTS `documents` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `uploaded_by` BIGINT UNSIGNED NOT NULL,
   `title` VARCHAR(255) NOT NULL,
+  `description` VARCHAR(2000) NULL DEFAULT NULL,
+  `author` VARCHAR(255) NULL DEFAULT NULL,
   `original_filename` VARCHAR(255) NOT NULL,
   `storage_type` VARCHAR(20) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'LOCAL',
   `storage_key` VARCHAR(512) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
@@ -105,6 +113,10 @@ CREATE TABLE IF NOT EXISTS `documents` (
   `mime_type` VARCHAR(127) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL,
   `file_size_bytes` BIGINT UNSIGNED NOT NULL,
   `checksum_sha256` CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  `page_count` INT UNSIGNED NULL DEFAULT NULL,
+  `preview_status` VARCHAR(20) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'PENDING',
+  `preview_storage_key` VARCHAR(512) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL DEFAULT NULL,
+  `preview_mime_type` VARCHAR(127) CHARACTER SET ascii COLLATE ascii_general_ci NULL DEFAULT NULL,
   `processing_status` VARCHAR(20) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'UPLOADED',
   `visibility_status` VARCHAR(20) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'VISIBLE',
   `processed_at` DATETIME(3) NULL DEFAULT NULL,
@@ -122,6 +134,8 @@ CREATE TABLE IF NOT EXISTS `documents` (
   CONSTRAINT `chk_documents_processing_status` CHECK (processing_status IN ('UPLOADED','PROCESSING','READY','FAILED','CANCELLED')),
   CONSTRAINT `chk_documents_visibility_status` CHECK (visibility_status IN ('VISIBLE','HIDDEN','DELETED')),
   CONSTRAINT `chk_documents_file_size` CHECK (file_size_bytes > 0),
+  CONSTRAINT `chk_documents_page_count` CHECK (page_count IS NULL OR page_count > 0),
+  CONSTRAINT `chk_documents_preview_status` CHECK (preview_status IN ('PENDING','READY','FAILED','NOT_APPLICABLE')),
   CONSTRAINT `chk_documents_ready_timestamp` CHECK (processing_status <> 'READY' OR processed_at IS NOT NULL),
   CONSTRAINT `chk_documents_deleted_timestamp` CHECK ((visibility_status = 'DELETED' AND deleted_at IS NOT NULL) OR (visibility_status <> 'DELETED' AND deleted_at IS NULL))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Metadata nghiệp vụ và vị trí file gốc; không lưu nội dung vector.';
@@ -152,7 +166,7 @@ CREATE TABLE IF NOT EXISTS `document_processing_jobs` (
   KEY `idx_processing_jobs_document_created` (`document_id`, `created_at`),
   KEY `idx_processing_jobs_status_created` (`status`, `created_at`),
   CONSTRAINT `fk_processing_jobs_document` FOREIGN KEY (`document_id`) REFERENCES `documents` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
-  CONSTRAINT `chk_processing_jobs_type` CHECK (job_type IN ('INGEST','REPROCESS','SET_RETRIEVAL','DELETE_VECTORS')),
+  CONSTRAINT `chk_processing_jobs_type` CHECK (job_type IN ('INGEST','REPROCESS','SET_RETRIEVAL','DELETE_VECTORS','GENERATE_PDF_PREVIEW')),
   CONSTRAINT `chk_processing_jobs_status` CHECK (status IN ('QUEUED','RUNNING','SUCCEEDED','FAILED','CANCELLED')),
   CONSTRAINT `chk_processing_jobs_attempts` CHECK (max_attempts >= 1 AND attempt_count <= max_attempts),
   CONSTRAINT `chk_processing_jobs_dimension` CHECK (embedding_dimension IS NULL OR embedding_dimension > 0)
@@ -276,6 +290,9 @@ CREATE TABLE IF NOT EXISTS `llm_usage_logs` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Một hàng cho mỗi LLM call; nhiều hàng có thể thuộc cùng assistant message/RAG request.';
 
 START TRANSACTION;
+
+INSERT IGNORE INTO `schema_migrations` (`name`)
+VALUES ('20260727_document_metadata_preview.sql');
 
 INSERT INTO `roles` (`id`, `code`, `name`, `description`) VALUES
   (1, 'STUDENT', 'Sinh viên', 'Hỏi đáp RAG và xem citation/source'),

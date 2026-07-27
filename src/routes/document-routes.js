@@ -15,6 +15,7 @@ router.post('/', documentUpload, documentController.upload);
 router.get('/', validateRequest(validateDocumentQuery, 'query'), documentController.list);
 router.get('/jobs/:jobId', documentController.jobDetail);
 router.get('/:id/file', documentController.streamFile);
+router.get('/:id/preview', documentController.streamPreview);
 router.post('/:id/hide', documentController.hide);
 router.post('/:id/unhide', documentController.unhide);
 router.get('/:id', documentController.detail);

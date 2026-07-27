@@ -69,9 +69,7 @@ def _make_chunk_id(doc_id: str, job_id: str, attempt_count: int, chunk_index: in
     - Khác attempt → khác ID → cleanup attempt cũ không ảnh hưởng attempt mới.
     """
     seed = f"{doc_id}::{job_id}::{attempt_count}::{chunk_index}"
-    digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()
-    # Lấy 32 ký tự hex đầu và format thành UUID v4-like
-    return str(uuid.UUID(digest[:32]))
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"edurag:{seed}"))
 
 
 def _make_attempt_key(doc_id: str, job_id: str, attempt_count: int) -> str:
@@ -98,50 +96,48 @@ async def _cleanup_attempt_points(
     """
     settings = get_settings()
     attempt_key = _make_attempt_key(doc_id, job_id, attempt_count)
-    try:
-        client = await get_qdrant_client()
-        result = client.delete(
-            collection_name=settings.QDRANT_COLLECTION_NAME,
-            points_selector=models.FilterSelector(
-                filter=models.Filter(
-                    must=[
-                        models.FieldCondition(
-                            key=_ATTEMPT_FIELD,
-                            match=models.MatchValue(value=attempt_key),
-                        )
-                    ]
-                )
-            ),
-        )
-        # Count deleted points
-        deleted = _count_attempt_points(client, settings.QDRANT_COLLECTION_NAME, attempt_key)
-        logger.info(
-            "[INGEST] Đã cleanup %d points của attempt_key=%s",
-            deleted, attempt_key,
-        )
-        return deleted
-    except Exception as e:
-        logger.warning("[INGEST] Không cleanup được attempt_key=%s: %s", attempt_key, str(e))
-        return 0
-
-
-def _count_attempt_points(client, collection_name: str, attempt_key: str) -> int:
-    """Đếm số points trong Qdrant có cùng attempt_key."""
-    try:
-        result = client.count(
-            collection_name=collection_name,
-            count_filter=models.Filter(
+    client = await get_qdrant_client()
+    before = _count_attempt_points(client, settings.QDRANT_COLLECTION_NAME, attempt_key)
+    client.delete(
+        collection_name=settings.QDRANT_COLLECTION_NAME,
+        points_selector=models.FilterSelector(
+            filter=models.Filter(
                 must=[
                     models.FieldCondition(
                         key=_ATTEMPT_FIELD,
                         match=models.MatchValue(value=attempt_key),
                     )
                 ]
-            ),
+            )
+        ),
+        wait=True,
+    )
+    remaining = _count_attempt_points(client, settings.QDRANT_COLLECTION_NAME, attempt_key)
+    if remaining:
+        raise RuntimeError(
+            f"Cleanup incomplete for attempt_key={attempt_key}: {remaining} points remain"
         )
-        return result.count
-    except Exception:
-        return 0
+    logger.info(
+        "[INGEST] Đã cleanup %d points của attempt_key=%s",
+        before, attempt_key,
+    )
+    return before
+
+
+def _count_attempt_points(client, collection_name: str, attempt_key: str) -> int:
+    """Đếm số points trong Qdrant có cùng attempt_key."""
+    result = client.count(
+        collection_name=collection_name,
+        count_filter=models.Filter(
+            must=[
+                models.FieldCondition(
+                    key=_ATTEMPT_FIELD,
+                    match=models.MatchValue(value=attempt_key),
+                )
+            ]
+        ),
+    )
+    return result.count
 
 
 async def _activate_attempt_points(
@@ -157,32 +153,40 @@ async def _activate_attempt_points(
     """
     settings = get_settings()
     attempt_key = _make_attempt_key(doc_id, job_id, attempt_count)
-    try:
-        client = await get_qdrant_client()
-        client.set_payload(
-            collection_name=settings.QDRANT_COLLECTION_NAME,
-            payload={"is_hidden": False},
-            points=models.Filter(
-                must=[
-                    models.FieldCondition(
-                        key=_ATTEMPT_FIELD,
-                        match=models.MatchValue(value=attempt_key),
-                    )
-                ]
-            ),
-        )
-        count = _count_attempt_points(client, settings.QDRANT_COLLECTION_NAME, attempt_key)
-        logger.info(
-            "[INGEST] Activated %d points sau ACK: doc_id=%s, attempt=%d",
-            count, doc_id, attempt_count,
-        )
-        return count
-    except Exception as e:
-        logger.error(
-            "[INGEST] Không activate được points: doc_id=%s, attempt=%d, lỗi=%s",
-            doc_id, attempt_count, str(e),
-        )
-        return 0
+    client = await get_qdrant_client()
+    client.set_payload(
+        collection_name=settings.QDRANT_COLLECTION_NAME,
+        payload={"is_hidden": False},
+        points=models.Filter(
+            must=[
+                models.FieldCondition(
+                    key=_ATTEMPT_FIELD,
+                    match=models.MatchValue(value=attempt_key),
+                )
+            ]
+        ),
+        wait=True,
+    )
+    count = _count_attempt_points(client, settings.QDRANT_COLLECTION_NAME, attempt_key)
+    logger.info(
+        "[INGEST] Activated %d points sau ACK: doc_id=%s, attempt=%d",
+        count, doc_id, attempt_count,
+    )
+    return count
+
+
+def _ack_allows_activation(ack: object, job_id: str, attempt_count: int) -> bool:
+    """Chỉ ACK đúng job/attempt và canActivate=true mới được mở retrieval."""
+    if not isinstance(ack, dict):
+        return False
+    outcome = ack.get("outcome")
+    return (
+        str(ack.get("jobId")) == str(job_id)
+        and ack.get("attemptCount") == attempt_count
+        and ack.get("canActivate") is True
+        and outcome in {"ACCEPTED", "IDEMPOTENT_REPLAY"}
+        and ack.get("status") == "SUCCEEDED"
+    )
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -350,7 +354,7 @@ async def ingest_document_background(request: IngestRequest) -> None:
         )
 
         # ── Bước 5: Callback SUCCEEDED → nhận ACK ─────────────────
-        ack_ok = await send_succeeded_ingest(
+        ack = await send_succeeded_ingest(
             callback_url=callback_url,
             job_id=job_id,
             attempt_count=attempt_count,
@@ -359,20 +363,45 @@ async def ingest_document_background(request: IngestRequest) -> None:
         )
 
         # ── Bước 6: Xử lý kết quả ACK ────────────────────────────
-        if ack_ok:
+        if _ack_allows_activation(ack, job_id, attempt_count):
             # Node.js đã nhận manifest → kích hoạt retrieval
-            activated = await _activate_attempt_points(doc_id, job_id, attempt_count)
+            try:
+                activated = await _activate_attempt_points(doc_id, job_id, attempt_count)
+                if activated != len(points):
+                    raise RuntimeError(
+                        f"Activation count mismatch: expected={len(points)}, actual={activated}"
+                    )
+            except Exception as activation_error:
+                await _cleanup_attempt_points(doc_id, job_id, attempt_count)
+                await send_failed(
+                    callback_url,
+                    job_id,
+                    attempt_count,
+                    "ACTIVATION_FAILED",
+                    str(activation_error),
+                    stage="activation",
+                )
+                return
             logger.info(
                 "[INGEST] ✓ Hoàn tất: doc_id=%s, attempt=%d, %d chunks activated",
                 doc_id, attempt_count, activated,
             )
         else:
-            # Callback thất bại → cleanup để tránh orphan enabled point
+            # ACK stale/rejected/malformed hoặc callback thất bại: không activate.
             logger.error(
-                "[INGEST] Callback SUCCEEDED thất bại — cleanup attempt: doc_id=%s, attempt=%d",
+                "[INGEST] ACK không cho activate — cleanup attempt: doc_id=%s, attempt=%d",
                 doc_id, attempt_count,
             )
             await _cleanup_attempt_points(doc_id, job_id, attempt_count)
+            if ack is None:
+                await send_failed(
+                    callback_url,
+                    job_id,
+                    attempt_count,
+                    "ACTIVATION_ACK_UNAVAILABLE",
+                    "Node activation ACK was unavailable or malformed.",
+                    stage="activation",
+                )
 
     except FileNotFoundError as e:
         logger.error("[INGEST] File không tồn tại: %s", str(e))

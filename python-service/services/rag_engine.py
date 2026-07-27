@@ -69,23 +69,23 @@ def _extract_usage_info(llm_response: Any, model_name: str) -> UsageInfo:
 
 def _make_usage_call(
     call_index: int,
-    operation: str,
+    operation_type: str,
     model_name: str,
     usage_info: UsageInfo,
     status: str = "SUCCEEDED",
-    error_message: str | None = None,
+    error_code: str | None = None,
 ) -> UsageCall:
     """Tạo UsageCall entry từ kết quả một LLM call."""
     return UsageCall(
         call_index=call_index,
-        operation=operation,
+        operation_type=operation_type,
         provider="google",
         model=model_name,
         prompt_tokens=usage_info.prompt_tokens,
         completion_tokens=usage_info.completion_tokens,
         total_tokens=usage_info.total_tokens,
         status=status,
-        error_message=error_message,
+        error_code=error_code,
     )
 
 
@@ -163,7 +163,7 @@ async def _classify_intent(
         empty_usage = UsageInfo(prompt_tokens=0, completion_tokens=0, total_tokens=0, model=model_name)
         usage_call = _make_usage_call(
             call_index, "QUERY_REWRITE", model_name, empty_usage,
-            status="FAILED", error_message=str(e),
+            status="FAILED", error_code="QUERY_REWRITE_FAILED",
         )
 
     return intent, usage_call
@@ -210,7 +210,7 @@ async def _handle_chit_chat(
         empty_usage = UsageInfo(prompt_tokens=0, completion_tokens=0, total_tokens=0, model=model_name)
         answer_usage_call = _make_usage_call(
             call_index, "ANSWER_GENERATION", model_name, empty_usage,
-            status="FAILED", error_message=str(e),
+            status="FAILED", error_code="ANSWER_GENERATION_FAILED",
         )
         raise
 
@@ -253,14 +253,14 @@ async def process_query(request: QueryRequest) -> QueryResponse:
 
     # ── Bước 1: Query Router ──────────────────────────────────────
     intent, router_usage_call = await _classify_intent(
-        request.question, call_index=0, model_name=model_name
+        request.question, call_index=1, model_name=model_name
     )
 
     # ── Bước 2: CHIT_CHAT ────────────────────────────────────────
     if intent.intent == "CHIT_CHAT":
         logger.info("[RAG] Intent = CHIT_CHAT")
         return await _handle_chit_chat(
-            request.question, history, call_index=1,
+            request.question, history, call_index=2,
             model_name=model_name, router_usage_call=router_usage_call,
         )
 
@@ -335,20 +335,24 @@ async def process_query(request: QueryRequest) -> QueryResponse:
         llm_response = await llm.acomplete(prompt)
         answer_text = llm_response.text.strip()
         usage_info = _extract_usage_info(llm_response, model_name)
-        answer_usage_call = _make_usage_call(1, "ANSWER_GENERATION", model_name, usage_info)
+        answer_usage_call = _make_usage_call(2, "ANSWER_GENERATION", model_name, usage_info)
         logger.info("[RAG] LLM answer tokens=%d", usage_info.total_tokens)
 
     except Exception as e:
         logger.error("[RAG] Lỗi gọi LLM: %s", str(e))
         empty_usage = UsageInfo(prompt_tokens=0, completion_tokens=0, total_tokens=0, model=model_name)
         answer_usage_call = _make_usage_call(
-            1, "ANSWER_GENERATION", model_name, empty_usage,
-            status="FAILED", error_message=str(e),
+            2, "ANSWER_GENERATION", model_name, empty_usage,
+            status="FAILED", error_code="ANSWER_GENERATION_FAILED",
         )
         raise
 
     # ── Bước 7: Trích xuất citations ─────────────────────────────
-    citations = _extract_citations(answer_text, filtered_results)
+    extracted = _extract_citations(answer_text, filtered_results, request.question)
+    if extracted is None:
+        citations = []
+    else:
+        answer_text, citations = extracted
     confidence = _evaluate_confidence(filtered_results)
 
     usage_calls = [router_usage_call, answer_usage_call]
@@ -477,23 +481,39 @@ def _build_rag_prompt(
 def _extract_citations(
     answer: str,
     results: list[Any],
-) -> list[Citation]:
-    """Trích xuất danh sách Citation từ câu trả lời của LLM."""
-    cited_indices: set[int] = set()
-    matches = re.findall(r"\[(\d+)\]", answer)
+    question: str = "",
+) -> tuple[str, list[Citation]] | None:
+    """
+    Ánh xạ marker về retrieval result và đánh lại marker liên tục.
 
-    for match in matches:
+    Marker không có nguồn hợp lệ làm toàn bộ citation set bị từ chối.
+    """
+    raw_matches = re.findall(r"\[(\d+)\]", answer)
+    if not raw_matches:
+        return None
+    referenced_indices: list[int] = []
+    seen: set[int] = set()
+    for match in raw_matches:
         idx = int(match)
-        if 1 <= idx <= len(results):
-            cited_indices.add(idx)
-
+        if not 1 <= idx <= len(results):
+            return None
+        if idx not in seen:
+            seen.add(idx)
+            referenced_indices.append(idx)
+    marker_map = {
+        original_idx: citation_idx
+        for citation_idx, original_idx in enumerate(referenced_indices, start=1)
+    }
+    normalized_answer = re.sub(
+        r"\[(\d+)\]",
+        lambda match: f"[{marker_map[int(match.group(1))]}]",
+        answer,
+    )
     citations = []
-    for idx in sorted(cited_indices):
+    for idx in referenced_indices:
         result = results[idx - 1]
         payload = result.payload
-
         page_number = payload.get("page_number")
-        # Bảo đảm page_number là int >= 1 hoặc None
         if page_number is not None:
             try:
                 page_number = int(page_number)
@@ -507,13 +527,88 @@ def _extract_citations(
                 vector_node_id=str(result.id),
                 doc_id=str(payload.get("doc_id", "unknown")),
                 page_number=page_number,
-                snippet=payload.get("text", "")[:200],
+                snippet=_select_relevant_snippet(
+                    text=payload.get("text", ""),
+                    question=question,
+                    answer=answer,
+                ),
                 chapter=payload.get("chapter") or None,
                 section=payload.get("section") or None,
             )
         )
+    return normalized_answer, citations
 
-    return citations
+
+def _select_relevant_snippet(
+    text: str,
+    question: str,
+    answer: str,
+    max_chars: int = 500,
+) -> str:
+    """Chọn đoạn nguồn liên quan nhất, không sinh hoặc diễn giải lại nội dung."""
+    text = text.strip()
+    if not text:
+        return ""
+    if len(text) <= 220:
+        return text
+    segments = [
+        segment.strip()
+        for segment in re.split(r"(?<=[.!?])\s+|\n+", text)
+        if segment.strip()
+    ]
+    if not segments:
+        return text[:max_chars].strip()
+    stop_words = {
+        "các", "cho", "của", "được", "hay", "khi", "là", "một", "này",
+        "những", "phần", "qua", "sau", "theo", "thì", "trong", "trên",
+        "vào", "và", "với", "tài", "liệu",
+    }
+
+    def keywords(value: str) -> set[str]:
+        return {
+            word
+            for word in re.findall(r"\w+", value.lower(), flags=re.UNICODE)
+            if len(word) > 2 and word not in stop_words and not word.isdigit()
+        }
+
+    question_words = keywords(question)
+    answer_words = keywords(re.sub(r"\[\d+\]", "", answer))
+
+    def score(segment: str) -> tuple[int, int]:
+        words = keywords(segment)
+        return 3 * len(words & question_words) + len(words & answer_words), -len(segment)
+
+    best_index = max(range(len(segments)), key=lambda index: score(segments[index]))
+    selected = segments[best_index]
+    if len(selected) > max_chars:
+        relevant_words = question_words | answer_words
+        positions = [
+            match.start()
+            for match in re.finditer(r"\w+", selected.lower(), flags=re.UNICODE)
+            if match.group(0) in relevant_words
+        ]
+        center = positions[0] if positions else 0
+        start = max(0, center - max_chars // 3)
+        end = min(len(selected), start + max_chars)
+        selected = selected[max(0, end - max_chars):end]
+    left = best_index - 1
+    right = best_index + 1
+    while len(selected) < 220 and (left >= 0 or right < len(segments)):
+        candidates = []
+        if left >= 0:
+            candidates.append(("left", segments[left]))
+        if right < len(segments):
+            candidates.append(("right", segments[right]))
+        side, candidate = max(candidates, key=lambda item: score(item[1]))
+        combined = f"{candidate}\n{selected}" if side == "left" else f"{selected}\n{candidate}"
+        if len(combined) > max_chars:
+            break
+        selected = combined
+        if side == "left":
+            left -= 1
+        else:
+            right += 1
+    return selected[:max_chars].strip()
 
 
 def _evaluate_confidence(results: list[Any]) -> str:

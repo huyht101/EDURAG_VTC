@@ -6,6 +6,8 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
+    "db:migrate": "node scripts/migrate.js",
+    "documents:backfill": "node scripts/backfill-document-previews.js",
     "check": "node scripts/check-syntax.js",
     "test:openapi": "node scripts/openapi-test.js",
     "test:docs": "node scripts/docs-link-test.js",
@@ -14,6 +16,7 @@
     "test:corpus:live": "node scripts/restored-corpus-live-smoke.js",
     "test:contract": "node scripts/rag-contract-test.js",
     "test:library": "node scripts/library-contract-test.js",
+    "test:documents": "node scripts/document-preview-test.js",
     "test:node-consolidation": "node scripts/node-consolidation-test.js",
     "test:part2": "node scripts/part2-smoke.js",
     "docker:mock:config": "docker compose config --quiet",
@@ -52,6 +55,7 @@
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.2.0",
     "mysql2": "^3.9.7",
+    "pdf-lib": "1.17.1",
     "swagger-jsdoc": "^6.3.0",
     "swagger-ui-express": "^5.0.1"
   },

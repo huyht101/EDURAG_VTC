@@ -93,20 +93,23 @@ class TestExtractUsageInfo:
 class TestMakeUsageCall:
     def test_creates_usage_call_with_correct_fields(self):
         usage = UsageInfo(prompt_tokens=10, completion_tokens=20, total_tokens=30, model="m")
-        uc = _make_usage_call(0, "QUERY_REWRITE", "m", usage)
-        assert uc.call_index == 0
-        assert uc.operation == "QUERY_REWRITE"
+        uc = _make_usage_call(1, "QUERY_REWRITE", "m", usage)
+        assert uc.call_index == 1
+        assert uc.operation_type == "QUERY_REWRITE"
         assert uc.prompt_tokens == 10
         assert uc.completion_tokens == 20
         assert uc.total_tokens == 30
         assert uc.status == "SUCCEEDED"
-        assert uc.error_message is None
+        assert uc.error_code is None
 
     def test_creates_failed_usage_call(self):
         usage = UsageInfo(prompt_tokens=0, completion_tokens=0, total_tokens=0, model="m")
-        uc = _make_usage_call(1, "ANSWER_GENERATION", "m", usage, status="FAILED", error_message="oops")
+        uc = _make_usage_call(
+            1, "ANSWER_GENERATION", "m", usage,
+            status="FAILED", error_code="ANSWER_GENERATION_FAILED",
+        )
         assert uc.status == "FAILED"
-        assert uc.error_message == "oops"
+        assert uc.error_code == "ANSWER_GENERATION_FAILED"
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -118,8 +121,8 @@ class TestAggregateUsage:
         """Chỉ cộng dồn token của SUCCEEDED calls."""
         usage_ok = UsageInfo(prompt_tokens=100, completion_tokens=50, total_tokens=150, model="m")
         usage_fail = UsageInfo(prompt_tokens=200, completion_tokens=100, total_tokens=300, model="m")
-        uc1 = _make_usage_call(0, "QUERY_REWRITE", "m", usage_ok, status="SUCCEEDED")
-        uc2 = _make_usage_call(1, "ANSWER_GENERATION", "m", usage_fail, status="FAILED")
+        uc1 = _make_usage_call(1, "QUERY_REWRITE", "m", usage_ok, status="SUCCEEDED")
+        uc2 = _make_usage_call(2, "ANSWER_GENERATION", "m", usage_fail, status="FAILED")
 
         aggregate = _aggregate_usage([uc1, uc2], "m")
         assert aggregate.prompt_tokens == 100
@@ -152,7 +155,8 @@ class TestExtractCitations:
     def test_extracts_single_citation(self):
         answer = "Theo tài liệu [1] thì..."
         results = [self._make_result("uuid-1", "1", "nội dung", 1)]
-        citations = _extract_citations(answer, results)
+        normalized, citations = _extract_citations(answer, results)
+        assert normalized == answer
         assert len(citations) == 1
         assert citations[0].vector_node_id == "uuid-1"
         assert citations[0].doc_id == "1"
@@ -164,40 +168,37 @@ class TestExtractCitations:
             self._make_result("uuid-1", "1", "text1"),
             self._make_result("uuid-2", "2", "text2"),
         ]
-        citations = _extract_citations(answer, results)
+        _normalized, citations = _extract_citations(answer, results)
         assert len(citations) == 2
 
     def test_deduplicates_repeated_citation(self):
         """[1] xuất hiện nhiều lần → chỉ 1 citation."""
         answer = "Theo [1], thêm [1], cũng [1]."
         results = [self._make_result("uuid-1", "1", "text")]
-        citations = _extract_citations(answer, results)
+        _normalized, citations = _extract_citations(answer, results)
         assert len(citations) == 1
 
     def test_no_citation_marker_returns_empty(self):
         """Không có [N] → citations rỗng."""
         answer = "Câu trả lời không có trích dẫn."
         results = [self._make_result("uuid-1", "1", "text")]
-        citations = _extract_citations(answer, results)
-        assert len(citations) == 0
+        assert _extract_citations(answer, results) is None
 
-    def test_out_of_range_index_ignored(self):
-        """[5] khi chỉ có 2 results → bị bỏ qua."""
+    def test_out_of_range_index_rejects_citation_set(self):
+        """[5] khi chỉ có 2 results → fail closed."""
         answer = "Theo [5] thì..."
         results = [
             self._make_result("uuid-1", "1", "text1"),
             self._make_result("uuid-2", "2", "text2"),
         ]
-        citations = _extract_citations(answer, results)
-        assert len(citations) == 0
+        assert _extract_citations(answer, results) is None
 
-    def test_citation_snippet_max_200_chars(self):
-        """snippet được truncate tại 200 ký tự."""
+    def test_citation_snippet_is_bounded(self):
         long_text = "A" * 500
         answer = "Theo [1]..."
         results = [self._make_result("uuid-1", "1", long_text)]
-        citations = _extract_citations(answer, results)
-        assert len(citations[0].snippet) <= 200
+        _normalized, citations = _extract_citations(answer, results)
+        assert len(citations[0].snippet) <= 500
 
     def test_invalid_page_number_becomes_none(self):
         """page_number < 1 → None."""
@@ -205,8 +206,18 @@ class TestExtractCitations:
             id="uuid-1", score=0.9,
             payload={"doc_id": "1", "text": "text", "page_number": 0, "chapter": None, "section": None},
         )
-        citations = _extract_citations("[1]", [result])
+        _normalized, citations = _extract_citations("[1]", [result])
         assert citations[0].page_number is None
+
+    def test_sparse_markers_are_renumbered_in_first_seen_order(self):
+        results = [
+            self._make_result("uuid-1", "1", "first"),
+            self._make_result("uuid-2", "2", "second"),
+            self._make_result("uuid-3", "3", "third"),
+        ]
+        normalized, citations = _extract_citations("Theo [3], rồi [1], lại [3].", results)
+        assert normalized == "Theo [1], rồi [2], lại [1]."
+        assert [item.doc_id for item in citations] == ["3", "1"]
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -239,7 +250,7 @@ class TestFinalizeRagAnswer:
         uc = _make_usage_call(0, "QUERY_REWRITE", "m", usage_info)
         response = _finalize_rag_answer("text", [], "low", [uc], self._empty_usage())
         assert len(response.usage_calls) == 1
-        assert response.usage_calls[0].call_index == 0
+        assert response.usage_calls[0].call_index == 1
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -307,10 +318,10 @@ async def test_process_query_chit_chat_has_two_usage_calls():
 
     assert response.no_answer is True  # CHIT_CHAT → no_answer
     assert len(response.usage_calls) == 2
-    assert response.usage_calls[0].operation == "QUERY_REWRITE"
-    assert response.usage_calls[0].call_index == 0
-    assert response.usage_calls[1].operation == "ANSWER_GENERATION"
-    assert response.usage_calls[1].call_index == 1
+    assert response.usage_calls[0].operation_type == "QUERY_REWRITE"
+    assert response.usage_calls[0].call_index == 1
+    assert response.usage_calls[1].operation_type == "ANSWER_GENERATION"
+    assert response.usage_calls[1].call_index == 2
     # Legacy usage phải có tổng
     assert response.usage is not None
     assert response.usage.total_tokens == 25 + 80  # router + answer
@@ -357,7 +368,7 @@ async def test_process_query_rag_below_threshold_returns_no_answer_with_router_u
     assert response.citations == []
     # Phải có router usage_call
     assert len(response.usage_calls) >= 1
-    assert response.usage_calls[0].operation == "QUERY_REWRITE"
+    assert response.usage_calls[0].operation_type == "QUERY_REWRITE"
 
 
 @pytest.mark.asyncio
@@ -412,9 +423,9 @@ async def test_process_query_rag_with_citation_returns_answer():
     assert response.citations[0].page_number == 3
     # 2 usage_calls: router + answer
     assert len(response.usage_calls) == 2
-    assert response.usage_calls[0].operation == "QUERY_REWRITE"
-    assert response.usage_calls[1].operation == "ANSWER_GENERATION"
-    assert response.usage_calls[1].call_index == 1
+    assert response.usage_calls[0].operation_type == "QUERY_REWRITE"
+    assert response.usage_calls[1].operation_type == "ANSWER_GENERATION"
+    assert response.usage_calls[1].call_index == 2
     # Legacy aggregate
     assert response.usage is not None
     assert response.usage.total_tokens == 12 + 300

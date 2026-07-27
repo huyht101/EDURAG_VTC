@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const path = require('path');
 const { TextDecoder } = require('util');
+const { PDFDocument } = require('pdf-lib');
 
 const localStorage = require('../storage/local-storage');
 const appError = require('../utils/app-error');
@@ -109,17 +110,36 @@ function validate(file) {
   };
 }
 
+async function countPdfPages(buffer) {
+  try {
+    const pdf = await PDFDocument.load(buffer, {
+      ignoreEncryption: false,
+      throwOnInvalidObject: true,
+      updateMetadata: false
+    });
+    const pageCount = pdf.getPageCount();
+    if (!Number.isSafeInteger(pageCount) || pageCount < 1) throw new Error('PDF has no pages');
+    return pageCount;
+  } catch (_error) {
+    throw appError(400, 'INVALID_PDF', 'PDF khÃ´ng thá»ƒ Ä‘á»c hoáº·c khÃ´ng cÃ³ trang há»£p lá»‡.');
+  }
+}
+
 async function persist(file) {
   const metadata = validate(file);
+  const pageCount = metadata.fileType === 'PDF' ? await countPdfPages(file.buffer) : null;
   const storageKey = await localStorage.save(file.buffer, metadata.extension);
-  return { ...metadata, storageType: 'LOCAL', storageKey };
+  return { ...metadata, pageCount, storageType: 'LOCAL', storageKey };
 }
 
 module.exports = {
   validDocxArchive,
   validate,
+  countPdfPages,
   persist,
   remove: localStorage.remove,
   open: localStorage.open,
-  exists: localStorage.exists
+  exists: localStorage.exists,
+  resolveStorageKey: localStorage.resolveStorageKey,
+  publish: localStorage.publish
 };

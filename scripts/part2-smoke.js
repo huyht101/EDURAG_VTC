@@ -8,10 +8,91 @@ const bcrypt = require('bcrypt');
 const crypto = require('crypto');
 const fs = require('fs/promises');
 const jwt = require('jsonwebtoken');
+const { PDFDocument } = require('pdf-lib');
 
 const DEMO_ADMIN_EMAIL = 'admin@example.com';
 const DEMO_ADMIN_PASSWORD = '123456';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function crc32(buffer) {
+  let crc = 0xffffffff;
+  for (const byte of buffer) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function storedZip(entries) {
+  const localParts = [];
+  const centralParts = [];
+  let offset = 0;
+  for (const [name, contents] of entries) {
+    const filename = Buffer.from(name, 'utf8');
+    const data = Buffer.from(contents, 'utf8');
+    const checksum = crc32(data);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt32LE(checksum, 14);
+    local.writeUInt32LE(data.length, 18);
+    local.writeUInt32LE(data.length, 22);
+    local.writeUInt16LE(filename.length, 26);
+    localParts.push(local, filename, data);
+
+    const central = Buffer.alloc(46);
+    central.writeUInt32LE(0x02014b50, 0);
+    central.writeUInt16LE(20, 4);
+    central.writeUInt16LE(20, 6);
+    central.writeUInt32LE(checksum, 16);
+    central.writeUInt32LE(data.length, 20);
+    central.writeUInt32LE(data.length, 24);
+    central.writeUInt16LE(filename.length, 28);
+    central.writeUInt32LE(offset, 42);
+    centralParts.push(central, filename);
+    offset += local.length + filename.length + data.length;
+  }
+  const centralSize = centralParts.reduce((total, part) => total + part.length, 0);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(entries.length, 8);
+  end.writeUInt16LE(entries.length, 10);
+  end.writeUInt32LE(centralSize, 12);
+  end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...localParts, ...centralParts, end]);
+}
+
+function minimalDocxBytes() {
+  return storedZip([
+    ['[Content_Types].xml',
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+      + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+      + '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+      + '<Default Extension="xml" ContentType="application/xml"/>'
+      + '<Override PartName="/word/document.xml" '
+      + 'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+      + '</Types>'],
+    ['_rels/.rels',
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+      + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+      + '<Relationship Id="rId1" '
+      + 'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
+      + 'Target="word/document.xml"/>'
+      + '</Relationships>'],
+    ['word/document.xml',
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+      + '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+      + '<w:body><w:p><w:r><w:t>EDURAG DOCX page one</w:t></w:r></w:p>'
+      + '<w:p><w:r><w:br w:type="page"/></w:r></w:p>'
+      + '<w:p><w:r><w:t>EDURAG DOCX page two</w:t></w:r></w:p>'
+      + '<w:sectPr><w:pgSz w:w="12240" w:h="15840"/>'
+      + '<w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/>'
+      + '</w:sectPr></w:body></w:document>']
+  ]);
+}
+
 const LIBRARY_SOURCE_FIXTURES = [
   {
     fileType: 'PDF',
@@ -57,6 +138,7 @@ const documentRepo = require('../src/repositories/document-repository');
 const documentService = require('../src/services/document-service');
 const documentFileService = require('../src/services/document-file-service');
 const authService = require('../src/services/auth-service');
+const { backfillDocument } = require('./backfill-document-previews');
 
 function accessToken(user) {
   return authService.signJwt(user);
@@ -120,7 +202,9 @@ async function cleanupSmokeSuffix(suffix) {
     const messageIds = messages.map((row) => row.id);
     const messageMarks = messageIds.map(() => '?').join(',');
     const [documents] = await connection.execute(
-      `SELECT id, storage_key FROM documents WHERE uploaded_by IN (${userMarks})`, userIds
+      `SELECT id, storage_key, preview_storage_key
+       FROM documents WHERE uploaded_by IN (${userMarks})`,
+      userIds
     );
     const documentIds = documents.map((row) => row.id);
     const documentMarks = documentIds.map(() => '?').join(',');
@@ -146,7 +230,7 @@ async function cleanupSmokeSuffix(suffix) {
       [emailMarker]
     );
     assert.equal(Number(remaining[0].total), 0, 'Smoke cleanup must remove every user sharing the test marker.');
-    return documents.map((row) => row.storage_key).filter(Boolean);
+    return documents.flatMap((row) => [row.storage_key, row.preview_storage_key]).filter(Boolean);
   });
   await Promise.all(storageKeys.map((storageKey) => documentFileService.remove(storageKey).catch(() => {})));
 }
@@ -170,6 +254,13 @@ async function listenOnSafePort(application) {
 }
 
 async function main() {
+  const conversionFailureDocxBytes = LIBRARY_SOURCE_FIXTURES[1].bytes;
+  const pdf = await PDFDocument.create();
+  pdf.addPage([300, 400]);
+  pdf.addPage([300, 400]);
+  pdf.addPage([300, 400]);
+  LIBRARY_SOURCE_FIXTURES[0].bytes = Buffer.from(await pdf.save());
+  LIBRARY_SOURCE_FIXTURES[1].bytes = minimalDocxBytes();
   const suffix = `${Date.now()}-${crypto.randomInt(1000, 9999)}`;
   const teacher1 = await createActiveUser('TEACHER', `one-${suffix}`);
   const teacher2 = await createActiveUser('TEACHER', `two-${suffix}`);
@@ -306,6 +397,7 @@ async function main() {
     await request('/api/library/documents', {}, 401);
     await request('/api/library/documents/1', {}, 401);
     await request('/api/library/documents/1/source', {}, 401);
+    await request('/api/library/documents/1/preview', {}, 401);
     await request('/api/library/documents', { headers: auth(studentToken) });
     await request('/api/library/documents', { headers: auth(teacher1Token) });
     await request('/api/library/documents', { headers: auth(adminToken) });
@@ -334,7 +426,7 @@ async function main() {
       {
         buffer: Buffer.from('cleanup test'), size: 12, originalname: 'cleanup.txt', mimetype: 'text/plain'
       },
-      'Cleanup test'
+      { title: 'Cleanup test' }
     ));
     documentRepo.createDocument = originalCreate;
     assert.equal(await recursiveFileCount(process.env.UPLOAD_DIR), beforeCleanup, 'DB failure must clean stored file.');
@@ -342,6 +434,8 @@ async function main() {
     const uploadForm = new FormData();
     uploadForm.append('file', new Blob(['verified source text'], { type: 'text/plain' }), 'source.txt');
     uploadForm.append('title', 'Smoke Document');
+    uploadForm.append('description', 'Smoke description');
+    uploadForm.append('author', 'Smoke author');
     const uploaded = (await request('/api/documents', {
       method: 'POST', headers: auth(teacher1Token), body: uploadForm
     }, 202)).payload.data;
@@ -350,6 +444,7 @@ async function main() {
     assert.equal(uploaded.document.processingStatus, 'PROCESSING');
     await request(`/api/documents/${documentId}`, { headers: auth(studentToken) }, 403);
     await request(`/api/documents/${documentId}/file`, { headers: auth(studentToken) }, 403);
+    await request(`/api/documents/${documentId}/preview`, { headers: auth(studentToken) }, 403);
     await request(`/api/documents/jobs/${jobId}`, { headers: auth(studentToken) }, 403);
     await request(`/api/documents/${documentId}`, {
       method: 'PATCH',
@@ -375,6 +470,7 @@ async function main() {
 
     await request(`/api/documents/${documentId}`, { headers: auth(teacher2Token) }, 404);
     await request(`/api/documents/${documentId}/file`, { headers: auth(teacher2Token) }, 404);
+    await request(`/api/documents/${documentId}/preview`, { headers: auth(teacher2Token) }, 404);
     await request(`/api/documents/jobs/${jobId}`, { headers: auth(teacher2Token) }, 404);
     await request(`/api/documents/${documentId}`, {
       method: 'PATCH',
@@ -433,15 +529,22 @@ async function main() {
     const duplicate = (await request('/api/internal/rag/processing-callback', {
       method: 'POST', headers: internalHeaders, body: JSON.stringify(callback)
     })).payload.data;
-    assert.equal(duplicate.duplicate, true);
+    assert.equal(duplicate.outcome, 'IDEMPOTENT_REPLAY');
+    assert.equal(duplicate.canActivate, true);
     const stale = (await request('/api/internal/rag/processing-callback', {
       method: 'POST', headers: internalHeaders,
       body: JSON.stringify({ ...callback, attemptCount: 2 })
     })).payload.data;
-    assert.equal(stale.ignored, true);
+    assert.equal(stale.outcome, 'IGNORED');
+    assert.equal(stale.canActivate, false);
+    assert.equal(stale.reason, 'STALE_ATTEMPT');
 
     const detail = (await request(`/api/documents/${documentId}`, { headers: auth(teacher1Token) })).payload.data;
     assert.equal(detail.document.processingStatus, 'READY');
+    assert.equal(detail.document.description, 'Smoke description');
+    assert.equal(detail.document.author, 'Smoke author');
+    assert.equal(detail.document.pageCount, null);
+    assert.equal(detail.document.previewStatus, 'NOT_APPLICABLE');
     const libraryTokens = [studentToken, teacher2Token, adminToken];
     const libraryDocuments = [];
     for (const token of libraryTokens) {
@@ -455,9 +558,15 @@ async function main() {
     const [libraryDocument] = libraryDocuments;
     assert.deepEqual(
       Object.keys(libraryDocument).sort(),
-      ['createdAt', 'fileSize', 'fileType', 'id', 'originalAvailable', 'pageCount', 'title']
+      [
+        'author', 'createdAt', 'description', 'fileSize', 'fileType', 'id',
+        'originalAvailable', 'originalFileUrl', 'pageCount', 'previewAvailable',
+        'previewMimeType', 'previewStatus', 'previewUrl', 'title', 'updatedAt'
+      ]
     );
     assert.equal(libraryDocument.originalAvailable, true);
+    assert.equal(libraryDocument.description, 'Smoke description');
+    assert.equal(libraryDocument.author, 'Smoke author');
     for (const [index, token] of libraryTokens.entries()) {
       assert.deepEqual(libraryDocuments[index], libraryDocument);
       const libraryDetail = (await request(`/api/library/documents/${documentId}`, {
@@ -472,6 +581,386 @@ async function main() {
       assert.match(librarySource.headers.get('content-disposition') || '', /attachment/i);
       assert.equal(await librarySource.text(), 'verified source text');
     }
+
+    async function uploadSearchFixture({
+      token,
+      title,
+      description,
+      author,
+      filename,
+      mimeType = 'text/plain',
+      bytes = Buffer.from(`source ${title}`, 'utf8'),
+      complete = true
+    }) {
+      const form = new FormData();
+      form.append('file', new Blob([bytes], { type: mimeType }), filename);
+      form.append('title', title);
+      form.append('description', description);
+      form.append('author', author);
+      const result = (await request('/api/documents', {
+        method: 'POST',
+        headers: auth(token),
+        body: form
+      }, 202)).payload.data;
+      if (complete) {
+        const text = `search fixture ${result.document.id}`;
+        await request('/api/internal/rag/processing-callback', {
+          method: 'POST',
+          headers: internalHeaders,
+          body: JSON.stringify({
+            eventType: 'SUCCEEDED',
+            jobId: result.job.id,
+            documentId: result.document.id,
+            attemptCount: 1,
+            chunks: [{
+              chunkIndex: 0,
+              vectorNodeId: crypto.randomUUID(),
+              chunkText: text,
+              contentHash: crypto.createHash('sha256').update(text).digest('hex'),
+              pageNumber: result.document.fileType === 'PDF' ? 1 : null
+            }]
+          })
+        });
+      }
+      return result;
+    }
+
+    function listPath(prefix, query) {
+      return `${prefix}?${new URLSearchParams(query).toString()}`;
+    }
+
+    const listMarker = `list-${suffix}`;
+    const readySearchFixtures = [];
+    readySearchFixtures.push(await uploadSearchFixture({
+      token: teacher1Token,
+      title: 'Danh mục ổn định',
+      description: `${listMarker} mô tả tiếng Việt`,
+      author: 'Tác giả 100%',
+      filename: `${listMarker}-percent.pdf`,
+      mimeType: 'application/pdf',
+      bytes: LIBRARY_SOURCE_FIXTURES[0].bytes
+    }));
+    readySearchFixtures.push(await uploadSearchFixture({
+      token: teacher1Token,
+      title: 'Danh mục ổn định',
+      description: `${listMarker} mô tả DOCX`,
+      author: 'Tác_giả',
+      filename: `${listMarker}-underscore.docx`,
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      bytes: LIBRARY_SOURCE_FIXTURES[1].bytes
+    }));
+    readySearchFixtures.push(await uploadSearchFixture({
+      token: teacher1Token,
+      title: 'Zeta tài liệu',
+      description: `${listMarker} mô tả TXT`,
+      author: 'Tác\\giả',
+      filename: `${listMarker}-backslash.txt`
+    }));
+    readySearchFixtures.push(await uploadSearchFixture({
+      token: teacher1Token,
+      title: 'Alpha tài liệu',
+      description: `${listMarker} x' OR 1=1 --`,
+      author: "O'Brien",
+      filename: `${listMarker}-quote.txt`
+    }));
+    readySearchFixtures.push(await uploadSearchFixture({
+      token: teacher2Token,
+      title: 'Tài liệu owner khác',
+      description: `${listMarker} owner thứ hai`,
+      author: 'Nguyễn Ánh',
+      filename: `original-${listMarker}-needle.txt`
+    }));
+
+    const processingFixture = await uploadSearchFixture({
+      token: teacher1Token,
+      title: `Processing ${listMarker}`,
+      description: `${listMarker} processing`,
+      author: 'Processing author',
+      filename: `${listMarker}-processing.txt`,
+      complete: false
+    });
+    const failedFixture = await uploadSearchFixture({
+      token: teacher1Token,
+      title: `Failed ${listMarker}`,
+      description: `${listMarker} failed`,
+      author: 'Failed author',
+      filename: `${listMarker}-failed.txt`,
+      complete: false
+    });
+    await documentRepo.updateProcessingStatus(failedFixture.document.id, 'FAILED');
+    const hiddenFixture = await uploadSearchFixture({
+      token: teacher1Token,
+      title: `Hidden ${listMarker}`,
+      description: `${listMarker} hidden`,
+      author: 'Hidden author',
+      filename: `${listMarker}-hidden.txt`
+    });
+    await request(`/api/documents/${hiddenFixture.document.id}/hide`, {
+      method: 'POST',
+      headers: auth(teacher1Token)
+    }, 202);
+    const deletedFixture = await uploadSearchFixture({
+      token: teacher1Token,
+      title: `Deleted ${listMarker}`,
+      description: `${listMarker} deleted`,
+      author: 'Deleted author',
+      filename: `${listMarker}-deleted.txt`
+    });
+    await request(`/api/documents/${deletedFixture.document.id}`, {
+      method: 'DELETE',
+      headers: auth(teacher1Token)
+    }, 202);
+
+    const publicQuery = {
+      q: listMarker,
+      page: '1',
+      limit: '100',
+      sort: 'title_asc'
+    };
+    const publicPages = [];
+    for (const pageNumber of [1, 2, 3]) {
+      const page = (await request(listPath('/api/library/documents', {
+        ...publicQuery,
+        page: String(pageNumber),
+        limit: '2'
+      }), { headers: auth(studentToken) })).payload.data;
+      assert.equal(page.page, pageNumber);
+      assert.equal(page.offset, (pageNumber - 1) * 2);
+      assert.equal(page.limit, 2);
+      assert.equal(page.total, 5);
+      assert.equal(page.totalPages, 3);
+      publicPages.push(...page.documents);
+    }
+    assert.equal(publicPages.length, 5);
+    assert.equal(new Set(publicPages.map((document) => document.id)).size, 5);
+    assert.deepEqual(
+      new Set(publicPages.map((document) => document.id)),
+      new Set(readySearchFixtures.map((fixture) => fixture.document.id))
+    );
+    const equalTitleIds = publicPages
+      .filter((document) => document.title === 'Danh mục ổn định')
+      .map((document) => Number(document.id));
+    assert.deepEqual(equalTitleIds, [...equalTitleIds].sort((left, right) => left - right));
+
+    const sortedIds = {};
+    for (const sort of ['newest', 'oldest', 'title_asc', 'title_desc']) {
+      const result = (await request(listPath('/api/library/documents', {
+        q: listMarker,
+        sort,
+        page: '1',
+        limit: '100'
+      }), { headers: auth(studentToken) })).payload.data;
+      assert.equal(result.total, 5);
+      sortedIds[sort] = result.documents.map((document) => Number(document.id));
+    }
+    assert.deepEqual(sortedIds.newest, [...sortedIds.oldest].reverse());
+    assert.deepEqual(sortedIds.title_desc, [...sortedIds.title_asc].reverse());
+
+    const rolePages = [];
+    for (const token of [studentToken, teacher1Token, teacher2Token, adminToken]) {
+      rolePages.push((await request(
+        listPath('/api/library/documents', publicQuery),
+        { headers: auth(token) }
+      )).payload.data);
+    }
+    for (const rolePage of rolePages.slice(1)) assert.deepEqual(rolePage, rolePages[0]);
+
+    const legacySearch = (await request(listPath('/api/library/documents', {
+      search: listMarker,
+      page: '1',
+      limit: '100',
+      sort: 'title_asc'
+    }), { headers: auth(studentToken) })).payload.data;
+    assert.deepEqual(legacySearch.documents, rolePages[0].documents);
+    const matchingAliases = (await request(listPath('/api/library/documents', {
+      q: ` ${listMarker} `,
+      search: listMarker,
+      page: '1',
+      offset: '0',
+      limit: '100',
+      sort: 'title_asc'
+    }), { headers: auth(studentToken) })).payload.data;
+    assert.deepEqual(matchingAliases, rolePages[0]);
+    const exactOffset = (await request(listPath('/api/library/documents', {
+      q: listMarker,
+      offset: '3',
+      limit: '2',
+      sort: 'title_asc'
+    }), { headers: auth(studentToken) })).payload.data;
+    assert.equal(exactOffset.offset, 3);
+    assert.equal(exactOffset.page, 2);
+    assert.equal(exactOffset.total, 5);
+    assert.deepEqual(exactOffset.documents, rolePages[0].documents.slice(3, 5));
+    const matchingPageOffset = (await request(listPath('/api/library/documents', {
+      q: listMarker,
+      page: '2',
+      offset: '2',
+      limit: '2',
+      sort: 'title_asc'
+    }), { headers: auth(studentToken) })).payload.data;
+    assert.deepEqual(matchingPageOffset.documents, rolePages[0].documents.slice(2, 4));
+
+    const literalCases = [
+      ['%', readySearchFixtures[0].document.id],
+      ['_', readySearchFixtures[1].document.id],
+      ['\\', readySearchFixtures[2].document.id],
+      ["x' OR 1=1 --", readySearchFixtures[3].document.id],
+      ['Nguyễn Ánh', readySearchFixtures[4].document.id]
+    ];
+    for (const [q, expectedId] of literalCases) {
+      const result = (await request(listPath('/api/library/documents', {
+        q,
+        page: '1',
+        limit: '100'
+      }), { headers: auth(studentToken) })).payload.data;
+      assert.equal(result.total, 1, `Literal search must match exactly one fixture: ${q}`);
+      assert.equal(Number(result.documents[0].id), Number(expectedId));
+    }
+    const combinedLibrary = (await request(listPath('/api/library/documents', {
+      q: listMarker,
+      fileType: 'TXT',
+      author: 'Nguyễn',
+      sort: 'oldest',
+      page: '1',
+      limit: '20'
+    }), { headers: auth(studentToken) })).payload.data;
+    assert.equal(combinedLibrary.total, 1);
+    assert.equal(Number(combinedLibrary.documents[0].id), Number(readySearchFixtures[4].document.id));
+    for (const [fileType, expectedTotal] of [['PDF', 1], ['DOCX', 1], ['TXT', 3]]) {
+      const result = (await request(listPath('/api/library/documents', {
+        q: listMarker,
+        fileType,
+        page: '1',
+        limit: '100'
+      }), { headers: auth(studentToken) })).payload.data;
+      assert.equal(result.total, expectedTotal);
+      assert(result.documents.every((document) => document.fileType === fileType));
+    }
+    await request('/api/library/documents?q=%20%20&author=%20%20', {
+      headers: auth(studentToken)
+    });
+    for (const invalidQuery of [
+      'fileType=PPTX',
+      'sort=random',
+      'page=0',
+      'limit=101',
+      'processingStatus=FAILED',
+      'q=new&search=legacy',
+      'page=2&offset=3&limit=2'
+    ]) {
+      await request(`/api/library/documents?${invalidQuery}`, {
+        headers: auth(studentToken)
+      }, 400);
+    }
+    for (const fixture of [processingFixture, failedFixture, hiddenFixture, deletedFixture]) {
+      for (const endpoint of [
+        `/api/library/documents/${fixture.document.id}`,
+        `/api/library/documents/${fixture.document.id}/source`,
+        `/api/library/documents/${fixture.document.id}/preview`
+      ]) {
+        await request(endpoint, { headers: auth(studentToken) }, 404);
+      }
+    }
+
+    const teacher1Management = (await request(listPath('/api/documents', {
+      q: listMarker,
+      page: '1',
+      limit: '100',
+      sort: 'oldest'
+    }), { headers: auth(teacher1Token) })).payload.data;
+    assert(teacher1Management.documents.length >= 7);
+    assert(teacher1Management.documents.every(
+      (document) => Number(document.uploadedBy) === Number(teacher1.id)
+    ));
+    assert(!teacher1Management.documents.some(
+      (document) => Number(document.id) === Number(readySearchFixtures[4].document.id)
+    ));
+    const teacher2Management = (await request(listPath('/api/documents', {
+      q: listMarker,
+      page: '1',
+      limit: '100'
+    }), { headers: auth(teacher2Token) })).payload.data;
+    assert.equal(teacher2Management.total, 1);
+    assert.equal(
+      Number(teacher2Management.documents[0].id),
+      Number(readySearchFixtures[4].document.id)
+    );
+    await request(`/api/documents?ownerId=${teacher2.id}`, {
+      headers: auth(teacher1Token)
+    }, 403);
+    const adminOwner = (await request(`/api/documents?ownerId=${teacher2.id}`, {
+      headers: auth(adminToken)
+    })).payload.data;
+    assert(adminOwner.documents.every(
+      (document) => Number(document.uploadedBy) === Number(teacher2.id)
+    ));
+    assert(adminOwner.documents.some(
+      (document) => Number(document.id) === Number(readySearchFixtures[4].document.id)
+    ));
+    const originalFilenameSearch = (await request(listPath('/api/documents', {
+      q: `original-${listMarker}-needle`,
+      page: '1',
+      limit: '20'
+    }), { headers: auth(adminToken) })).payload.data;
+    assert.equal(originalFilenameSearch.total, 1);
+    assert.equal(
+      Number(originalFilenameSearch.documents[0].id),
+      Number(readySearchFixtures[4].document.id)
+    );
+    assert(!Object.hasOwn(originalFilenameSearch.documents[0], 'storageKey'));
+    assert(!Object.hasOwn(originalFilenameSearch.documents[0], 'storage_key'));
+    const managementPages = [];
+    for (const pageNumber of [1, 2, 3]) {
+      const result = (await request(listPath('/api/documents', {
+        q: listMarker,
+        sort: 'newest',
+        page: String(pageNumber),
+        limit: '3'
+      }), { headers: auth(adminToken) })).payload.data;
+      assert.equal(result.total, 8);
+      assert.equal(result.totalPages, 3);
+      managementPages.push(...result.documents);
+    }
+    assert.equal(managementPages.length, 8);
+    assert.equal(new Set(managementPages.map((document) => document.id)).size, 8);
+    for (const [query, expectedId] of [
+      [{ q: listMarker, processingStatus: 'PROCESSING' }, processingFixture.document.id],
+      [{ q: listMarker, processingStatus: 'FAILED' }, failedFixture.document.id],
+      [{ q: listMarker, visibilityStatus: 'HIDDEN' }, hiddenFixture.document.id],
+      [{ q: listMarker, visibilityStatus: 'DELETED' }, deletedFixture.document.id]
+    ]) {
+      const result = (await request(listPath('/api/documents', {
+        ...query,
+        page: '1',
+        limit: '20'
+      }), { headers: auth(adminToken) })).payload.data;
+      assert.equal(result.total, 1);
+      assert.equal(Number(result.documents[0].id), Number(expectedId));
+    }
+    const combinedManagement = (await request(listPath('/api/documents', {
+      q: listMarker,
+      fileType: 'TXT',
+      processingStatus: 'READY',
+      visibilityStatus: 'VISIBLE',
+      previewStatus: 'NOT_APPLICABLE',
+      ownerId: String(teacher1.id),
+      sort: 'title_desc',
+      page: '1',
+      limit: '100'
+    }), { headers: auth(adminToken) })).payload.data;
+    assert.equal(combinedManagement.total, 2);
+    assert(combinedManagement.documents.every(
+      (document) => Number(document.uploadedBy) === Number(teacher1.id)
+        && document.fileType === 'TXT'
+        && document.processingStatus === 'READY'
+        && document.visibilityStatus === 'VISIBLE'
+        && document.previewStatus === 'NOT_APPLICABLE'
+    ));
+    await request('/api/documents?previewStatus=UNKNOWN', {
+      headers: auth(adminToken)
+    }, 400);
+
+    let pdfBackfillDocumentId = null;
     for (const fixture of LIBRARY_SOURCE_FIXTURES) {
       const fixtureForm = new FormData();
       fixtureForm.append(
@@ -479,7 +968,9 @@ async function main() {
         new Blob([fixture.bytes], { type: fixture.mimeType }),
         fixture.filename
       );
-      fixtureForm.append('title', `Library ${fixture.fileType} bytes`);
+      if (fixture.fileType !== 'PDF') {
+        fixtureForm.append('title', `Library ${fixture.fileType} bytes`);
+      }
       const fixtureUpload = (await request('/api/documents', {
         method: 'POST',
         headers: auth(teacher1Token),
@@ -509,6 +1000,59 @@ async function main() {
       )).payload.data.document;
       assert.equal(fixtureDetail.fileType, fixture.fileType);
       assert.equal(fixtureDetail.originalAvailable, true);
+      if (fixture.fileType === 'PDF') {
+        assert.equal(fixtureDetail.title, 'library-source');
+        assert.equal(fixtureDetail.pageCount, 3);
+        assert.equal(fixtureDetail.previewStatus, 'READY');
+        assert.equal(fixtureDetail.previewAvailable, true);
+        for (const token of libraryTokens) {
+          const previewResponse = await fetch(
+            `${base}${fixtureDetail.previewUrl}`,
+            { headers: auth(token), signal: AbortSignal.timeout(15_000) }
+          );
+          assert.equal(previewResponse.status, 200);
+          assert.match(previewResponse.headers.get('content-disposition') || '', /inline/i);
+          assert.deepEqual(Buffer.from(await previewResponse.arrayBuffer()), fixture.bytes);
+        }
+        for (const [token, status] of [
+          [teacher1Token, 200],
+          [teacher2Token, 404],
+          [adminToken, 200]
+        ]) {
+          const managementPreview = await fetch(
+            `${base}/api/documents/${fixtureUpload.document.id}/preview`,
+            { headers: auth(token), signal: AbortSignal.timeout(15_000) }
+          );
+          assert.equal(managementPreview.status, status);
+          if (status === 200) await managementPreview.arrayBuffer();
+        }
+      } else if (fixture.fileType === 'TXT') {
+        assert.equal(fixtureDetail.pageCount, null);
+        assert.equal(fixtureDetail.previewStatus, 'NOT_APPLICABLE');
+        assert.equal(fixtureDetail.previewAvailable, false);
+        assert.equal(fixtureDetail.previewUrl, null);
+      } else {
+        let docxDetail = fixtureDetail;
+        for (let attempt = 0; attempt < 120 && docxDetail.previewStatus === 'PENDING'; attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          docxDetail = (await request(
+            `/api/library/documents/${fixtureUpload.document.id}`,
+            { headers: auth(studentToken) }
+          )).payload.data.document;
+        }
+        assert.equal(docxDetail.previewStatus, 'READY', 'Disposable runtime must convert DOCX preview.');
+        assert(Number.isInteger(docxDetail.pageCount) && docxDetail.pageCount >= 2);
+        assert.equal(docxDetail.previewAvailable, true);
+        const previewResponse = await fetch(`${base}${docxDetail.previewUrl}`, {
+          headers: auth(studentToken),
+          signal: AbortSignal.timeout(15_000)
+        });
+        assert.equal(previewResponse.status, 200);
+        assert.match(previewResponse.headers.get('content-type') || '', /^application\/pdf/);
+        const previewBytes = Buffer.from(await previewResponse.arrayBuffer());
+        assert.equal(previewBytes.subarray(0, 5).toString('ascii'), '%PDF-');
+        assert.equal(await documentFileService.countPdfPages(previewBytes), docxDetail.pageCount);
+      }
       const fixtureSource = await fetch(
         `${base}/api/library/documents/${fixtureUpload.document.id}/source`,
         { headers: auth(studentToken), signal: AbortSignal.timeout(15_000) }
@@ -526,7 +1070,98 @@ async function main() {
         crypto.createHash('sha256').update(fixture.bytes).digest('hex')
       );
       assert.deepEqual(received, fixture.bytes);
+      if (fixture.fileType === 'PDF') {
+        pdfBackfillDocumentId = fixtureUpload.document.id;
+      }
     }
+    const legacyPdfBefore = await documentRepo.findById(pdfBackfillDocumentId);
+    const [[jobsBeforeBackfill]] = await pool.execute(
+      'SELECT COUNT(*) AS total FROM document_processing_jobs WHERE document_id = ?',
+      [pdfBackfillDocumentId]
+    );
+    await pool.execute(
+      `UPDATE documents
+       SET page_count = NULL, preview_status = 'READY', preview_mime_type = 'application/pdf'
+       WHERE id = ?`,
+      [pdfBackfillDocumentId]
+    );
+    assert.equal(
+      await backfillDocument({ ...legacyPdfBefore, page_count: null }, true),
+      'updated'
+    );
+    assert.equal((await documentRepo.findById(pdfBackfillDocumentId)).page_count, null);
+    assert.equal(
+      await backfillDocument(
+        await documentRepo.findById(pdfBackfillDocumentId),
+        false
+      ),
+      'updated'
+    );
+    assert.equal(Number((await documentRepo.findById(pdfBackfillDocumentId)).page_count), 3);
+    assert(!(await documentRepo.listForPreviewBackfill({
+      afterId: Number(pdfBackfillDocumentId) - 1,
+      limit: 100
+    })).some((document) => Number(document.id) === Number(pdfBackfillDocumentId)));
+    const [[jobsAfterBackfill]] = await pool.execute(
+      'SELECT COUNT(*) AS total FROM document_processing_jobs WHERE document_id = ?',
+      [pdfBackfillDocumentId]
+    );
+    assert.equal(Number(jobsAfterBackfill.total), Number(jobsBeforeBackfill.total));
+
+    const failedPreviewForm = new FormData();
+    failedPreviewForm.append(
+      'file',
+      new Blob([conversionFailureDocxBytes], {
+        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      }),
+      'conversion-failure.docx'
+    );
+    const failedPreviewUpload = (await request('/api/documents', {
+      method: 'POST',
+      headers: auth(teacher1Token),
+      body: failedPreviewForm
+    }, 202)).payload.data;
+    const failedPreviewText = 'DOCX original remains available after preview conversion failure.';
+    await request('/api/internal/rag/processing-callback', {
+      method: 'POST',
+      headers: internalHeaders,
+      body: JSON.stringify({
+        eventType: 'SUCCEEDED',
+        jobId: failedPreviewUpload.job.id,
+        documentId: failedPreviewUpload.document.id,
+        attemptCount: 1,
+        chunks: [{
+          chunkIndex: 0,
+          vectorNodeId: crypto.randomUUID(),
+          chunkText: failedPreviewText,
+          contentHash: crypto.createHash('sha256').update(failedPreviewText).digest('hex'),
+          pageNumber: null
+        }]
+      })
+    });
+    let failedPreviewDetail = null;
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      failedPreviewDetail = (await request(
+        `/api/documents/${failedPreviewUpload.document.id}`,
+        { headers: auth(teacher1Token) }
+      )).payload.data.document;
+      if (failedPreviewDetail.previewStatus !== 'PENDING') break;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    assert.equal(failedPreviewDetail.previewStatus, 'FAILED');
+    assert.equal(failedPreviewDetail.pageCount, null);
+    assert.equal(failedPreviewDetail.processingStatus, 'READY');
+    assert.equal(failedPreviewDetail.originalAvailable, true);
+    assert.equal(failedPreviewDetail.previewAvailable, false);
+    const failedPreviewSource = await fetch(
+      `${base}/api/documents/${failedPreviewUpload.document.id}/file`,
+      { headers: auth(teacher1Token), signal: AbortSignal.timeout(15_000) }
+    );
+    assert.equal(failedPreviewSource.status, 200);
+    assert.deepEqual(
+      Buffer.from(await failedPreviewSource.arrayBuffer()),
+      conversionFailureDocxBytes
+    );
     await request(`/api/documents/${documentId}`, { headers: auth(adminToken) });
     await request(`/api/documents/jobs/${jobId}`, { headers: auth(adminToken) });
     const adminFile = await fetch(`${base}/api/documents/${documentId}/file`, {
@@ -535,14 +1170,38 @@ async function main() {
     });
     assert.equal(adminFile.status, 200);
     assert.equal(await adminFile.text(), 'verified source text');
+    const [[jobsBeforeMetadataUpdate]] = await pool.execute(
+      'SELECT COUNT(*) AS total FROM document_processing_jobs WHERE document_id = ?',
+      [documentId]
+    );
     await request(`/api/documents/${documentId}`, {
       method: 'PATCH', headers: auth(adminToken, { 'content-type': 'application/json' }),
-      body: JSON.stringify({ title: 'Smoke Document Admin Reviewed' })
+      body: JSON.stringify({
+        title: 'Smoke Document Admin Reviewed',
+        description: 'Admin description',
+        author: 'Admin author'
+      })
     });
     await request(`/api/documents/${documentId}`, {
       method: 'PATCH', headers: auth(teacher1Token, { 'content-type': 'application/json' }),
-      body: JSON.stringify({ title: 'Smoke Document Updated' })
+      body: JSON.stringify({ title: 'Smoke Document Updated', description: null })
     });
+    const metadataDetail = (await request(
+      `/api/documents/${documentId}`,
+      { headers: auth(teacher1Token) }
+    )).payload.data.document;
+    assert.equal(metadataDetail.title, 'Smoke Document Updated');
+    assert.equal(metadataDetail.description, null);
+    assert.equal(metadataDetail.author, 'Admin author');
+    const [[jobsAfterMetadataUpdate]] = await pool.execute(
+      'SELECT COUNT(*) AS total FROM document_processing_jobs WHERE document_id = ?',
+      [documentId]
+    );
+    assert.equal(
+      Number(jobsAfterMetadataUpdate.total),
+      Number(jobsBeforeMetadataUpdate.total),
+      'Metadata update must not create an ingest/processing job.'
+    );
     const fileResponse = await fetch(`${base}/api/documents/${documentId}/file`, {
       headers: auth(teacher1Token),
       signal: AbortSignal.timeout(15_000)
@@ -556,6 +1215,7 @@ async function main() {
     await request(`/api/documents/${documentId}/hide`, { method: 'POST', headers: auth(teacher1Token) }, 202);
     await request(`/api/library/documents/${documentId}`, { headers: auth(studentToken) }, 404);
     await request(`/api/library/documents/${documentId}/source`, { headers: auth(studentToken) }, 404);
+    await request(`/api/library/documents/${documentId}/preview`, { headers: auth(studentToken) }, 404);
     await request(`/api/documents/${documentId}/unhide`, { method: 'POST', headers: auth(teacher1Token) }, 202);
 
     process.env.RAG_MOCK_SOURCE_VECTOR_NODE_ID = vectorNodeId;
@@ -654,6 +1314,34 @@ async function main() {
     );
     assert.equal(linkedLibrarySource.status, 200);
     assert.equal(await linkedLibrarySource.text(), 'verified source text');
+    const [[jobsBeforeSnapshotCheck]] = await pool.execute(
+      'SELECT COUNT(*) AS total FROM document_processing_jobs WHERE document_id = ?',
+      [documentId]
+    );
+    await request(`/api/documents/${documentId}`, {
+      method: 'PATCH',
+      headers: auth(teacher1Token, { 'content-type': 'application/json' }),
+      body: JSON.stringify({
+        title: 'Metadata Changed After Citation',
+        description: 'Citation snapshot must remain immutable.',
+        author: 'Updated author'
+      })
+    });
+    const citationAfterMetadataUpdate = (await request(`/api/citations/${citationId}`, {
+      headers: auth(studentToken)
+    })).payload.data;
+    assert.equal(citationAfterMetadataUpdate.documentTitle, availableCitation.documentTitle);
+    assert.equal(citationAfterMetadataUpdate.pageNumber, availableCitation.pageNumber);
+    assert.equal(citationAfterMetadataUpdate.sourceText, availableCitation.sourceText);
+    const [[jobsAfterSnapshotCheck]] = await pool.execute(
+      'SELECT COUNT(*) AS total FROM document_processing_jobs WHERE document_id = ?',
+      [documentId]
+    );
+    assert.equal(
+      Number(jobsAfterSnapshotCheck.total),
+      Number(jobsBeforeSnapshotCheck.total),
+      'Metadata-only updates after citation creation must not create processing jobs.'
+    );
     await request(`/api/citations/${citationId}`, { headers: auth(adminToken) }, 404);
 
     const storedDocument = await documentRepo.findById(documentId);
@@ -680,6 +1368,7 @@ async function main() {
 
     await request(`/api/documents/${documentId}/hide`, { method: 'POST', headers: auth(teacher1Token) }, 202);
     await request(`/api/library/documents/${documentId}`, { headers: auth(studentToken) }, 404);
+    await request(`/api/library/documents/${documentId}/preview`, { headers: auth(studentToken) }, 404);
     await request(`/api/library/documents/${documentId}/source`, { headers: auth(studentToken) }, 404);
     const hiddenCitation = (await request(`/api/citations/${citationId}/source`, {
       headers: auth(studentToken)

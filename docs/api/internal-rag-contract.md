@@ -117,9 +117,20 @@ Optional: `token_count`, `page_number`, `section_title`, `chapter`, `section`, `
 
 NodeJS không nhận `text_preview` thay full text, không tự hash preview và không sinh fake vector ID.
 
-NodeJS khóa job/document rows trong transaction, so processing attempt, ACK duplicate idempotently và ignore stale callback mà không mutate.
+NodeJS khóa job/document rows trong transaction, so processing attempt và trả ACK JSON:
 
-Current snapshot hiện tạo UUID một lần cho cả Qdrant point ID và `chunk_id`, gửi full `chunk_text`, SHA-256 lowercase `content_hash`, optional page/heading và giữ nguyên processing `attempt_count` khi callback HTTP retry. `source_locator` chưa được Python tạo nhưng vẫn optional.
+- `jobId`, `attemptCount`;
+- `outcome`: `ACCEPTED`, `IDEMPOTENT_REPLAY`, `IGNORED`, `REJECTED`;
+- `canActivate`;
+- nullable `reason` và terminal/current `status`.
+
+Python chỉ activate Qdrant point khi `jobId/attemptCount` khớp, `status=SUCCEEDED`, `canActivate=true` và outcome là accepted hoặc exact replay. Replay cùng attempt chỉ được activate nếu complete manifest khớp dữ liệu Node đã persist; stale, terminal conflict, manifest conflict và malformed ACK không activate. HTTP `200` một mình không phải activation permission.
+
+MVP không dùng full two-phase callback. Nếu activation Qdrant thất bại sau ACK, Python cleanup point của attempt và gửi `FAILED` với `ACTIVATION_FAILED`; nếu ACK không thể đọc sau retry, dùng `ACTIVATION_ACK_UNAVAILABLE`. Node chỉ cho phép hai mã compensation này chuyển exact current ingest/reprocess attempt từ `SUCCEEDED` sang `FAILED`; stale attempt và failure code khác không được ghi đè terminal state.
+
+Current snapshot dùng deterministic RFC-4122 UUID5 từ document/job/attempt/chunk index cho cả Qdrant point ID và `chunk_id`, gửi full `chunk_text`, SHA-256 lowercase `content_hash`, optional page/heading và giữ nguyên processing `attempt_count` khi callback HTTP retry. Cùng attempt retry overwrite cùng point; attempt khác có point identity khác. `source_locator` chưa được Python tạo nhưng vẫn optional.
+
+`page_count`/`pageCount` không đi qua RAG callback: Node tự đếm original PDF hoặc generated DOCX PDF preview. Python `page_number` chỉ là locator của chunk/citation; DOCX/TXT synthetic segment không được diễn giải thành preview page.
 
 `gemini-embedding-001` trả 3072 chiều theo SDK mặc định. Snapshot integration overlay cấu hình `embedding_config.output_dimensionality=EMBEDDING_DIMENSION` để giữ agreed dimension `768`; Qdrant đã từ chối upsert trước patch và live ingest đã PASS sau patch. Thay đổi này cần upstream về Python repository.
 
@@ -141,11 +152,12 @@ Current snapshot response có:
 - `citations[]`;
 - `confidence`: string `high|medium|low`;
 - `no_answer`: boolean;
-- optional `usage`.
+- ordered `usage_calls[]`;
+- legacy aggregate `usage`.
 
-Python `usage` hỗ trợ `prompt_tokens`, `completion_tokens`, `total_tokens`, `model` và hiện trả một usage object. NodeJS persist một normalized `ANSWER_GENERATION/GOOGLE/SUCCEEDED` usage row; `total_tokens` là derived field và không có cột riêng. Optional future `usage_calls[]` vẫn được Node hỗ trợ.
+Mỗi `usage_calls[]` item bắt buộc có unique contiguous `call_index` 1-based, `operation_type`, provider/model, non-negative token fields, status và nullable machine-readable `error_code`. Node không mặc định operation bị thiếu thành answer generation. `total_tokens` trong MySQL là derived field; legacy aggregate chỉ là compatibility fallback khi `usage_calls` không được gửi.
 
-Current snapshot citation có `vector_node_id=str(result.id)`, `doc_id`, `snippet`, optional `page_number`, `chapter`, `section`. NodeJS nhận `snippet` làm source fragment alias, resolve ID qua `document_chunks`, không suy đoán vector ID và không parse marker `[1]`.
+Current snapshot citation có `vector_node_id=str(result.id)`, `doc_id`, relevant `snippet`, optional 1-based PDF `page_number`, `chapter`, `section`. Python fail closed với marker không có retrieval source và renumber marker liên tục theo thứ tự citation. NodeJS nhận `snippet` làm source fragment alias, resolve ID qua `document_chunks`, không suy đoán vector ID. Bounding box/source locator vẫn OPTIONAL/LATER.
 
 `no_answer=true` là success; NodeJS không tạo citation dù response có citation data.
 

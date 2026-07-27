@@ -14,6 +14,6 @@ Remaining product/infrastructure limitations:
 6. Chat image/multimodal upload is not implemented; document upload is a separate workflow.
 7. Student email currently has format-only validation. `@student.edu.vn` requires an owner/BA decision before server enforcement.
 8. Python does not emit locator boxes; frontend highlighting is text-search best effort.
-9. Original-file endpoints stream attachments without byte Range or derived DOCX/TXT preview.
+9. Original-file endpoints stream attachments without byte Range. PDF uses original as preview; DOCX has asynchronous generated-PDF preview; TXT has no derived preview.
 
 None requires a schema change for the current MVP.

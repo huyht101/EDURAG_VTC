@@ -4,6 +4,7 @@ const JOB_STATUSES = require('../constants/job-statuses');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA256 = /^[0-9a-f]{64}$/i;
+const ERROR_CODE = /^[A-Z][A-Z0-9_]{0,63}$/;
 const EVENTS = ['PROGRESS', JOB_STATUSES.SUCCEEDED, JOB_STATUSES.FAILED, JOB_STATUSES.CANCELLED];
 
 function validateChunk(chunk, index) {
@@ -86,14 +87,13 @@ function validateProcessingCallback(body) {
     }
   }
   if ([JOB_STATUSES.FAILED, JOB_STATUSES.CANCELLED].includes(body.eventType)
-    && body.error !== undefined && (typeof body.error !== 'object' || Array.isArray(body.error))) {
-    return { error: 'error phải là object.' };
+    && (!body.error || typeof body.error !== 'object' || Array.isArray(body.error))) {
+    return { error: 'FAILED/CANCELLED callback phải có error object.' };
   }
-  if (body.error?.code !== undefined
-    && (typeof body.error.code !== 'string' || body.error.code.length > 64)) {
+  if (body.error?.code !== undefined && !ERROR_CODE.test(body.error.code)) {
     return { error: 'error.code không hợp lệ.' };
   }
-  if (body.error?.message !== undefined
+  if (body.error?.message !== undefined && body.error.message !== null
     && (typeof body.error.message !== 'string' || body.error.message.length > 2000)) {
     return { error: 'error.message không hợp lệ.' };
   }

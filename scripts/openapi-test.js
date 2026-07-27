@@ -108,24 +108,67 @@ assert.match(libraryList.description, /READY \+ VISIBLE/);
 assert.match(libraryList.description, /STUDENT, TEACHER (?:hoặc|và) ADMIN/);
 assert.deepEqual(
   libraryList.parameters.map((parameter) => parameter.name),
-  ['offset', 'limit', 'search']
+  ['page', 'limit', 'q', 'fileType', 'author', 'sort', 'offset', 'search']
+);
+assert.equal(libraryList.parameters.find((parameter) => parameter.name === 'limit').schema.maximum, 100);
+assert.deepEqual(
+  libraryList.parameters.find((parameter) => parameter.name === 'sort').schema.enum,
+  ['newest', 'oldest', 'title_asc', 'title_desc']
+);
+assert(libraryList.parameters.find((parameter) => parameter.name === 'offset').deprecated);
+assert(libraryList.parameters.find((parameter) => parameter.name === 'search').deprecated);
+assert.match(libraryList.parameters.find((parameter) => parameter.name === 'search').description, /normalized values must match/);
+assert.match(libraryList.parameters.find((parameter) => parameter.name === 'offset').description, /\(page - 1\) \* limit/);
+assert.match(libraryList.description, /title\/description\/author/);
+assert.match(libraryList.description, /id tie-breaker/);
+assert.match(libraryList.description, /ký tự literal/);
+assert.match(libraryList.description, /giống nhau sau trim/);
+assert.match(libraryList.description, /offset=\(page-1\)\*limit/);
+assert.deepEqual(
+  spec.components.schemas.LibraryPageResponse.properties.data.required,
+  ['offset', 'page', 'limit', 'total', 'totalPages', 'documents']
 );
 const libraryProperties = Object.keys(spec.components.schemas.LibraryDocument.properties).sort();
 assert.deepEqual(
   libraryProperties,
-  ['createdAt', 'fileSize', 'fileType', 'id', 'originalAvailable', 'pageCount', 'title']
+  [
+    'author', 'createdAt', 'description', 'fileSize', 'fileType', 'id',
+    'originalAvailable', 'originalFileUrl', 'pageCount', 'previewAvailable',
+    'previewMimeType', 'previewStatus', 'previewUrl', 'title', 'updatedAt'
+  ]
 );
 assert(spec.paths['/api/library/documents/{id}'].get.responses[404]);
 assert(spec.paths['/api/library/documents/{id}/source'].get.responses[404]);
 assert(spec.paths['/api/library/documents/{id}/source'].get.responses[409]);
+assert(spec.paths['/api/library/documents/{id}/preview'].get.responses[409]);
 for (const path of [
   '/api/library/documents',
   '/api/library/documents/{id}',
-  '/api/library/documents/{id}/source'
+  '/api/library/documents/{id}/source',
+  '/api/library/documents/{id}/preview'
 ]) {
   assert(spec.paths[path].get.responses[401], `${path} must document unauthenticated access.`);
 }
 assert.match(spec.paths['/api/documents'].get.description, /STUDENT bị từ chối/);
+const managementList = spec.paths['/api/documents'].get;
+assert.deepEqual(
+  managementList.parameters.map((parameter) => parameter.name),
+  [
+    'page', 'limit', 'q', 'fileType', 'processingStatus', 'visibilityStatus',
+    'previewStatus', 'ownerId', 'sort', 'offset', 'search'
+  ]
+);
+assert.match(managementList.description, /TEACHER luôn bị server giới hạn/);
+assert.match(managementList.description, /ADMIN thấy toàn bộ hoặc lọc ownerId/);
+assert.match(managementList.description, /original filename/);
+assert.match(managementList.description, /giống nhau sau trim/);
+assert.match(managementList.description, /cặp mâu thuẫn trả 400/);
+assert(managementList.responses[400]);
+assert(managementList.responses[401]);
+assert.deepEqual(
+  spec.components.schemas.ManagementDocumentPageResponse.properties.data.required,
+  ['offset', 'page', 'limit', 'total', 'totalPages', 'documents']
+);
 for (const [method, path] of [
   ['get', '/api/documents'],
   ['post', '/api/documents'],
@@ -133,6 +176,7 @@ for (const [method, path] of [
   ['patch', '/api/documents/{id}'],
   ['delete', '/api/documents/{id}'],
   ['get', '/api/documents/{id}/file'],
+  ['get', '/api/documents/{id}/preview'],
   ['get', '/api/documents/jobs/{jobId}'],
   ['post', '/api/documents/{id}/hide'],
   ['post', '/api/documents/{id}/unhide']
@@ -145,10 +189,17 @@ assert.deepEqual(callback.security, [{ internalBearer: [] }]);
 assert.match(callback.description, /Service-to-service only/);
 assert.match(callback.description, /không dùng user JWT/i);
 assert(!callback.security.some((item) => Object.hasOwn(item, 'bearerAuth')));
+const callbackAck = spec.components.schemas.ProcessingCallbackAck;
+assert(callbackAck.required.includes('canActivate'));
+assert(callbackAck.required.includes('attemptCount'));
+assert(callbackAck.properties.outcome.enum.includes('IDEMPOTENT_REPLAY'));
 
 const upload = spec.paths['/api/documents'].post;
-assert.match(upload.description, /poll GET \/api\/documents\/jobs\/\{jobId\}/);
+assert.match(upload.description, /DOCX tạo durable preview job/);
 assert.match(upload.responses[202].description, /not complete/i);
+const uploadProperties = upload.requestBody.content['multipart/form-data'].schema.properties;
+assert.deepEqual(Object.keys(uploadProperties), ['file', 'title', 'description', 'author']);
+assert.equal(spec.components.schemas.DocumentUpdateBody.additionalProperties, false);
 assert.equal(spec.paths['/api/documents/jobs/{jobId}'].get.tags[0], 'Document Processing');
 assert.match(spec.paths['/api/citations/{id}/file'].get.description, /portable corpus/i);
 

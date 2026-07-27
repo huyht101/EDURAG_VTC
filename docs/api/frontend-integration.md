@@ -146,7 +146,7 @@ Luồng FE khi người dùng mở citation:
 
 1. Gọi `GET /api/citations/{citationId}` bằng user Bearer token.
 2. Đọc `documentId`, `documentTitle`, `pageNumber` (1-based khi có), `sourceText` và optional `sourceLocator`.
-3. Gọi `GET /api/library/documents/{documentId}` rồi `GET /api/library/documents/{documentId}/source`, cùng Bearer token.
+3. Gọi `GET /api/library/documents/{documentId}`. Nếu `previewAvailable=true`, fetch `previewUrl`; nếu cần tải original, fetch `originalFileUrl`. Cả hai đều là relative authenticated URL.
 4. Dùng `fetch` nhận `Blob`/`ArrayBuffer`; không gắn URL source được bảo vệ trực tiếp vào viewer nếu viewer không gửi `Authorization`.
 5. Với PDF, tạo object URL từ Blob, mở best-effort tại `pageNumber`, rồi `URL.revokeObjectURL()` khi đóng viewer hoặc thay file.
 
@@ -156,32 +156,38 @@ Fallback và lỗi:
 - `originalAvailable=false`, `409 ORIGINAL_SOURCE_UNAVAILABLE`, hoặc original bị thiếu: vẫn hiển thị immutable citation snapshot.
 - Document `HIDDEN`/`DELETED`: Library detail/source trả `404`; không nới scope và không retry qua `/api/documents` hay management source.
 - `401`: xử lý session/login; `403`: hiển thị lỗi quyền, không đổi sang management API.
-- DOCX/TXT hiện là authenticated stream/download; Node không cung cấp DOCX preview hoặc generated HTML/PDF.
+- DOCX `previewStatus=READY` có authenticated generated-PDF preview; original DOCX vẫn là download. TXT chỉ stream/download original.
 - `sourceLocator` là optional opaque object. FE không suy đoán coordinate unit, origin hay single/array boxes cho đến khi contract Python–Node–FE được chốt.
 
-Node không convert DOCX/TXT sang PDF/HTML và không lưu generated preview. File endpoints stream original dưới dạng `attachment`; citation source endpoint trả JSON snapshot để FE dùng fallback.
+Node tạo PDF preview bất đồng bộ cho DOCX bằng durable preview job. Không có generated HTML; TXT không convert. Citation source endpoint vẫn trả immutable JSON snapshot để FE fallback, độc lập với current file availability.
 
 | File/source | Endpoint | Response | Auth và state |
 |---|---|---|---|
-| Document Library metadata | `GET /api/library/documents`, `GET /api/library/documents/{id}` | JSON allowlist; list có offset/limit và optional title search | User JWT; STUDENT/TEACHER/ADMIN nhận cùng DTO; server cố định `READY + VISIBLE`. |
+| Document Library metadata | `GET /api/library/documents`, `GET /api/library/documents/{id}` | JSON allowlist; list có `q`, `fileType`, `author`, `page`, `limit`, `sort` và trả `offset/page/limit/total/totalPages/documents` | User JWT; STUDENT/TEACHER/ADMIN nhận cùng DTO; server cố định `READY + VISIBLE`. |
 | Document Library original | `GET /api/library/documents/{id}/source` | Binary attachment, `Content-Length`, `Content-Disposition` | STUDENT/TEACHER/ADMIN; `404` nếu không còn `READY + VISIBLE`, `409` nếu record hợp lệ nhưng original thiếu. |
+| Document Library preview | `GET /api/library/documents/{id}/preview` | PDF inline; original PDF hoặc generated DOCX PDF | STUDENT/TEACHER/ADMIN; cùng fixed Library scope; `409` nếu pending/failed/not applicable/missing. |
 | PDF/DOCX/TXT original của document | `GET /api/documents/{id}/file` | `200`, MIME suy ra từ filename, `Content-Length`, `Content-Disposition: attachment` | User JWT; TEACHER uploader hoặc ADMIN. HIDDEN vẫn mở được; DELETED trả `404`. |
+| Management preview | `GET /api/documents/{id}/preview` | PDF inline | TEACHER uploader hoặc ADMIN; không mở cho Student. |
 | Citation snapshot | `GET /api/citations/{id}/source` hoặc `GET /api/citations/{id}` | JSON gồm snapshot và `originalAvailable` | User JWT và owner của chat session; snapshot vẫn tồn tại sau hide/delete. |
 | Original qua citation | `GET /api/citations/{id}/file` | Binary attachment như original | Session owner trước, sau đó current source authorization. Student thường nhận `409 ORIGINAL_SOURCE_UNAVAILABLE` khi source hidden/deleted/missing; uploader/Admin chỉ được hưởng quyền này trong session của chính họ. |
 
 Upload document dùng Multer memory storage và cùng giới hạn `FILE_MAX_SIZE_BYTES` cho PDF/DOCX/TXT; default là `20 MiB`. Sai định dạng/signature trả `400`; quá giới hạn trả `413 FILE_TOO_LARGE`.
 
-Document Library không dùng management DTO. Object public giống nhau cho STUDENT/TEACHER/ADMIN, gồm `id`, `title`, `fileType`, `fileSize`, `pageCount` (hiện `null` vì Node chưa duy trì page count authoritative), `createdAt` và `originalAvailable`. Teacher/Admin có thể đọc public document của uploader khác qua Library nhưng management vẫn theo ownership. Không dựa vào query client để quyết định owner, processing, visibility, deletion hoặc job state.
+Document Library không dùng management DTO. Object public giống nhau cho STUDENT/TEACHER/ADMIN, gồm `id`, `title`, nullable `description/author`, `fileType`, `fileSize`, `pageCount`, preview status/availability/MIME/URL, original availability/URL và timestamps. PDF `pageCount` là số trang vật lý original; DOCX chỉ có `pageCount` khi generated PDF preview READY; TXT và DOCX pending/failed là `null`. Teacher/Admin có thể đọc public document của uploader khác qua Library nhưng management vẫn theo ownership. Không dựa vào query client để quyết định owner, processing, visibility, deletion hoặc job state.
 
-Download dùng filesystem stream và có `Content-Length`, nhưng chưa implement byte `Range`, `206`, `Accept-Ranges` hoặc cache policy riêng. FE nên hiển thị loading/progress theo `Content-Length`, không giả định seek server-side. PDF viewer có thể fetch blob rồi render phía client; DOCX/TXT cần client-side renderer/download hoặc hiển thị `sourceText`. Trả DOCX gốc không đồng nghĩa server có inline DOCX viewer.
+List UI/Mobile nên gửi `page` (mặc định 1), `limit` (mặc định 20, tối đa 100) và một trong `newest`, `oldest`, `title_asc`, `title_desc`. `q` của Library tìm OR trên title/description/author; `fileType` và partial `author` kết hợp AND. Management `q` tìm thêm original filename; status filters kết hợp AND; chỉ ADMIN được gửi `ownerId`. Server trim chuỗi và coi chuỗi whitespace là không truyền. `%`, `_`, `\` trong `q`/`author` là literal, nên FE không cần tự escape wildcard; URL encoding thông thường vẫn bắt buộc.
+
+`q`/`page` là canonical. `search` là alias cũ của `q`: có thể gửi cả hai trong giai đoạn chuyển đổi nếu giá trị sau trim giống nhau; khác nhau trả `400`. `offset` là exact legacy offset: khi gửi riêng, response giữ nguyên `offset` và tính `page=floor(offset/limit)+1`; khi gửi cùng `page`, offset phải bằng `(page-1)*limit`, nếu không trả `400`. Client mới nên chỉ gửi `q` và `page`.
+
+Download/preview dùng filesystem stream và có `Content-Length`, nhưng chưa implement byte `Range`, `206`, `Accept-Ranges` hoặc cache policy riêng. FE phải `fetch` Blob/ArrayBuffer với Bearer, tạo object URL cho PDF viewer và revoke khi đóng/thay file; không gắn protected URL trực tiếp nếu viewer không gửi Authorization. DOCX preview là PDF khi READY; original DOCX/TXT vẫn là download/stream.
 
 ## Page và highlight
 
 - Node chỉ chấp nhận `pageNumber >= 1` khi field tồn tại.
 - Python PDF fallback dùng trang vật lý 1-based.
-- Python DOCX/TXT fallback chia synthetic segment khoảng 3.000 ký tự và đánh số 1-based; đây không phải trang in.
+- Python DOCX/TXT có thể dùng synthetic segment nội bộ; đây không phải trang của PDF preview. Vì vậy citation DOCX hiển thị `sourceText` và mở preview nhưng không tự nhảy/highlight theo synthetic number.
 - LlamaParse primary đánh số theo thứ tự document fragment trả về; không có contract đảm bảo đó là physical page cho mọi format.
-- Không có `totalPages`, paragraph index, character offset/range hoặc public `chunkIndex`.
+- `pageCount` là document preview metadata do Node sở hữu, không phải citation `pageNumber`; chưa có public paragraph index, character range hoặc chunk index.
 
 Node có thể nhận/lưu/trả `sourceLocator` dạng object hoặc `null`, nhưng không định nghĩa schema tọa độ. Fixture hiện không có locator và Python snapshot không tạo `source_locator` hay `boxes[]`. Vì vậy FE chưa thể highlight chính xác bằng normalized coordinate, pixel hoặc PDF point. Fallback đáng tin cậy là `sourceText` kết hợp text search; `pageNumber` và `sectionTitle` chỉ dùng best-effort navigation.
 
@@ -229,6 +235,6 @@ Requirement `@student.edu.vn` không có BA document canonical trong repository 
 | Request mới synchronous; duplicate có thể trả current `PENDING` | Loading đến khi HTTP xong; chỉ poll history cho duplicate-pending | Không streaming token/status endpoint riêng | SSE/WebSocket chỉ khi có product decision |
 | History trả `messages` theo `messageOrder` | Render `senderType`, status và embedded citations | Usage không nằm trong history | Không cần thêm call nếu chỉ hiển thị chat |
 | Image chat chưa có | Chỉ gửi JSON text | Không vision/image upload | Joint Node/Python contract |
-| Original là attachment stream | Fetch blob với Bearer hoặc download | Không Range/derived preview | Expose filename header, preview/range nếu cần |
+| Original là attachment; preview là inline PDF | Fetch blob với Bearer; use `previewUrl` only when available | Không Range; DOCX citation segment chưa map preview page | Range/precise DOCX navigation khi có contract |
 | Locator thường `null` | Highlight bằng text search | Không boxes/coordinate units | Python locator schema + public contract |
 | Email domain chỉ format chung | Normalize UI và hiển thị BA warning nếu cần | Server chưa enforce student domain | BA decision rồi Node validation |

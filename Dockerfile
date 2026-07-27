@@ -7,6 +7,7 @@ RUN npm ci --omit=dev
 FROM node:20-alpine
 
 WORKDIR /usr/src/app
+RUN apk add --no-cache libreoffice
 COPY --from=builder /usr/src/app/node_modules ./node_modules
 COPY . .
 

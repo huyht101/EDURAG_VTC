@@ -1,0 +1,6 @@
+module.exports = {
+  PENDING: 'PENDING',
+  READY: 'READY',
+  FAILED: 'FAILED',
+  NOT_APPLICABLE: 'NOT_APPLICABLE'
+};

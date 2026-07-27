@@ -10,7 +10,7 @@ Backend MVP cho trợ lý học tập RAG. Repository root là NodeJS/Core; [`py
 
 ## Bắt đầu
 
-Yêu cầu Node.js 20+, Docker Desktop và Docker Compose.
+Yêu cầu Node.js 20+, Docker Desktop và Docker Compose. Docker image đã gồm LibreOffice cho DOCX PDF preview; chạy Node trực tiếp trên host cần `soffice` trong `PATH` hoặc cấu hình `LIBREOFFICE_COMMAND`.
 
 ```powershell
 npm ci
@@ -18,6 +18,8 @@ Copy-Item .env.example .env
 ```
 
 Điền các biến bắt buộc trong root `.env`; không commit `.env` hoặc credential trong `secrets/`.
+
+Database hiện hữu chạy `npm run db:migrate`; page/preview cũ kiểm tra trước bằng `npm run documents:backfill -- --dry-run`. Chi tiết và recovery nằm tại [Documents](docs/modules/documents.md).
 
 Base Compose luôn ép `RAG_MODE=mock`; `.env.example` cũng dùng mock. Đây là runtime stub tối thiểu cho local/Part 2 regression, không phải bằng chứng Python integration:
 

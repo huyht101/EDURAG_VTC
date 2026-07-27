@@ -122,19 +122,78 @@ function normalizeCitation(citation) {
   };
 }
 
-function normalizeUsageCall(call, index, defaults = {}) {
+function invalidUsage(message) {
+  throw appError(502, 'RAG_USAGE_INVALID', message);
+}
+
+function normalizeUsageCall(call) {
+  if (!call || typeof call !== 'object' || Array.isArray(call)) {
+    return invalidUsage('Each Python usage_calls entry must be an object.');
+  }
+  const callIndex = call.call_index;
+  const operationType = call.operation_type;
+  const provider = call.provider;
+  const model = call.model;
+  const promptTokens = call.prompt_tokens;
+  const completionTokens = call.completion_tokens;
+  const estimatedCost = call.estimated_cost ?? null;
+  const currency = call.currency ?? 'USD';
+  const latencyMs = call.latency_ms ?? null;
+  const status = call.status;
+  const errorCode = call.error_code ?? null;
+  if (!Number.isInteger(callIndex) || callIndex < 1
+    || !['QUERY_REWRITE', 'ANSWER_GENERATION', 'REFINE', 'OTHER'].includes(operationType)
+    || typeof provider !== 'string' || !provider.trim()
+    || typeof model !== 'string' || !model.trim()
+    || !Number.isInteger(promptTokens) || promptTokens < 0
+    || !Number.isInteger(completionTokens) || completionTokens < 0
+    || (estimatedCost !== null
+      && (typeof estimatedCost !== 'number' || !Number.isFinite(estimatedCost) || estimatedCost < 0))
+    || !/^[A-Z]{3}$/.test(currency)
+    || (latencyMs !== null && (!Number.isInteger(latencyMs) || latencyMs < 0))
+    || !['SUCCEEDED', 'FAILED'].includes(status)
+    || (errorCode !== null
+      && (typeof errorCode !== 'string' || !/^[A-Z][A-Z0-9_]{0,63}$/.test(errorCode)))) {
+    return invalidUsage('Python usage_calls entry does not match the Node usage contract.');
+  }
   return {
-    callIndex: call.call_index ?? index + 1,
-    operationType: call.operation_type ?? defaults.operationType ?? 'ANSWER_GENERATION',
-    provider: call.provider ?? defaults.provider ?? 'GOOGLE',
-    model: call.model,
-    promptTokens: call.prompt_tokens ?? call.input_tokens ?? 0,
-    completionTokens: call.completion_tokens ?? call.output_tokens ?? 0,
-    estimatedCost: call.estimated_cost ?? null,
-    currency: call.currency ?? 'USD',
-    latencyMs: call.latency_ms ?? null,
-    status: call.status ?? defaults.status ?? 'SUCCEEDED',
-    errorCode: call.error_code ?? null
+    callIndex,
+    operationType,
+    provider: provider.trim(),
+    model: model.trim(),
+    promptTokens,
+    completionTokens,
+    estimatedCost,
+    currency,
+    latencyMs,
+    status,
+    errorCode
+  };
+}
+
+function normalizeLegacyUsage(call) {
+  if (!call || typeof call !== 'object' || Array.isArray(call)
+    || typeof call.model !== 'string' || !call.model.trim()) {
+    return invalidUsage('Python legacy usage must include a model.');
+  }
+  const promptTokens = call.prompt_tokens ?? 0;
+  const completionTokens = call.completion_tokens ?? 0;
+  if (!Number.isInteger(promptTokens) || promptTokens < 0
+    || !Number.isInteger(completionTokens) || completionTokens < 0) {
+    return invalidUsage('Python legacy usage token counts must be non-negative integers.');
+  }
+  return {
+    callIndex: 1,
+    operationType: 'ANSWER_GENERATION',
+    provider: 'GOOGLE',
+    model: call.model.trim(),
+    promptTokens,
+    completionTokens,
+    estimatedCost: null,
+    currency: 'USD',
+    latencyMs: null,
+    status: 'SUCCEEDED',
+    errorCode: null
   };
 }
 
@@ -163,13 +222,14 @@ function normalizeQueryResult(payload) {
   let usageCalls = [];
 
   if (Array.isArray(result.usage_calls)) {
-    usageCalls = result.usage_calls.map((call, index) => normalizeUsageCall(call, index));
+    usageCalls = result.usage_calls.map(normalizeUsageCall);
+    const indexes = usageCalls.map((call) => call.callIndex);
+    if (new Set(indexes).size !== indexes.length
+      || indexes.some((value, index) => value !== index + 1)) {
+      invalidUsage('Python usage_calls call_index must be unique and contiguous from 1.');
+    }
   } else if (result.usage && typeof result.usage === 'object') {
-    usageCalls = [normalizeUsageCall(result.usage, 0, {
-      operationType: 'ANSWER_GENERATION',
-      provider: 'GOOGLE',
-      status: 'SUCCEEDED'
-    })];
+    usageCalls = [normalizeLegacyUsage(result.usage)];
   }
 
   return {
@@ -261,5 +321,7 @@ module.exports = {
   buildQueryRequest,
   normalizeAcceptedResponse,
   normalizeQueryResult,
-  normalizeProcessingCallback
+  normalizeProcessingCallback,
+  normalizeUsageCall,
+  normalizeLegacyUsage
 };

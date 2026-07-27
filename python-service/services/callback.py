@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 async def send_callback(
     callback_url: str,
     payload: CallbackPayload,
-) -> bool:
+) -> Optional[dict[str, Any]]:
     """
     Gửi callback tới Node.js Internal API.
 
@@ -37,7 +37,7 @@ async def send_callback(
         payload: CallbackPayload chứa job_id, event_type, data.
 
     Returns:
-        True nếu gửi thành công (nhận 200 ACK), False nếu thất bại.
+        ACK JSON machine-readable nếu Node chấp nhận HTTP request; None nếu thất bại.
     """
     settings = get_settings()
     max_retries = settings.CALLBACK_MAX_RETRIES
@@ -68,13 +68,34 @@ async def send_callback(
                 )
 
             if response.status_code == 200:
+                try:
+                    response_body = response.json()
+                    ack = (
+                        response_body.get("data")
+                        if isinstance(response_body, dict)
+                        and isinstance(response_body.get("data"), dict)
+                        else response_body
+                    )
+                    if not isinstance(ack, dict):
+                        raise ValueError("ACK body is not an object")
+                except (ValueError, TypeError):
+                    logger.warning(
+                        "[CALLBACK] ACK JSON không hợp lệ: job_id=%s (retry %d)",
+                        payload.job_id,
+                        retry_idx,
+                    )
+                    ack = None
+                if ack is None:
+                    if retry_idx < max_retries:
+                        await asyncio.sleep(2 ** (retry_idx - 1))
+                    continue
                 logger.info(
                     "[CALLBACK] Thành công: job_id=%s, event=%s (retry %d)",
                     payload.job_id,
                     payload.event_type,
                     retry_idx,
                 )
-                return True
+                return ack
 
             logger.warning(
                 "[CALLBACK] Node.js trả status %d: job_id=%s (retry %d)",
@@ -120,14 +141,14 @@ async def send_callback(
         payload.job_id,
         payload.event_type,
     )
-    return False
+    return None
 
 
 # ══════════════════════════════════════════════════════════════════
 # HELPER FUNCTIONS — Tạo callback nhanh
 # ══════════════════════════════════════════════════════════════════
 
-async def send_progress(callback_url: str, job_id: str, attempt_count: int, stage: str) -> bool:
+async def send_progress(callback_url: str, job_id: str, attempt_count: int, stage: str) -> Optional[dict[str, Any]]:
     """Gửi callback PROGRESS với stage hiện tại."""
     payload = CallbackPayload(
         job_id=job_id,
@@ -144,7 +165,7 @@ async def send_succeeded_ingest(
     attempt_count: int,
     chunks_count: int,
     chunk_manifest: list,
-) -> bool:
+) -> Optional[dict[str, Any]]:
     """Gửi callback SUCCEEDED cho ingest (kèm chunk manifest)."""
     payload = CallbackPayload(
         job_id=job_id,
@@ -161,7 +182,7 @@ async def send_succeeded_visibility(
     job_id: str,
     attempt_count: int,
     updated_count: int,
-) -> bool:
+) -> Optional[dict[str, Any]]:
     """Gửi callback SUCCEEDED cho hide/unhide."""
     payload = CallbackPayload(
         job_id=job_id,
@@ -177,7 +198,7 @@ async def send_succeeded_delete(
     job_id: str,
     attempt_count: int,
     deleted_count: int,
-) -> bool:
+) -> Optional[dict[str, Any]]:
     """Gửi callback SUCCEEDED cho delete."""
     payload = CallbackPayload(
         job_id=job_id,
@@ -195,7 +216,7 @@ async def send_failed(
     error_code: str,
     error_message: str,
     stage: Optional[str] = None,
-) -> bool:
+) -> Optional[dict[str, Any]]:
     """Gửi callback FAILED với thông tin lỗi và giai đoạn."""
     payload = CallbackPayload(
         job_id=job_id,

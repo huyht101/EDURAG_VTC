@@ -241,16 +241,17 @@ class UsageCall(BaseModel):
 
     Node.js lưu từng entry vào llm_usage_logs với:
     - call_index: thứ tự stable trong request
-    - operation: loại call (QUERY_REWRITE = router, ANSWER_GENERATION = RAG answer)
+    - operation_type: loại call (QUERY_REWRITE = router, ANSWER_GENERATION = RAG answer)
     - provider/model/tokens/status: metadata đầy đủ
 
     Không double-count: mỗi LLM call thật → đúng 1 entry.
     """
     call_index: int = Field(
         ...,
-        description="Thứ tự call trong request (0-based, stable per request)"
+        ge=1,
+        description="Thứ tự call trong request (1-based, stable per request)"
     )
-    operation: Literal["QUERY_REWRITE", "ANSWER_GENERATION", "REFINE", "OTHER"] = Field(
+    operation_type: Literal["QUERY_REWRITE", "ANSWER_GENERATION", "REFINE", "OTHER"] = Field(
         ...,
         description=(
             "Loại operation: "
@@ -267,9 +268,10 @@ class UsageCall(BaseModel):
         default="SUCCEEDED",
         description="Kết quả của call: SUCCEEDED hoặc FAILED"
     )
-    error_message: Optional[str] = Field(
+    error_code: Optional[str] = Field(
         default=None,
-        description="Thông báo lỗi nếu status=FAILED"
+        max_length=64,
+        description="Mã lỗi machine-readable nếu status=FAILED"
     )
 
 

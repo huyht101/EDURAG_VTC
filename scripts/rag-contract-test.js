@@ -204,32 +204,46 @@ async function testChatContract() {
   assert.equal(result.sources[0].vectorNodeId, answer.citations[0].vector_node_id);
   assert.equal(result.sources[0].sourceText, answer.citations[0].snippet);
   assert.equal(result.sources[0].sectionTitle, answer.citations[0].chapter);
-  assert.equal(result.usageCalls.length, 1);
+  assert.equal(result.usageCalls.length, 2);
   assert.deepEqual(result.usageCalls[0], {
     callIndex: 1,
-    operationType: 'ANSWER_GENERATION',
-    provider: 'GOOGLE',
+    operationType: 'QUERY_REWRITE',
+    provider: 'google',
     model: 'models/gemini-3.5-flash',
-    promptTokens: 21,
-    completionTokens: 8,
+    promptTokens: 8,
+    completionTokens: 1,
     estimatedCost: null,
     currency: 'USD',
     latencyMs: null,
     status: 'SUCCEEDED',
     errorCode: null
   });
+  assert.equal(result.usageCalls[1].callIndex, 2);
+  assert.equal(result.usageCalls[1].operationType, 'ANSWER_GENERATION');
 
   const multiUsage = normalizeQueryResult({
     ...answer,
     usage: undefined,
     usage_calls: [
-      { call_index: 1, operation_type: 'QUERY_REWRITE', provider: 'GOOGLE', model: 'router', prompt_tokens: 4, completion_tokens: 1 },
-      { call_index: 2, operation_type: 'ANSWER_GENERATION', provider: 'GOOGLE', model: 'answer', prompt_tokens: 10, completion_tokens: 3 }
+      { call_index: 1, operation_type: 'QUERY_REWRITE', provider: 'GOOGLE', model: 'router', prompt_tokens: 4, completion_tokens: 1, status: 'SUCCEEDED' },
+      { call_index: 2, operation_type: 'ANSWER_GENERATION', provider: 'GOOGLE', model: 'answer', prompt_tokens: 10, completion_tokens: 3, status: 'SUCCEEDED' }
     ]
   });
   assert.deepEqual(multiUsage.usageCalls.map((call) => call.operationType), [
     'QUERY_REWRITE', 'ANSWER_GENERATION'
   ]);
+  for (const invalidCalls of [
+    [{ call_index: 1, provider: 'GOOGLE', model: 'm', prompt_tokens: 0, completion_tokens: 0, status: 'SUCCEEDED' }],
+    [
+      { call_index: 1, operation_type: 'QUERY_REWRITE', provider: 'GOOGLE', model: 'm', prompt_tokens: 0, completion_tokens: 0, status: 'SUCCEEDED' },
+      { call_index: 3, operation_type: 'ANSWER_GENERATION', provider: 'GOOGLE', model: 'm', prompt_tokens: 0, completion_tokens: 0, status: 'SUCCEEDED' }
+    ]
+  ]) {
+    assert.throws(
+      () => normalizeQueryResult({ ...answer, usage: undefined, usage_calls: invalidCalls }),
+      (error) => error.code === 'RAG_USAGE_INVALID'
+    );
+  }
 
   const noAnswerPayload = {
     ...fixture('chat/no-answer-response.json'),
@@ -335,7 +349,7 @@ async function testUpstreamErrors() {
   );
 }
 
-function callbackDependencies(job, mutations) {
+function callbackDependencies(job, mutations, persistedManifest = []) {
   return {
     withTransaction: async (callback) => callback({ transaction: true }),
     jobRepo: {
@@ -356,7 +370,17 @@ function callbackDependencies(job, mutations) {
         mutations.push('chunks-inserted');
         mutations.manifestLength = chunks.length;
       },
-      countByJob: async () => mutations.manifestLength
+      countByJob: async () => mutations.manifestLength,
+      listByJob: async () => persistedManifest.map((chunk) => ({
+        chunk_index: chunk.chunkIndex,
+        vector_node_id: chunk.vectorNodeId,
+        chunk_text: chunk.chunkText,
+        content_hash: chunk.contentHash,
+        token_count: chunk.tokenCount ?? null,
+        page_number: chunk.pageNumber ?? null,
+        section_title: chunk.sectionTitle ?? null,
+        source_locator: chunk.sourceLocator ?? null
+      }))
     }
   };
 }
@@ -432,7 +456,15 @@ async function testCallbackContract() {
     job_type: 'INGEST',
     job_config: null
   }, successMutations));
-  assert.deepEqual(success, { acknowledged: true, jobId: 101, status: 'SUCCEEDED' });
+  assert.deepEqual(success, {
+    acknowledged: true,
+    jobId: 101,
+    attemptCount: 2,
+    outcome: 'ACCEPTED',
+    canActivate: true,
+    reason: null,
+    status: 'SUCCEEDED'
+  });
   assert.deepEqual(
     [...successMutations],
     ['chunks-inserted', 'job-succeeded', 'document-processing']
@@ -447,7 +479,15 @@ async function testCallbackContract() {
     job_type: 'INGEST',
     job_config: null
   }, staleMutations));
-  assert.deepEqual(stale, { acknowledged: true, ignored: true, reason: 'STALE_ATTEMPT' });
+  assert.deepEqual(stale, {
+    acknowledged: true,
+    jobId: 101,
+    attemptCount: 2,
+    outcome: 'IGNORED',
+    canActivate: false,
+    reason: 'STALE_ATTEMPT',
+    status: 'RUNNING'
+  });
   assert.deepEqual(staleMutations, []);
 
   const duplicateMutations = [];
@@ -458,9 +498,32 @@ async function testCallbackContract() {
     status: 'SUCCEEDED',
     job_type: 'INGEST',
     job_config: null
-  }, duplicateMutations));
-  assert.deepEqual(duplicate, { acknowledged: true, duplicate: true, jobId: 101 });
+  }, duplicateMutations, normalized.chunks));
+  assert.deepEqual(duplicate, {
+    acknowledged: true,
+    jobId: 101,
+    attemptCount: 2,
+    outcome: 'IDEMPOTENT_REPLAY',
+    canActivate: true,
+    reason: null,
+    status: 'SUCCEEDED'
+  });
   assert.deepEqual(duplicateMutations, []);
+
+  const conflictingReplay = JSON.parse(JSON.stringify(normalized));
+  conflictingReplay.chunks[0].chunkText = 'Different replay text.';
+  conflictingReplay.chunks[0].contentHash = sha256('Different replay text.');
+  const conflict = await handleCallback(conflictingReplay, callbackDependencies({
+    id: 101,
+    document_id: 42,
+    attempt_count: 2,
+    status: 'SUCCEEDED',
+    job_type: 'INGEST',
+    job_config: null
+  }, [], normalized.chunks));
+  assert.equal(conflict.outcome, 'REJECTED');
+  assert.equal(conflict.canActivate, false);
+  assert.equal(conflict.reason, 'MANIFEST_CONFLICT');
 
   const mismatchMutations = [];
   await assert.rejects(
@@ -497,9 +560,53 @@ async function testCallbackContract() {
       job_type: 'INGEST',
       job_config: null
     }, failedMutations)),
-    { acknowledged: true, jobId: 101, status: 'FAILED' }
+    {
+      acknowledged: true, jobId: 101, attemptCount: 2,
+      outcome: 'ACCEPTED', canActivate: false, reason: null, status: 'FAILED'
+    }
   );
   assert.deepEqual(failedMutations, ['job-failed', 'document-processing']);
+
+  const compensationMutations = [];
+  const activationCompensation = normalizeProcessingCallback({
+    job_id: '101',
+    attempt_count: 2,
+    event_type: 'FAILED',
+    stage: 'activation',
+    error: {
+      code: 'ACTIVATION_FAILED',
+      message: 'Qdrant activation count mismatch.'
+    }
+  });
+  assert.deepEqual(
+    await handleCallback(activationCompensation, callbackDependencies({
+      id: 101,
+      document_id: 42,
+      attempt_count: 2,
+      status: 'SUCCEEDED',
+      job_type: 'INGEST',
+      job_config: null
+    }, compensationMutations)),
+    {
+      acknowledged: true, jobId: 101, attemptCount: 2,
+      outcome: 'ACCEPTED', canActivate: false,
+      reason: 'ACTIVATION_COMPENSATED', status: 'FAILED'
+    }
+  );
+  assert.deepEqual(compensationMutations, ['job-failed', 'document-processing']);
+
+  for (const invalidError of [
+    { eventType: 'FAILED', error: undefined },
+    { eventType: 'FAILED', error: { code: 'not-machine-readable', message: null } },
+    { eventType: 'CANCELLED', error: [] },
+    { eventType: 'FAILED', error: { code: 'FAILED', message: 42 } }
+  ]) {
+    assert(validateProcessingCallback({
+      jobId: '101',
+      attemptCount: 2,
+      ...invalidError
+    })?.error);
+  }
 
   const cancelledMutations = [];
   assert.deepEqual(
@@ -514,7 +621,10 @@ async function testCallbackContract() {
         job_config: null
       }, cancelledMutations)
     ),
-    { acknowledged: true, jobId: 101, status: 'CANCELLED' }
+    {
+      acknowledged: true, jobId: 101, attemptCount: 2,
+      outcome: 'ACCEPTED', canActivate: false, reason: null, status: 'CANCELLED'
+    }
   );
   assert.deepEqual(cancelledMutations, ['job-cancelled', 'document-processing']);
 
@@ -533,7 +643,15 @@ async function testCallbackContract() {
         job_type: jobType,
         job_config: JSON.stringify({ targetVisibility })
       }, operationMutations)),
-      { acknowledged: true, jobId: Number(operation.jobId), status: 'SUCCEEDED' }
+      {
+        acknowledged: true,
+        jobId: Number(operation.jobId),
+        attemptCount: 1,
+        outcome: 'ACCEPTED',
+        canActivate: false,
+        reason: null,
+        status: 'SUCCEEDED'
+      }
     );
     assert.deepEqual(operationMutations, ['job-succeeded', 'document-visibility']);
   }

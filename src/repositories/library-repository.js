@@ -1,27 +1,44 @@
 const pool = require('../configs/db');
 const sqlPageNumbers = require('../utils/pagination');
+const { likePattern, orderBySql } = require('../utils/document-list-query');
 
 function db(executor) {
   return executor || pool;
 }
 
 const SELECT_FIELDS = `
-  d.id, d.title, d.file_type, d.file_size_bytes, d.storage_key,
-  d.original_filename, d.mime_type, d.created_at,
+  d.id, d.title, d.description, d.author, d.file_type, d.file_size_bytes,
+  d.storage_key, d.original_filename, d.mime_type, d.page_count,
+  d.preview_status, d.preview_storage_key, d.preview_mime_type,
+  d.created_at, d.updated_at,
   d.processing_status, d.visibility_status`;
 
-async function listEligibleDocuments({ offset, limit, search }, executor) {
-  const page = sqlPageNumbers(offset, limit);
+async function listEligibleDocuments(filters, executor) {
+  const page = sqlPageNumbers(filters.offset, filters.limit);
   const conditions = [
     "d.processing_status = 'READY'",
     "d.visibility_status = 'VISIBLE'"
   ];
   const params = [];
-  if (search) {
-    conditions.push('d.title LIKE ?');
-    params.push(`%${search}%`);
+  if (filters.q) {
+    const pattern = likePattern(filters.q);
+    conditions.push(`(
+      d.title LIKE ? ESCAPE '!'
+      OR d.description LIKE ? ESCAPE '!'
+      OR d.author LIKE ? ESCAPE '!'
+    )`);
+    params.push(pattern, pattern, pattern);
+  }
+  if (filters.fileType) {
+    conditions.push('d.file_type = ?');
+    params.push(filters.fileType);
+  }
+  if (filters.author) {
+    conditions.push("d.author LIKE ? ESCAPE '!'");
+    params.push(likePattern(filters.author));
   }
   const where = `WHERE ${conditions.join(' AND ')}`;
+  const orderBy = orderBySql(filters.sort);
   const database = db(executor);
   const [countRows] = await database.execute(
     `SELECT COUNT(*) AS total FROM documents d ${where}`,
@@ -31,7 +48,7 @@ async function listEligibleDocuments({ offset, limit, search }, executor) {
     `SELECT ${SELECT_FIELDS}
      FROM documents d
      ${where}
-     ORDER BY d.created_at DESC, d.id DESC
+     ORDER BY ${orderBy}
      LIMIT ${page.limit} OFFSET ${page.offset}`,
     params
   );

@@ -2,13 +2,16 @@ const path = require('path');
 
 const ROLES = require('../constants/roles');
 const DOCUMENT_STATUSES = require('../constants/document-statuses');
+const PREVIEW_STATUSES = require('../constants/preview-statuses');
 const JOB_TYPES = require('../constants/job-types');
 const withTransaction = require('../database/transaction');
 const documentRepo = require('../repositories/document-repository');
 const jobRepo = require('../repositories/processing-job-repository');
 const fileService = require('./document-file-service');
+const documentDto = require('./document-dto-service');
 const { getRagClient } = require('../clients/rag-client');
 const appError = require('../utils/app-error');
+const { normalizeListQuery } = require('../utils/document-list-query');
 
 function parseId(value, name = 'id') {
   const id = Number(value);
@@ -22,23 +25,8 @@ function assertManager(user, document) {
   if (!allowed) throw appError(404, 'DOCUMENT_NOT_FOUND', 'Không tìm thấy document.');
 }
 
-function publicDocument(document) {
-  return {
-    id: document.id,
-    uploadedBy: document.uploaded_by,
-    title: document.title,
-    originalFilename: document.original_filename,
-    fileType: document.file_type,
-    mimeType: document.mime_type,
-    fileSizeBytes: document.file_size_bytes,
-    checksumSha256: document.checksum_sha256,
-    processingStatus: document.processing_status,
-    visibilityStatus: document.visibility_status,
-    processedAt: document.processed_at,
-    deletedAt: document.deleted_at,
-    createdAt: document.created_at,
-    updatedAt: document.updated_at
-  };
+async function publicDocument(document) {
+  return documentDto.managementDocument(document);
 }
 
 function publicJob(job) {
@@ -60,23 +48,77 @@ function publicJob(job) {
   };
 }
 
-async function uploadDocument(user, file, requestedTitle) {
-  const stored = await fileService.persist(file);
-  const fallbackTitle = path.basename(stored.originalFilename, stored.extension);
-  const title = String(requestedTitle || fallbackTitle).trim();
+function normalizeNullable(value, maximum, field) {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'string') {
+    throw appError(400, `INVALID_${field.toUpperCase()}`, `${field} không hợp lệ.`);
+  }
+  const normalized = value.trim();
+  if (!normalized) return null;
+  if (normalized.length > maximum) {
+    throw appError(400, `INVALID_${field.toUpperCase()}`, `${field} không được vượt quá ${maximum} ký tự.`);
+  }
+  return normalized;
+}
+
+function normalizeUploadMetadata(file, input = {}) {
+  const filename = path.basename(file?.originalname || '');
+  const extension = path.extname(filename);
+  const fallbackTitle = path.basename(filename, extension);
+  const requestedTitle = input.title === undefined || input.title === null ? '' : input.title;
+  if (typeof requestedTitle !== 'string') {
+    throw appError(400, 'INVALID_TITLE', 'title không hợp lệ.');
+  }
+  const title = requestedTitle.trim() || fallbackTitle.trim();
   if (!title || title.length > 255) {
-    await fileService.remove(stored.storageKey);
     throw appError(400, 'INVALID_TITLE', 'title phải có từ 1 đến 255 ký tự.');
   }
+  return {
+    title,
+    description: normalizeNullable(input.description, 2000, 'description'),
+    author: normalizeNullable(input.author, 255, 'author')
+  };
+}
+
+function initialPreview(stored) {
+  if (stored.fileType === 'PDF') {
+    return {
+      pageCount: stored.pageCount,
+      previewStatus: PREVIEW_STATUSES.READY,
+      previewStorageKey: null,
+      previewMimeType: 'application/pdf'
+    };
+  }
+  if (stored.fileType === 'DOCX') {
+    return {
+      pageCount: null,
+      previewStatus: PREVIEW_STATUSES.PENDING,
+      previewStorageKey: null,
+      previewMimeType: null
+    };
+  }
+  return {
+    pageCount: null,
+    previewStatus: PREVIEW_STATUSES.NOT_APPLICABLE,
+    previewStorageKey: null,
+    previewMimeType: null
+  };
+}
+
+async function uploadDocument(user, file, metadataInput = {}) {
+  const metadata = normalizeUploadMetadata(file, metadataInput);
+  const stored = await fileService.persist(file);
 
   let documentId;
   let jobId;
+  let previewJobId = null;
   try {
-    ({ documentId, jobId } = await withTransaction(async (connection) => {
+    ({ documentId, jobId, previewJobId } = await withTransaction(async (connection) => {
       const createdDocumentId = await documentRepo.createDocument({
         uploadedBy: user.id,
-        title,
+        ...metadata,
         ...stored,
+        ...initialPreview(stored),
         processingStatus: DOCUMENT_STATUSES.processing.UPLOADED,
         visibilityStatus: DOCUMENT_STATUSES.visibility.VISIBLE
       }, connection);
@@ -84,7 +126,18 @@ async function uploadDocument(user, file, requestedTitle) {
         documentId: createdDocumentId,
         jobType: JOB_TYPES.INGEST
       }, connection);
-      return { documentId: createdDocumentId, jobId: createdJobId };
+      const createdPreviewJobId = stored.fileType === 'DOCX'
+        ? await jobRepo.createJob({
+          documentId: createdDocumentId,
+          jobType: JOB_TYPES.GENERATE_PDF_PREVIEW,
+          jobConfig: { sourceFileType: stored.fileType }
+        }, connection)
+        : null;
+      return {
+        documentId: createdDocumentId,
+        jobId: createdJobId,
+        previewJobId: createdPreviewJobId
+      };
     }));
   } catch (error) {
     await fileService.remove(stored.storageKey);
@@ -132,26 +185,33 @@ async function uploadDocument(user, file, requestedTitle) {
   }
 
   const document = await documentRepo.findById(documentId);
-  return { document: publicDocument(document), job: publicJob(await jobRepo.findById(jobId)) };
+  return {
+    document: await publicDocument(document),
+    job: publicJob(await jobRepo.findById(jobId)),
+    previewJob: previewJobId ? publicJob(await jobRepo.findById(previewJobId)) : null
+  };
 }
 
-async function listDocuments(user, query) {
-  const offset = Math.max(0, Number.parseInt(query.offset, 10) || 0);
-  const limit = Math.min(100, Math.max(1, Number.parseInt(query.limit, 10) || 20));
-  const filters = {
-    offset,
-    limit,
-    search: query.search?.trim() || '',
-    processingStatus: query.processingStatus || '',
-    visibilityStatus: query.visibilityStatus || ''
-  };
-  if (user.role === ROLES.TEACHER) filters.uploadedBy = user.id;
-  const result = await documentRepo.listDocuments(filters);
+async function listDocuments(user, query, dependencies = {}) {
+  const repository = dependencies.repository || documentRepo;
+  const serialize = dependencies.publicDocument || publicDocument;
+  const filters = normalizeListQuery(query);
+  if (user.role === ROLES.TEACHER) {
+    if (filters.ownerId) {
+      throw appError(403, 'OWNER_FILTER_FORBIDDEN', 'Teacher không được lọc theo ownerId.');
+    }
+    filters.uploadedBy = user.id;
+  } else if (user.role === ROLES.ADMIN && filters.ownerId) {
+    filters.uploadedBy = Number(filters.ownerId);
+  }
+  const result = await repository.listDocuments(filters);
   return {
-    offset,
-    limit,
+    offset: filters.offset,
+    page: filters.page,
+    limit: filters.limit,
     total: result.total,
-    documents: result.documents.map(publicDocument)
+    totalPages: Math.ceil(result.total / filters.limit),
+    documents: await Promise.all(result.documents.map(serialize))
   };
 }
 
@@ -163,23 +223,35 @@ async function getDocument(user, idValue) {
   }
   assertManager(user, document);
   return {
-    document: publicDocument(document),
+    document: await publicDocument(document),
     latestJob: publicJob(await jobRepo.findLatestForDocument(id))
   };
 }
 
-async function updateDocument(user, idValue, title) {
+function normalizeUpdateMetadata(input) {
+  const metadata = {};
+  if (Object.prototype.hasOwnProperty.call(input, 'title')) metadata.title = input.title.trim();
+  for (const [field, maximum] of [['description', 2000], ['author', 255]]) {
+    if (Object.prototype.hasOwnProperty.call(input, field)) {
+      metadata[field] = normalizeNullable(input[field], maximum, field);
+    }
+  }
+  return metadata;
+}
+
+async function updateDocument(user, idValue, metadataInput) {
   const id = parseId(idValue, 'document id');
-  return withTransaction(async (connection) => {
+  const updated = await withTransaction(async (connection) => {
     const document = await documentRepo.findByIdForUpdate(id, connection);
     if (!document) throw appError(404, 'DOCUMENT_NOT_FOUND', 'Không tìm thấy document.');
     assertManager(user, document);
     if (document.visibility_status === DOCUMENT_STATUSES.visibility.DELETED) {
       throw appError(409, 'DOCUMENT_DELETED', 'Document đã bị xóa.');
     }
-    await documentRepo.updateTitle(id, title.trim(), connection);
-    return publicDocument(await documentRepo.findById(id, connection));
+    await documentRepo.updateMetadata(id, normalizeUpdateMetadata(metadataInput), connection);
+    return documentRepo.findById(id, connection);
   });
+  return publicDocument(updated);
 }
 
 async function openManagedFile(user, idValue) {
@@ -191,6 +263,32 @@ async function openManagedFile(user, idValue) {
   assertManager(user, document);
   const file = await fileService.open(document.storage_key);
   return { ...file, document };
+}
+
+async function openManagedPreview(user, idValue) {
+  const id = parseId(idValue, 'document id');
+  const document = await documentRepo.findById(id);
+  if (!document || document.visibility_status === DOCUMENT_STATUSES.visibility.DELETED) {
+    throw appError(404, 'DOCUMENT_NOT_FOUND', 'Không tìm thấy document.');
+  }
+  assertManager(user, document);
+  const storageKey = documentDto.previewStorageKey(document);
+  if (!storageKey || !(await fileService.exists(storageKey))) {
+    throw appError(409, 'PREVIEW_UNAVAILABLE', 'Bản xem trước hiện không khả dụng.');
+  }
+  try {
+    return {
+      ...(await fileService.open(storageKey)),
+      filename: `${document.title}.pdf`,
+      mimeType: document.preview_mime_type || 'application/pdf',
+      document
+    };
+  } catch (error) {
+    if (error.code === 'FILE_NOT_FOUND') {
+      throw appError(409, 'PREVIEW_UNAVAILABLE', 'Bản xem trước hiện không khả dụng.');
+    }
+    throw error;
+  }
 }
 
 async function getProcessingJob(user, idValue) {
@@ -277,7 +375,7 @@ async function operateDocument(user, idValue, action) {
   }
 
   return {
-    document: publicDocument(await documentRepo.findById(id)),
+    document: await publicDocument(await documentRepo.findById(id)),
     job: publicJob(await jobRepo.findById(jobId))
   };
 }
@@ -288,10 +386,14 @@ module.exports = {
   getDocument,
   updateDocument,
   openManagedFile,
+  openManagedPreview,
   getProcessingJob,
   operateDocument,
   publicDocument,
   publicJob,
   assertManager,
-  parseId
+  parseId,
+  normalizeUploadMetadata,
+  normalizeUpdateMetadata,
+  initialPreview
 };

@@ -29,4 +29,18 @@ async function streamSource(req, res, next) {
   }
 }
 
-module.exports = { list, detail, streamSource };
+async function streamPreview(req, res, next) {
+  try {
+    const result = await libraryService.openPreview(req.params.id);
+    const filename = result.filename.replace(/[\r\n"\\/]/g, '_');
+    res.setHeader('Content-Type', result.mimeType);
+    res.setHeader('Content-Length', result.size);
+    res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+    result.stream.on('error', next);
+    return result.stream.pipe(res);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+module.exports = { list, detail, streamSource, streamPreview };

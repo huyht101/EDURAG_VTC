@@ -3,6 +3,7 @@ require('dotenv').config();
 
 const app = require('./app');
 const pool = require('./configs/db');
+const previewWorker = require('./workers/document-preview-worker');
 
 const PORT = process.env.PORT || 5000;
 const SHUTDOWN_TIMEOUT_MS = Number(process.env.SHUTDOWN_TIMEOUT_MS || 10000);
@@ -18,6 +19,7 @@ async function startServer() {
     const conn = await pool.getConnection();
     console.log('[DB] Kết nối MySQL thành công.');
     conn.release();
+    await previewWorker.start();
 
     server = app.listen(PORT, () => {
       console.log(`[SERVER] Đang chạy tại: http://localhost:${PORT}`);
@@ -34,6 +36,7 @@ function shutdown(signal, dependencies = {}) {
   if (shutdownPromise) return shutdownPromise;
   const activeServer = dependencies.server || server;
   const db = dependencies.pool || pool;
+  const worker = dependencies.previewWorker || previewWorker;
   const timeoutMs = dependencies.timeoutMs || SHUTDOWN_TIMEOUT_MS;
   shutdownPromise = new Promise((resolve) => {
     const timer = setTimeout(() => {
@@ -44,10 +47,12 @@ function shutdown(signal, dependencies = {}) {
     const closeHttp = activeServer
       ? new Promise((done) => activeServer.close(() => done()))
       : Promise.resolve();
-    Promise.allSettled([closeHttp, db.end()]).then(() => {
+    Promise.allSettled([closeHttp, worker.stop()])
+      .then(() => Promise.allSettled([db.end()]))
+      .then(() => {
       clearTimeout(timer);
       resolve({ graceful: true, signal });
-    });
+      });
   });
   return shutdownPromise;
 }

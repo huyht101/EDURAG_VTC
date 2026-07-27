@@ -3,7 +3,7 @@
 EDURAG gồm ba ownership boundary:
 
 1. Client gọi public NodeJS API.
-2. NodeJS/Core quản lý identity, authorization, document/job lifecycle, file metadata, chat, citation snapshots, usage và MySQL transactions.
+2. NodeJS/Core quản lý identity, authorization, document/job lifecycle, user metadata, authoritative page count/PDF preview, chat, citation snapshots, usage và MySQL transactions.
 3. Python RAG quản lý parsing, embeddings, retrieval/generation và Qdrant.
 
 NodeJS là thành phần duy nhất ghi MySQL. Python không giữ durable chat history. NodeJS không truy cập Qdrant.

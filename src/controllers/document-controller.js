@@ -2,7 +2,7 @@ const documentService = require('../services/document-service');
 
 async function upload(req, res, next) {
   try {
-    const result = await documentService.uploadDocument(req.user, req.file, req.body.title);
+    const result = await documentService.uploadDocument(req.user, req.file, req.body);
     return res.ok('Document đã được tiếp nhận để xử lý.', result, 202);
   } catch (error) {
     return next(error);
@@ -27,7 +27,7 @@ async function detail(req, res, next) {
 
 async function update(req, res, next) {
   try {
-    const document = await documentService.updateDocument(req.user, req.params.id, req.body.title);
+    const document = await documentService.updateDocument(req.user, req.params.id, req.body);
     return res.ok('Cập nhật document thành công.', document);
   } catch (error) {
     return next(error);
@@ -40,6 +40,20 @@ async function streamFile(req, res, next) {
     res.setHeader('Content-Type', result.document.mime_type);
     res.setHeader('Content-Length', result.size);
     res.attachment(result.document.original_filename);
+    result.stream.on('error', next);
+    return result.stream.pipe(res);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function streamPreview(req, res, next) {
+  try {
+    const result = await documentService.openManagedPreview(req.user, req.params.id);
+    const filename = result.filename.replace(/[\r\n"\\/]/g, '_');
+    res.setHeader('Content-Type', result.mimeType);
+    res.setHeader('Content-Length', result.size);
+    res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
     result.stream.on('error', next);
     return result.stream.pipe(res);
   } catch (error) {
@@ -72,6 +86,7 @@ module.exports = {
   detail,
   update,
   streamFile,
+  streamPreview,
   jobDetail,
   hide: operation('hide', 'Hide operation đã được tiếp nhận.'),
   unhide: operation('unhide', 'Unhide operation đã được tiếp nhận.'),

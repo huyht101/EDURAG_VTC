@@ -36,6 +36,23 @@ const originalFileResponse = (description) => ({
   }
 });
 
+const previewFileResponse = (description) => ({
+  description,
+  headers: {
+    'Content-Disposition': {
+      description: 'Inline PDF filename; clients still fetch with Bearer authentication.',
+      schema: { type: 'string', example: 'inline; filename="document.pdf"' }
+    },
+    'Content-Length': {
+      description: 'Full preview size. Byte Range/206 is not implemented.',
+      schema: { type: 'integer', minimum: 1 }
+    }
+  },
+  content: {
+    'application/pdf': { schema: { type: 'string', format: 'binary' } }
+  }
+});
+
 const citationSourceExample = {
   success: true,
   message: 'OK',
@@ -70,7 +87,7 @@ const definition = {
     { name: 'Admin - Users', description: 'ADMIN quản lý trạng thái và tra cứu tài khoản.' },
     { name: 'Documents', description: 'TEACHER quản lý tài liệu mình upload; ADMIN quản lý toàn bộ.' },
     { name: 'Document Library', description: 'STUDENT, TEACHER và ADMIN đọc cùng public DTO cho tài liệu READY + VISIBLE qua namespace read-only riêng.' },
-    { name: 'Document Processing', description: 'Theo dõi processing job bất đồng bộ sau upload/hide/unhide/delete.' },
+    { name: 'Document Processing', description: 'Theo dõi processing job bất đồng bộ sau upload/hide/unhide/delete và DOCX PDF preview.' },
     { name: 'Chat Sessions', description: 'ACTIVE user quản lý các chat session thuộc chính mình.' },
     { name: 'Chat Messages', description: 'ACTIVE user đọc history và gửi câu hỏi trong session của chính mình.' },
     { name: 'Citations', description: 'Đọc immutable citation snapshot và original source khi còn khả dụng.' },
@@ -179,25 +196,146 @@ const definition = {
         }
       },
       DocumentUpdateBody: {
-        type: 'object', required: ['title'],
-        properties: { title: { type: 'string', minLength: 1, maxLength: 255 } }
+        type: 'object',
+        minProperties: 1,
+        additionalProperties: false,
+        properties: {
+          title: { type: 'string', minLength: 1, maxLength: 255 },
+          description: { type: 'string', maxLength: 2000, nullable: true },
+          author: { type: 'string', maxLength: 255, nullable: true }
+        },
+        description: 'User metadata only. pageCount, preview/storage/checksum/status fields are server-owned.'
       },
       LibraryDocument: {
         type: 'object',
         required: [
-          'id', 'title', 'fileType', 'fileSize', 'pageCount', 'createdAt', 'originalAvailable'
+          'id', 'title', 'description', 'author', 'fileType', 'fileSize', 'pageCount',
+          'previewStatus', 'previewAvailable', 'previewMimeType', 'previewUrl',
+          'originalAvailable', 'originalFileUrl', 'createdAt', 'updatedAt'
         ],
         properties: {
           id: { type: 'integer' },
           title: { type: 'string' },
+          description: { type: 'string', nullable: true },
+          author: { type: 'string', nullable: true },
           fileType: { type: 'string', enum: ['PDF', 'DOCX', 'TXT'] },
           fileSize: { type: 'integer', minimum: 0 },
           pageCount: {
             type: 'integer', minimum: 1, nullable: true,
-            description: 'Reserved nullable field; CURRENT storage does not maintain an authoritative page count.'
+            description: 'Node-owned. Physical original PDF pages; DOCX generated-PDF preview pages; null for pending/failed DOCX and TXT.'
+          },
+          previewStatus: {
+            type: 'string',
+            enum: ['PENDING', 'READY', 'FAILED', 'NOT_APPLICABLE']
+          },
+          previewAvailable: {
+            type: 'boolean',
+            description: 'Derived from preview state and actual readable file existence.'
+          },
+          previewMimeType: { type: 'string', nullable: true, example: 'application/pdf' },
+          previewUrl: {
+            type: 'string',
+            nullable: true,
+            description: 'Authenticated relative URL; null unless a readable preview exists.'
           },
           createdAt: { type: 'string', format: 'date-time' },
-          originalAvailable: { type: 'boolean' }
+          updatedAt: { type: 'string', format: 'date-time' },
+          originalAvailable: { type: 'boolean' },
+          originalFileUrl: {
+            type: 'string',
+            description: 'Authenticated relative URL. Check originalAvailable before fetching.'
+          }
+        }
+      },
+      ManagementDocument: {
+        allOf: [
+          { $ref: '#/components/schemas/LibraryDocument' },
+          {
+            type: 'object',
+            required: [
+              'uploadedBy', 'originalFilename', 'mimeType', 'fileSizeBytes',
+              'checksumSha256', 'processingStatus', 'visibilityStatus'
+            ],
+            properties: {
+              uploadedBy: { type: 'integer' },
+              originalFilename: { type: 'string' },
+              mimeType: { type: 'string' },
+              fileSizeBytes: { type: 'integer', minimum: 1 },
+              checksumSha256: { type: 'string', pattern: '^[0-9a-f]{64}$' },
+              processingStatus: {
+                type: 'string',
+                enum: ['UPLOADED', 'PROCESSING', 'READY', 'FAILED', 'CANCELLED']
+              },
+              visibilityStatus: { type: 'string', enum: ['VISIBLE', 'HIDDEN', 'DELETED'] },
+              processedAt: { type: 'string', format: 'date-time', nullable: true },
+              deletedAt: { type: 'string', format: 'date-time', nullable: true }
+            }
+          }
+        ]
+      },
+      ManagementDocumentPageResponse: {
+        type: 'object',
+        required: ['success', 'message', 'data'],
+        properties: {
+          success: { type: 'boolean', enum: [true] },
+          message: { type: 'string' },
+          data: {
+            type: 'object',
+            required: ['offset', 'page', 'limit', 'total', 'totalPages', 'documents'],
+            properties: {
+              offset: { type: 'integer', minimum: 0 },
+              page: { type: 'integer', minimum: 1 },
+              limit: { type: 'integer', minimum: 1, maximum: 100 },
+              total: { type: 'integer', minimum: 0 },
+              totalPages: { type: 'integer', minimum: 0 },
+              documents: {
+                type: 'array',
+                items: { $ref: '#/components/schemas/ManagementDocument' }
+              }
+            }
+          }
+        }
+      },
+      ManagementDocumentResponse: {
+        type: 'object',
+        required: ['success', 'message', 'data'],
+        properties: {
+          success: { type: 'boolean', enum: [true] },
+          message: { type: 'string' },
+          data: { $ref: '#/components/schemas/ManagementDocument' }
+        }
+      },
+      ManagementDocumentDetailResponse: {
+        type: 'object',
+        required: ['success', 'message', 'data'],
+        properties: {
+          success: { type: 'boolean', enum: [true] },
+          message: { type: 'string' },
+          data: {
+            type: 'object',
+            required: ['document', 'latestJob'],
+            properties: {
+              document: { $ref: '#/components/schemas/ManagementDocument' },
+              latestJob: { type: 'object', nullable: true }
+            }
+          }
+        }
+      },
+      DocumentUploadResponse: {
+        type: 'object',
+        required: ['success', 'message', 'data'],
+        properties: {
+          success: { type: 'boolean', enum: [true] },
+          message: { type: 'string' },
+          data: {
+            type: 'object',
+            required: ['document', 'job', 'previewJob'],
+            properties: {
+              document: { $ref: '#/components/schemas/ManagementDocument' },
+              job: { type: 'object' },
+              previewJob: { type: 'object', nullable: true }
+            }
+          }
         }
       },
       LibraryPageResponse: {
@@ -208,11 +346,13 @@ const definition = {
           message: { type: 'string' },
           data: {
             type: 'object',
-            required: ['offset', 'limit', 'total', 'documents'],
+            required: ['offset', 'page', 'limit', 'total', 'totalPages', 'documents'],
             properties: {
               offset: { type: 'integer', minimum: 0 },
+              page: { type: 'integer', minimum: 1 },
               limit: { type: 'integer', minimum: 1, maximum: 100 },
               total: { type: 'integer', minimum: 0 },
+              totalPages: { type: 'integer', minimum: 0 },
               documents: {
                 type: 'array',
                 items: { $ref: '#/components/schemas/LibraryDocument' }
@@ -338,7 +478,49 @@ const definition = {
             items: { $ref: '#/components/schemas/ProcessingChunkManifestItem' }
           },
           result: { type: 'object' },
-          error: { type: 'object' }
+          error: {
+            type: 'object',
+            required: ['code'],
+            properties: {
+              code: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{0,63}$' },
+              message: { type: 'string', maxLength: 2000, nullable: true }
+            },
+            description: 'Required for FAILED/CANCELLED. ACTIVATION_FAILED and ACTIVATION_ACK_UNAVAILABLE are the only same-attempt post-ACK compensation codes.'
+          }
+        }
+      },
+      ProcessingCallbackAck: {
+        type: 'object',
+        required: [
+          'acknowledged', 'jobId', 'attemptCount', 'outcome',
+          'canActivate', 'reason', 'status'
+        ],
+        properties: {
+          acknowledged: { type: 'boolean', enum: [true] },
+          jobId: { type: 'integer', minimum: 1 },
+          attemptCount: { type: 'integer', minimum: 1 },
+          outcome: {
+            type: 'string',
+            enum: ['ACCEPTED', 'IDEMPOTENT_REPLAY', 'IGNORED', 'REJECTED']
+          },
+          canActivate: {
+            type: 'boolean',
+            description: 'Python may activate only when true and job/attempt match.'
+          },
+          reason: { type: 'string', nullable: true },
+          status: {
+            type: 'string',
+            enum: ['QUEUED', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED']
+          }
+        }
+      },
+      ProcessingCallbackAckResponse: {
+        type: 'object',
+        required: ['success', 'message', 'data'],
+        properties: {
+          success: { type: 'boolean', enum: [true] },
+          message: { type: 'string' },
+          data: { $ref: '#/components/schemas/ProcessingCallbackAck' }
         }
       }
     }
@@ -433,13 +615,24 @@ const definition = {
       get: {
         tags: ['Documents'], summary: 'List documents for TEACHER owner or ADMIN', security: [{ bearerAuth: [] }],
         parameters: [
-          { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0 } },
-          { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100 } },
-          { name: 'search', in: 'query', schema: { type: 'string' } },
+          { name: 'page', in: 'query', description: 'Canonical 1-based page. With offset, offset must equal (page - 1) * limit.', schema: { type: 'integer', minimum: 1, default: 1 } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } },
+          { name: 'q', in: 'query', description: 'Canonical literal partial search across title, description, author and original filename. With search, normalized values must match. Maximum 255 characters.', schema: { type: 'string', maxLength: 255 } },
+          { name: 'fileType', in: 'query', schema: { type: 'string', enum: ['PDF', 'DOCX', 'TXT'] } },
           { name: 'processingStatus', in: 'query', schema: { type: 'string', enum: ['UPLOADED', 'PROCESSING', 'READY', 'FAILED', 'CANCELLED'] } },
-          { name: 'visibilityStatus', in: 'query', schema: { type: 'string', enum: ['VISIBLE', 'HIDDEN', 'DELETED'] } }
+          { name: 'visibilityStatus', in: 'query', schema: { type: 'string', enum: ['VISIBLE', 'HIDDEN', 'DELETED'] } },
+          { name: 'previewStatus', in: 'query', schema: { type: 'string', enum: ['PENDING', 'READY', 'FAILED', 'NOT_APPLICABLE'] } },
+          { name: 'ownerId', in: 'query', description: 'ADMIN only. TEACHER requests with a nonblank ownerId receive 403.', schema: { type: 'integer', minimum: 1 } },
+          { name: 'sort', in: 'query', schema: { type: 'string', enum: ['newest', 'oldest', 'title_asc', 'title_desc'], default: 'newest' } },
+          { name: 'offset', in: 'query', deprecated: true, description: 'Legacy exact record offset. With page, it must equal (page - 1) * limit.', schema: { type: 'integer', minimum: 0 } },
+          { name: 'search', in: 'query', deprecated: true, description: 'Legacy alias for q. With q, normalized values must match.', schema: { type: 'string', maxLength: 255 } }
         ],
-        responses: { 200: response('Document page.'), 403: response('Document manager role required.', 'ErrorResponse') }
+        responses: {
+          200: response('Document page.', 'ManagementDocumentPageResponse'),
+          400: response('Invalid query parameter.', 'ErrorResponse'),
+          401: response('User Bearer token is missing or invalid.', 'ErrorResponse'),
+          403: response('Document manager role required, or TEACHER supplied ownerId.', 'ErrorResponse')
+        }
       },
       post: {
         tags: ['Documents'], summary: 'Upload PDF, DOCX or TXT', security: [{ bearerAuth: [] }],
@@ -447,16 +640,44 @@ const definition = {
           required: true,
           content: { 'multipart/form-data': { schema: {
             type: 'object', required: ['file'],
-            properties: { file: { type: 'string', format: 'binary' }, title: { type: 'string', maxLength: 255 } }
+            properties: {
+              file: { type: 'string', format: 'binary' },
+              title: {
+                type: 'string',
+                maxLength: 255,
+                description: 'Optional; blank/whitespace falls back to the original filename without extension.'
+              },
+              description: { type: 'string', maxLength: 2000, nullable: true },
+              author: { type: 'string', maxLength: 255, nullable: true }
+            }
           } } }
         },
         responses: {
-          202: response('Document/job accepted; processing is not complete yet.', 'SuccessResponse', {
+          202: response('Document/job accepted; processing is not complete yet.', 'DocumentUploadResponse', {
             success: true,
             message: 'Document đã được tiếp nhận để xử lý.',
             data: {
-              document: { id: 12, processingStatus: 'PROCESSING', visibilityStatus: 'VISIBLE' },
-              job: { id: 34, jobType: 'INGEST', status: 'RUNNING', attemptCount: 1 }
+              document: {
+                id: 12,
+                title: 'Tài liệu demo',
+                description: null,
+                author: null,
+                fileType: 'DOCX',
+                pageCount: null,
+                previewStatus: 'PENDING',
+                previewAvailable: false,
+                previewUrl: null,
+                originalFileUrl: '/api/documents/12/file',
+                processingStatus: 'PROCESSING',
+                visibilityStatus: 'VISIBLE'
+              },
+              job: { id: 34, jobType: 'INGEST', status: 'RUNNING', attemptCount: 1 },
+              previewJob: {
+                id: 35,
+                jobType: 'GENERATE_PDF_PREVIEW',
+                status: 'QUEUED',
+                attemptCount: 0
+              }
             }
           }),
           400: response('Invalid file.', 'ErrorResponse'),
@@ -472,9 +693,14 @@ const definition = {
         summary: 'List READY and VISIBLE library documents',
         security: [{ bearerAuth: [] }],
         parameters: [
-          { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0, default: 0 } },
+          { name: 'page', in: 'query', description: 'Canonical 1-based page. With offset, offset must equal (page - 1) * limit.', schema: { type: 'integer', minimum: 1, default: 1 } },
           { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } },
-          { name: 'search', in: 'query', schema: { type: 'string', maxLength: 255 } }
+          { name: 'q', in: 'query', description: 'Canonical literal partial search across title, description and author. With search, normalized values must match. Maximum 255 characters.', schema: { type: 'string', maxLength: 255 } },
+          { name: 'fileType', in: 'query', schema: { type: 'string', enum: ['PDF', 'DOCX', 'TXT'] } },
+          { name: 'author', in: 'query', description: 'Literal partial author filter. Maximum 255 characters.', schema: { type: 'string', maxLength: 255 } },
+          { name: 'sort', in: 'query', schema: { type: 'string', enum: ['newest', 'oldest', 'title_asc', 'title_desc'], default: 'newest' } },
+          { name: 'offset', in: 'query', deprecated: true, description: 'Legacy exact record offset. With page, it must equal (page - 1) * limit.', schema: { type: 'integer', minimum: 0 } },
+          { name: 'search', in: 'query', deprecated: true, description: 'Legacy alias for q. With q, normalized values must match.', schema: { type: 'string', maxLength: 255 } }
         ],
         responses: {
           200: response('Document Library page.', 'LibraryPageResponse', {
@@ -482,20 +708,30 @@ const definition = {
             message: 'OK',
             data: {
               offset: 0,
+              page: 1,
               limit: 20,
               total: 1,
+              totalPages: 1,
               documents: [{
                 id: 12,
                 title: 'Tài liệu demo',
+                description: 'Mô tả công khai',
+                author: 'Tác giả',
                 fileType: 'PDF',
                 fileSize: 123456,
-                pageCount: null,
+                pageCount: 12,
+                previewStatus: 'READY',
+                previewAvailable: true,
+                previewMimeType: 'application/pdf',
+                previewUrl: '/api/library/documents/12/preview',
                 createdAt: '2026-07-22T08:00:00.000Z',
-                originalAvailable: true
+                updatedAt: '2026-07-22T08:00:00.000Z',
+                originalAvailable: true,
+                originalFileUrl: '/api/library/documents/12/source'
               }]
             }
           }),
-          400: response('Unsupported management filter or invalid pagination.', 'ErrorResponse'),
+          400: response('Unsupported management filter or invalid query.', 'ErrorResponse'),
           401: response('User Bearer token is missing or invalid.', 'ErrorResponse'),
           403: response('Authenticated role is not permitted.', 'ErrorResponse')
         }
@@ -515,11 +751,19 @@ const definition = {
               document: {
                 id: 12,
                 title: 'Tài liệu demo',
+                description: 'Mô tả công khai',
+                author: 'Tác giả',
                 fileType: 'PDF',
                 fileSize: 123456,
-                pageCount: null,
+                pageCount: 12,
+                previewStatus: 'READY',
+                previewAvailable: true,
+                previewMimeType: 'application/pdf',
+                previewUrl: '/api/library/documents/12/preview',
                 createdAt: '2026-07-22T08:00:00.000Z',
-                originalAvailable: true
+                updatedAt: '2026-07-22T08:00:00.000Z',
+                originalAvailable: true,
+                originalFileUrl: '/api/library/documents/12/source'
               }
             }
           }),
@@ -544,13 +788,42 @@ const definition = {
         }
       }
     },
+    '/api/library/documents/{id}/preview': {
+      get: {
+        tags: ['Document Library'],
+        summary: 'Open authenticated PDF preview for an eligible library document',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
+        responses: {
+          200: previewFileResponse('Original PDF or generated DOCX PDF preview streamed inline.'),
+          401: response('User Bearer token is missing or invalid.', 'ErrorResponse'),
+          403: response('Authenticated role is not permitted.', 'ErrorResponse'),
+          404: response('Document is absent or no longer READY + VISIBLE.', 'ErrorResponse'),
+          409: response('Preview is pending, failed, not applicable or missing.', 'ErrorResponse')
+        }
+      }
+    },
     '/api/documents/{id}': {
-      get: { tags: ['Documents'], summary: 'Document detail', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 200: response('Document detail.'), 403: response('TEACHER or ADMIN role required.', 'ErrorResponse'), 404: response('Not found or not owned.', 'ErrorResponse') } },
-      patch: { tags: ['Documents'], summary: 'Update immutable document title only', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], requestBody: jsonBody({ $ref: '#/components/schemas/DocumentUpdateBody' }), responses: { 200: response('Updated.'), 403: response('TEACHER or ADMIN role required.', 'ErrorResponse'), 404: response('Not found or not owned.', 'ErrorResponse'), 409: response('Deleted document.', 'ErrorResponse') } },
+      get: { tags: ['Documents'], summary: 'Document detail', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 200: response('Document detail.', 'ManagementDocumentDetailResponse'), 403: response('TEACHER or ADMIN role required.', 'ErrorResponse'), 404: response('Not found or not owned.', 'ErrorResponse') } },
+      patch: { tags: ['Documents'], summary: 'Update title, description or author without re-ingest', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], requestBody: jsonBody({ $ref: '#/components/schemas/DocumentUpdateBody' }), responses: { 200: response('Updated.', 'ManagementDocumentResponse'), 403: response('TEACHER or ADMIN role required.', 'ErrorResponse'), 404: response('Not found or not owned.', 'ErrorResponse'), 409: response('Deleted document.', 'ErrorResponse') } },
       delete: { tags: ['Documents'], summary: 'Soft-delete document through operation job', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 202: response('Delete operation accepted.'), 403: response('TEACHER or ADMIN role required.', 'ErrorResponse'), 404: response('Not found or not owned.', 'ErrorResponse'), 503: response('RAG operation failed.', 'ErrorResponse') } }
     },
     '/api/documents/{id}/file': {
-      get: { tags: ['Documents'], summary: 'Download original file for owner/Admin', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 200: originalFileResponse('Original PDF/DOCX/TXT attachment stream; no derived preview and no Range/206.'), 403: response('TEACHER or ADMIN role required.', 'ErrorResponse'), 404: response('Unavailable or not owned.', 'ErrorResponse') } }
+      get: { tags: ['Documents'], summary: 'Download original file for owner/Admin', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 200: originalFileResponse('Original PDF/DOCX/TXT attachment stream; no Range/206.'), 403: response('TEACHER or ADMIN role required.', 'ErrorResponse'), 404: response('Unavailable or not owned.', 'ErrorResponse') } }
+    },
+    '/api/documents/{id}/preview': {
+      get: {
+        tags: ['Documents'],
+        summary: 'Open authenticated PDF preview for owner/Admin',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
+        responses: {
+          200: previewFileResponse('Original PDF or generated DOCX PDF preview streamed inline.'),
+          403: response('TEACHER or ADMIN role required.', 'ErrorResponse'),
+          404: response('Unavailable or not owned.', 'ErrorResponse'),
+          409: response('Preview is pending, failed, not applicable or missing.', 'ErrorResponse')
+        }
+      }
     },
     '/api/documents/jobs/{jobId}': {
       get: { tags: ['Document Processing'], summary: 'Processing job status for owner/Admin', security: [{ bearerAuth: [] }], parameters: [{ name: 'jobId', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 200: response('Processing job.', 'SuccessResponse', { success: true, message: 'OK', data: { id: 34, documentId: 12, jobType: 'INGEST', status: 'SUCCEEDED', currentStage: 'COMPLETED', attemptCount: 1, totalChunks: 8 } }), 403: response('TEACHER or ADMIN role required.', 'ErrorResponse'), 404: response('Not found or not owned.', 'ErrorResponse') } }
@@ -562,7 +835,7 @@ const definition = {
       post: { tags: ['Documents'], summary: 'Enable retrieval for READY document', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 202: response('Unhide operation accepted.'), 403: response('TEACHER or ADMIN role required.', 'ErrorResponse'), 404: response('Not found or not owned.', 'ErrorResponse'), 409: response('Invalid transition.', 'ErrorResponse') } }
     },
     '/api/internal/rag/processing-callback': {
-      post: { tags: ['Internal RAG'], summary: 'Complete-manifest processing callback', security: [{ internalBearer: [] }], requestBody: jsonBody({ $ref: '#/components/schemas/ProcessingCallbackBody' }), responses: { 200: response('ACK, duplicate or stale ignored.'), 400: response('Invalid callback.', 'ErrorResponse'), 401: response('Invalid internal token.', 'ErrorResponse') } }
+      post: { tags: ['Internal RAG'], summary: 'Complete-manifest processing callback', security: [{ internalBearer: [] }], requestBody: jsonBody({ $ref: '#/components/schemas/ProcessingCallbackBody' }), responses: { 200: response('Machine-readable activation ACK.', 'ProcessingCallbackAckResponse'), 400: response('Invalid callback.', 'ErrorResponse'), 401: response('Invalid internal token.', 'ErrorResponse') } }
     },
     '/api/chat/sessions': {
       get: { tags: ['Chat Sessions'], summary: 'List own chat sessions', security: [{ bearerAuth: [] }], parameters: [{ name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0, default: 0 } }, { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } }], responses: { 200: response('Session page.') } },
@@ -606,19 +879,21 @@ const operationDescriptions = {
   'GET /api/admin/users': 'Actor: ADMIN. Đọc danh sách user có pagination/filter; không dành cho TEACHER/STUDENT.',
   'GET /api/admin/users/{id}': 'Actor: ADMIN. Đọc account/profile detail của user theo id; không trả password/token hash.',
   'PUT /api/admin/users/{id}/status': 'Actor: ADMIN. Thực hiện approve/reject/reopen/lock/unlock theo transition hợp lệ; lock tăng auth_version.',
-  'GET /api/documents': 'Actor: TEACHER hoặc ADMIN. TEACHER chỉ thấy document mình upload, ADMIN thấy toàn bộ; mặc định không list DELETED. STUDENT bị từ chối management API; cả ba role dùng /api/library để đọc public catalog.',
-  'POST /api/documents': 'Actor: TEACHER hoặc ADMIN. Validate và lưu PDF/DOCX/TXT (DOCX phải là bounded OOXML archive), tạo document + INGEST job rồi dispatch Python. HTTP 202 chỉ là accepted; tiếp theo poll GET /api/documents/jobs/{jobId} đến SUCCEEDED và kiểm tra document READY.',
-  'GET /api/library/documents': 'Actor: STUDENT, TEACHER hoặc ADMIN. Ba role nhận cùng public DTO; danh sách luôn bị server khóa vào document READY + VISIBLE, chưa deleted. Client chỉ điều khiển offset/limit và optional title search, không thể filter owner, processing, visibility, deletion hoặc job state.',
+  'GET /api/documents': 'Actor: TEACHER hoặc ADMIN. STUDENT bị từ chối. TEACHER luôn bị server giới hạn vào document mình upload và không được gửi ownerId; ADMIN thấy toàn bộ hoặc lọc ownerId. q tìm OR trong title/description/author/original filename; fileType, processingStatus, visibilityStatus, previewStatus và ownerId kết hợp AND. page/limit và sort newest|oldest|title_asc|title_desc có id tie-breaker; %, _ và \\ trong q là ký tự literal. search là alias legacy: q+search được chấp nhận khi giống nhau sau trim. offset là exact legacy offset: page+offset được chấp nhận khi offset=(page-1)*limit; cặp mâu thuẫn trả 400.',
+  'POST /api/documents': 'Actor: TEACHER hoặc ADMIN. Nhận multipart file + optional title/description/author; blank title dùng filename. Node đếm PDF pages, DOCX tạo durable preview job, TXT không preview; INGEST vẫn độc lập và HTTP 202 chỉ là accepted.',
+  'GET /api/library/documents': 'Actor: STUDENT, TEACHER hoặc ADMIN. Ba role nhận cùng public DTO; server luôn khóa scope vào READY + VISIBLE, chưa deleted. q tìm OR trong title/description/author; fileType và author kết hợp AND. page/limit và sort newest|oldest|title_asc|title_desc có id tie-breaker; %, _ và \\ trong q/author là ký tự literal. Client không thể filter owner, processing, visibility, preview hoặc job state. search là alias legacy: q+search được chấp nhận khi giống nhau sau trim. offset là exact legacy offset: page+offset được chấp nhận khi offset=(page-1)*limit; cặp mâu thuẫn trả 400.',
   'GET /api/library/documents/{id}': 'Actor: STUDENT, TEACHER hoặc ADMIN. Trả cùng DTO allowlist của document READY + VISIBLE; trạng thái khác hoặc id không tồn tại cùng trả 404 để không lộ lifecycle nội bộ.',
   'GET /api/library/documents/{id}/source': 'Actor: STUDENT, TEACHER hoặc ADMIN. Stream original của document vẫn READY + VISIBLE dưới dạng attachment. Record không đủ điều kiện trả 404; record hợp lệ nhưng original bị thiếu trả 409 ORIGINAL_SOURCE_UNAVAILABLE.',
+  'GET /api/library/documents/{id}/preview': 'Actor: STUDENT, TEACHER hoặc ADMIN. Chỉ document READY + VISIBLE; PDF stream original inline, DOCX stream generated PDF khi preview READY. Preview thiếu/pending/failed trả 409 và không nới Library scope.',
   'GET /api/documents/{id}': 'Actor: document owner TEACHER hoặc ADMIN. Đọc metadata và latest job; storage_key không được public.',
-  'PATCH /api/documents/{id}': 'Actor: document owner TEACHER hoặc ADMIN. Chỉ đổi title; file gốc immutable và muốn thay nội dung phải upload document mới.',
+  'PATCH /api/documents/{id}': 'Actor: document owner TEACHER hoặc ADMIN. Chỉ đổi title/description/author; không tạo RAG job, không re-ingest, không sửa pageCount/preview/system metadata hoặc citation snapshot.',
   'DELETE /api/documents/{id}': 'Actor: document owner TEACHER hoặc ADMIN. Tạo async DELETE_VECTORS job rồi soft-delete business document; poll job status. Chat/citation snapshot không bị xóa.',
-  'GET /api/documents/{id}/file': 'Actor: document owner TEACHER hoặc ADMIN. Stream original PDF/DOCX/TXT as attachment khi local upload còn tồn tại. Không có derived preview hoặc byte Range/206; nếu corpus original chưa được materialize về upload volume thì trả FILE_NOT_FOUND.',
+  'GET /api/documents/{id}/file': 'Actor: document owner TEACHER hoặc ADMIN. Stream original PDF/DOCX/TXT as attachment khi local upload còn tồn tại; server kiểm tra ownership, không lộ storage path và chưa có byte Range/206.',
+  'GET /api/documents/{id}/preview': 'Actor: document owner TEACHER hoặc ADMIN. Stream PDF preview inline: original PDF hoặc generated DOCX PDF. Preview unavailable trả 409; Student không được dùng management namespace.',
   'GET /api/documents/jobs/{jobId}': 'Actor: owner của document hoặc ADMIN. Poll trạng thái QUEUED/RUNNING/SUCCEEDED/FAILED/CANCELLED; document chỉ dùng cho retrieval sau khi INGEST SUCCEEDED và processingStatus READY.',
   'POST /api/documents/{id}/hide': 'Actor: document owner TEACHER hoặc ADMIN. Tạo async SET_RETRIEVAL job để loại document khỏi retrieval nhưng giữ vectors và citation/history; poll job status.',
   'POST /api/documents/{id}/unhide': 'Actor: document owner TEACHER hoặc ADMIN. Tạo async SET_RETRIEVAL job để bật lại READY document; poll job status trước khi chat.',
-  'POST /api/internal/rag/processing-callback': 'Service-to-service only: Python RAG gọi bằng internal Bearer. Không dùng user JWT, không dành cho Web/Mobile/Swagger tester. Node validate attempt/idempotency/manifest rồi persist MySQL.',
+  'POST /api/internal/rag/processing-callback': 'Service-to-service only: Python RAG gọi bằng internal Bearer, không dùng user JWT. Node trả outcome/canActivate machine-readable; chỉ current accepted attempt hoặc replay cùng manifest được activate, stale/conflict/reject luôn canActivate=false.',
   'GET /api/chat/sessions': 'Actor: ACTIVE authenticated user. Chỉ list session chưa soft-delete của chính user, theo offset/limit; ADMIN không tự động đọc chat người khác.',
   'POST /api/chat/sessions': 'Actor: ACTIVE authenticated user. Tạo session thuộc chính user; title optional và chưa gọi Python/RAG.',
   'GET /api/chat/sessions/{id}': 'Actor: session owner. Đọc session detail kèm paginated messages/citations; endpoint read-only và không mở quyền ADMIN đọc session người khác.',

@@ -7,6 +7,8 @@
 | `id` | BIGINT UNSIGNED, auto | PK | Document ID; Python receives `String(id)` |
 | `uploaded_by` | BIGINT UNSIGNED, required | FK `users.id` RESTRICT; owner index | Teacher/Admin owner |
 | `title` | VARCHAR(255), required | — | Mutable display title |
+| `description` | VARCHAR(2000), nullable | — | Mutable user description; not sent to Python in CURRENT |
+| `author` | VARCHAR(255), nullable | — | Mutable user-provided author label; not an authorization identity |
 | `original_filename` | VARCHAR(255), required | — | Sanitized original name |
 | `storage_type` | VARCHAR(20), default `LOCAL` | UNIQUE with key, CHECK | `LOCAL` or future `OBJECT` |
 | `storage_key` | VARCHAR(512), required | UNIQUE with type | Relative case-sensitive key; never public |
@@ -14,6 +16,10 @@
 | `mime_type` | VARCHAR(127), required | — | Validated MIME |
 | `file_size_bytes` | BIGINT UNSIGNED, required | CHECK `>0` | Original size |
 | `checksum_sha256` | CHAR(64), required | index | File digest; not unique |
+| `page_count` | INT UNSIGNED, nullable | CHECK positive | Node-owned physical PDF page count; for DOCX, generated PDF preview pages; TXT null |
+| `preview_status` | VARCHAR(20), default `PENDING` | CHECK | `PENDING`, `READY`, `FAILED`, `NOT_APPLICABLE` |
+| `preview_storage_key` | VARCHAR(512), nullable | — | Generated PDF relative key for DOCX; never public; PDF reuses original |
+| `preview_mime_type` | VARCHAR(127), nullable | — | `application/pdf` for READY PDF/DOCX preview |
 | `processing_status` | VARCHAR(20), default `UPLOADED` | retrieval index, CHECK | `UPLOADED`, `PROCESSING`, `READY`, `FAILED`, `CANCELLED` |
 | `visibility_status` | VARCHAR(20), default `VISIBLE` | owner/retrieval indexes, CHECK | `VISIBLE`, `HIDDEN`, `DELETED` |
 | `processed_at` | DATETIME(3), nullable | CHECK with READY | Current successful processing time |
@@ -28,11 +34,11 @@
 |---|---|---|---|
 | `id` | BIGINT UNSIGNED, auto | PK | Job ID |
 | `document_id` | BIGINT UNSIGNED, required | FK `documents.id` RESTRICT; history index | Target document |
-| `job_type` | VARCHAR(32), required | CHECK | `INGEST`, `REPROCESS`, `SET_RETRIEVAL`, `DELETE_VECTORS` |
+| `job_type` | VARCHAR(32), required | CHECK | `INGEST`, `REPROCESS`, `SET_RETRIEVAL`, `DELETE_VECTORS`, `GENERATE_PDF_PREVIEW` |
 | `status` | VARCHAR(20), default `QUEUED` | status index, CHECK | `QUEUED`, `RUNNING`, `SUCCEEDED`, `FAILED`, `CANCELLED` |
 | `current_stage` | VARCHAR(32), nullable | — | High-level Python stage |
 | `attempt_count` | TINYINT UNSIGNED, default 0 | CHECK with max | Incremented before dispatch; callback stale guard |
-| `max_attempts` | TINYINT UNSIGNED, default 3 | CHECK `>=1` | Retry ceiling; no scheduler in MVP |
+| `max_attempts` | TINYINT UNSIGNED, default 3 | CHECK `>=1` | Retry ceiling; local preview worker retries DB-backed preview jobs |
 | `pipeline_version` | VARCHAR(50), nullable | — | Pipeline identity |
 | `parser_name` | VARCHAR(100), nullable | — | Parser result metadata |
 | `embedding_model` | VARCHAR(150), nullable | — | Model metadata from Python |

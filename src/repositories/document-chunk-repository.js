@@ -35,6 +35,18 @@ async function countByJob(processingJobId, executor) {
   return Number(rows[0].total);
 }
 
+async function listByJob(processingJobId, executor) {
+  const [rows] = await db(executor).execute(
+    `SELECT chunk_index, vector_node_id, chunk_text, content_hash, token_count,
+            page_number, section_title, source_locator
+     FROM document_chunks
+     WHERE processing_job_id = ?
+     ORDER BY chunk_index ASC`,
+    [processingJobId]
+  );
+  return rows;
+}
+
 async function findByVectorNodeIds(vectorNodeIds, executor) {
   if (!vectorNodeIds.length) return [];
   const placeholders = vectorNodeIds.map(() => '?').join(',');
@@ -52,5 +64,6 @@ module.exports = {
   deleteByDocument,
   insertManifest,
   countByJob,
+  listByJob,
   findByVectorNodeIds
 };

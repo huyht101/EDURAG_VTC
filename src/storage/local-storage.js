@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const fs = require('fs/promises');
 const path = require('path');
-const { createReadStream } = require('fs');
+const { constants, createReadStream } = require('fs');
 
 const uploadConfig = require('../configs/upload');
 const appError = require('../utils/app-error');
@@ -34,6 +34,20 @@ async function save(buffer, extension) {
   await fs.mkdir(path.dirname(target), { recursive: true });
   await fs.writeFile(target, buffer, { flag: 'wx' });
   return key;
+}
+
+async function publish(sourcePath, storageKey) {
+  const target = resolveStorageKey(storageKey);
+  const temporaryTarget = `${target}.${crypto.randomUUID()}.tmp`;
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  try {
+    await fs.copyFile(sourcePath, temporaryTarget, constants.COPYFILE_EXCL);
+    await fs.rename(temporaryTarget, target);
+  } catch (error) {
+    await fs.rm(temporaryTarget, { force: true }).catch(() => {});
+    throw error;
+  }
+  return storageKey;
 }
 
 async function remove(storageKey) {
@@ -70,4 +84,4 @@ async function exists(storageKey) {
   }
 }
 
-module.exports = { save, remove, open, exists, resolveStorageKey };
+module.exports = { save, publish, remove, open, exists, resolveStorageKey };

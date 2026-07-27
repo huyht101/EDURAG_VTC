@@ -1,25 +1,31 @@
 const pool = require('../configs/db');
 const sqlPageNumbers = require('../utils/pagination');
+const { likePattern, orderBySql } = require('../utils/document-list-query');
 
 function db(executor) {
   return executor || pool;
 }
 
 const SELECT_FIELDS = `
-  d.id, d.uploaded_by, d.title, d.original_filename, d.storage_type, d.storage_key,
+  d.id, d.uploaded_by, d.title, d.description, d.author,
+  d.original_filename, d.storage_type, d.storage_key,
   d.file_type, d.mime_type, d.file_size_bytes, d.checksum_sha256,
+  d.page_count, d.preview_status, d.preview_storage_key, d.preview_mime_type,
   d.processing_status, d.visibility_status, d.processed_at, d.deleted_at,
   d.created_at, d.updated_at`;
 
 async function createDocument(data, executor) {
   const [result] = await db(executor).execute(
     `INSERT INTO documents
-      (uploaded_by, title, original_filename, storage_type, storage_key, file_type,
-       mime_type, file_size_bytes, checksum_sha256, processing_status, visibility_status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (uploaded_by, title, description, author, original_filename, storage_type, storage_key,
+       file_type, mime_type, file_size_bytes, checksum_sha256, page_count, preview_status,
+       preview_storage_key, preview_mime_type, processing_status, visibility_status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
-      data.uploadedBy, data.title, data.originalFilename, data.storageType, data.storageKey,
-      data.fileType, data.mimeType, data.fileSizeBytes, data.checksumSha256,
+      data.uploadedBy, data.title, data.description, data.author,
+      data.originalFilename, data.storageType, data.storageKey, data.fileType,
+      data.mimeType, data.fileSizeBytes, data.checksumSha256, data.pageCount,
+      data.previewStatus, data.previewStorageKey, data.previewMimeType,
       data.processingStatus, data.visibilityStatus
     ]
   );
@@ -60,11 +66,26 @@ async function listDocuments(filters, executor) {
   } else {
     conditions.push("d.visibility_status <> 'DELETED'");
   }
-  if (filters.search) {
-    conditions.push('(d.title LIKE ? OR d.original_filename LIKE ?)');
-    params.push(`%${filters.search}%`, `%${filters.search}%`);
+  if (filters.fileType) {
+    conditions.push('d.file_type = ?');
+    params.push(filters.fileType);
+  }
+  if (filters.previewStatus) {
+    conditions.push('d.preview_status = ?');
+    params.push(filters.previewStatus);
+  }
+  if (filters.q) {
+    const pattern = likePattern(filters.q);
+    conditions.push(`(
+      d.title LIKE ? ESCAPE '!'
+      OR d.description LIKE ? ESCAPE '!'
+      OR d.author LIKE ? ESCAPE '!'
+      OR d.original_filename LIKE ? ESCAPE '!'
+    )`);
+    params.push(pattern, pattern, pattern, pattern);
   }
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const orderBy = orderBySql(filters.sort);
   const database = db(executor);
   const [countRows] = await database.execute(
     `SELECT COUNT(*) AS total FROM documents d ${where}`,
@@ -74,15 +95,62 @@ async function listDocuments(filters, executor) {
     `SELECT ${SELECT_FIELDS}
      FROM documents d
      ${where}
-     ORDER BY d.created_at DESC, d.id DESC
+     ORDER BY ${orderBy}
      LIMIT ${page.limit} OFFSET ${page.offset}`,
     params
   );
   return { total: Number(countRows[0].total), documents: rows };
 }
 
-async function updateTitle(id, title, executor) {
-  await db(executor).execute('UPDATE documents SET title = ? WHERE id = ?', [title, id]);
+async function updateMetadata(id, metadata, executor) {
+  const assignments = [];
+  const params = [];
+  for (const [field, column] of [
+    ['title', 'title'],
+    ['description', 'description'],
+    ['author', 'author']
+  ]) {
+    if (Object.prototype.hasOwnProperty.call(metadata, field)) {
+      assignments.push(`${column} = ?`);
+      params.push(metadata[field]);
+    }
+  }
+  if (!assignments.length) return;
+  params.push(id);
+  await db(executor).execute(
+    `UPDATE documents SET ${assignments.join(', ')} WHERE id = ?`,
+    params
+  );
+}
+
+async function updatePreview(id, data, executor) {
+  await db(executor).execute(
+    `UPDATE documents
+     SET preview_status = ?, preview_storage_key = ?, preview_mime_type = ?, page_count = ?
+     WHERE id = ?`,
+    [data.status, data.storageKey ?? null, data.mimeType ?? null, data.pageCount ?? null, id]
+  );
+}
+
+async function listForPreviewBackfill({ afterId = 0, limit = 100 }, executor) {
+  const page = sqlPageNumbers(0, limit);
+  const [rows] = await db(executor).execute(
+    `SELECT ${SELECT_FIELDS}
+     FROM documents d
+     WHERE d.id > ?
+       AND d.visibility_status <> 'DELETED'
+       AND d.file_type IN ('PDF','DOCX')
+       AND (
+         (d.file_type = 'PDF' AND d.page_count IS NULL)
+         OR
+         (d.file_type = 'DOCX' AND
+           (d.preview_status <> 'READY' OR d.preview_storage_key IS NULL OR d.page_count IS NULL))
+       )
+     ORDER BY d.id ASC
+     LIMIT ${page.limit}`,
+    [afterId]
+  );
+  return rows;
 }
 
 async function updateProcessingStatus(id, status, executor) {
@@ -111,7 +179,9 @@ module.exports = {
   findById,
   findByIdForUpdate,
   listDocuments,
-  updateTitle,
+  updateMetadata,
+  updatePreview,
+  listForPreviewBackfill,
   updateProcessingStatus,
   updateVisibility
 };

@@ -71,8 +71,8 @@ def test_usage_call_valid():
     """UsageCall schema valid với tất cả fields."""
     from models.schemas import UsageCall
     uc = UsageCall(
-        call_index=0,
-        operation="QUERY_REWRITE",
+        call_index=1,
+        operation_type="QUERY_REWRITE",
         provider="google",
         model="models/gemini-2.5-flash",
         prompt_tokens=100,
@@ -80,25 +80,25 @@ def test_usage_call_valid():
         total_tokens=150,
         status="SUCCEEDED",
     )
-    assert uc.call_index == 0
-    assert uc.operation == "QUERY_REWRITE"
+    assert uc.call_index == 1
+    assert uc.operation_type == "QUERY_REWRITE"
     assert uc.status == "SUCCEEDED"
-    assert uc.error_message is None
+    assert uc.error_code is None
 
 
-def test_usage_call_failed_requires_error_message_optional():
-    """FAILED status có thể không có error_message (Optional)."""
+def test_usage_call_failed_accepts_machine_readable_error_code():
+    """FAILED status có optional machine-readable error_code."""
     from models.schemas import UsageCall
     uc = UsageCall(
         call_index=1,
-        operation="ANSWER_GENERATION",
+        operation_type="ANSWER_GENERATION",
         provider="google",
         model="models/gemini-2.5-flash",
         status="FAILED",
-        error_message="Network timeout",
+        error_code="UPSTREAM_TIMEOUT",
     )
     assert uc.status == "FAILED"
-    assert uc.error_message == "Network timeout"
+    assert uc.error_code == "UPSTREAM_TIMEOUT"
 
 
 def test_usage_call_invalid_operation():
@@ -106,8 +106,18 @@ def test_usage_call_invalid_operation():
     from models.schemas import UsageCall
     with pytest.raises(ValidationError):
         UsageCall(
+            call_index=1,
+            operation_type="INVALID_OP",
+            model="m",
+        )
+
+
+def test_usage_call_rejects_zero_based_index():
+    from models.schemas import UsageCall
+    with pytest.raises(ValidationError):
+        UsageCall(
             call_index=0,
-            operation="INVALID_OP",
+            operation_type="QUERY_REWRITE",
             model="m",
         )
 
@@ -128,13 +138,13 @@ def test_query_response_usage_calls_backward_compatible():
 def test_query_response_with_usage_calls():
     """QueryResponse với usage_calls đầy đủ."""
     from models.schemas import QueryResponse, UsageCall
-    uc0 = UsageCall(call_index=0, operation="QUERY_REWRITE", model="m", status="SUCCEEDED")
-    uc1 = UsageCall(call_index=1, operation="ANSWER_GENERATION", model="m", status="SUCCEEDED")
+    uc0 = UsageCall(call_index=1, operation_type="QUERY_REWRITE", model="m", status="SUCCEEDED")
+    uc1 = UsageCall(call_index=2, operation_type="ANSWER_GENERATION", model="m", status="SUCCEEDED")
     response = QueryResponse(
         answer="Câu trả lời [1]",
         no_answer=False,
         usage_calls=[uc0, uc1],
     )
     assert len(response.usage_calls) == 2
-    assert response.usage_calls[0].call_index == 0
-    assert response.usage_calls[1].call_index == 1
+    assert response.usage_calls[0].call_index == 1
+    assert response.usage_calls[1].call_index == 2

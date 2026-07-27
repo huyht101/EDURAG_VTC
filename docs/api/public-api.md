@@ -30,7 +30,7 @@ Các endpoint register/login/OTP/forgot/reset có per-process in-memory rate lim
 | Citation/source | Citation thuộc session của mình | Citation thuộc session của mình | Citation thuộc session của mình |
 | Dashboard | Không | Không | Basic `LLM_CALLS_ONLY` summary |
 
-ADMIN không tự động đọc chat session của user khác. Pagination dùng `offset`/`limit` với server-side maximum.
+ADMIN không tự động đọc chat session của user khác. Document Library/Management dùng `page` (mặc định 1), `limit` (mặc định 20, tối đa 100) và trả thêm `offset`, `total`, `totalPages`; `offset` vẫn là alias legacy. Các API history hiện hữu tiếp tục dùng `offset`/`limit` theo OpenAPI.
 
 ## Workflow chính
 
@@ -40,13 +40,17 @@ Student đăng ký thành `ACTIVE`; Teacher thành `PENDING` và cần Admin rev
 
 ### Document ingest
 
-`POST /api/documents` nhận `multipart/form-data` với `file` và optional `title`; hỗ trợ PDF/DOCX/TXT. DOCX phải là bounded OOXML ZIP có core members, không chỉ mang ZIP magic bytes. Response `202` chỉ xác nhận document/job đã được tạo và dispatch, chưa có nghĩa document `READY`.
+`POST /api/documents` nhận `multipart/form-data` với `file` và optional `title`, `description`, `author`; hỗ trợ PDF/DOCX/TXT. Blank title dùng filename bỏ extension. Node sở hữu `pageCount`: original PDF physical pages; DOCX generated-PDF preview pages sau conversion; TXT null. DOCX phải là bounded OOXML ZIP có core members, không chỉ mang ZIP magic bytes. Response `202` chỉ xác nhận document/jobs đã được tạo và dispatch, chưa có nghĩa RAG hoặc preview đã hoàn tất.
 
 Client poll `GET /api/documents/jobs/{jobId}`. Chỉ khi job `SUCCEEDED` và document `READY + VISIBLE` thì document mới thuộc retrieval corpus. Hide tắt retrieval nhưng giữ vectors; delete soft-delete và giữ chat/citation history. Original file không immutable-update: thay nội dung bằng upload document mới.
 
 ### Document Library
 
-Student, Teacher và Admin dùng cùng namespace read-only: `GET /api/library/documents`, `GET /api/library/documents/{id}` và `GET /api/library/documents/{id}/source`. Ba role nhận cùng public DTO và có thể đọc tài liệu đủ điều kiện của người khác; server luôn khóa scope vào document `READY + VISIBLE`, chưa deleted. Student vẫn bị cấm toàn bộ `/api/documents`; quyền management của Teacher tiếp tục bị khóa theo `uploaded_by`, còn Admin quản lý toàn bộ. DTO library không chứa owner, storage key, filename lưu trữ, checksum, deletion hoặc processing/job metadata. Original hợp lệ được stream dạng attachment; record đủ điều kiện nhưng thiếu file trả `409 ORIGINAL_SOURCE_UNAVAILABLE`.
+Student, Teacher và Admin dùng cùng namespace read-only: list/detail, `/{id}/source` và `/{id}/preview`. Ba role nhận cùng public DTO và có thể đọc tài liệu đủ điều kiện của người khác; server luôn khóa scope vào document `READY + VISIBLE`, chưa deleted. Student vẫn bị cấm toàn bộ `/api/documents`; Teacher management theo `uploaded_by`, Admin quản lý toàn bộ. DTO chứa metadata người dùng, page/preview/original availability và authenticated relative URLs, không chứa owner/storage/checksum/lifecycle/job metadata. Original là attachment; preview là inline PDF. Record đủ điều kiện nhưng file thiếu/pending/failed trả canonical `409`; hidden/deleted/processing/failed RAG state trả `404`.
+
+Library list nhận `q`, `fileType`, `author`, `page`, `limit`, `sort`. `q` tìm partial theo OR trên `title`, `description`, `author`; các filter còn lại kết hợp bằng AND. Management list nhận `q` trên các field đó cộng original filename, cùng `fileType`, `processingStatus`, `visibilityStatus`, `previewStatus`; riêng ADMIN có `ownerId`, còn TEACHER gửi `ownerId` nhận `403`. `sort` là `newest`, `oldest`, `title_asc` hoặc `title_desc`, luôn có `id` tie-breaker để phân trang ổn định. Input được trim; `%`, `_`, `\` là ký tự literal, không phải wildcard. Unicode tiếng Việt và dấu nháy đi qua parameterized SQL.
+
+`q` là canonical; `search` là alias legacy với cùng validation/semantics. Nếu cả hai có giá trị sau trim, chúng phải giống nhau; khác nhau trả `400`, còn whitespace được xem như không truyền. `page` là canonical 1-based; `offset` là alias legacy nhưng luôn là số record bỏ qua chính xác. Chỉ có `offset` thì response dùng `page=floor(offset/limit)+1`, kể cả offset không chia hết. Nếu gửi cả hai, `offset` phải bằng `(page-1)*limit`; không nhất quán trả `400`.
 
 ### Chat
 

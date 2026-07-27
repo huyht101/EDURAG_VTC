@@ -12,6 +12,30 @@
       "section": "Overview"
     }
   ],
+  "usage_calls": [
+    {
+      "call_index": 1,
+      "operation_type": "QUERY_REWRITE",
+      "provider": "google",
+      "model": "models/gemini-3.5-flash",
+      "prompt_tokens": 8,
+      "completion_tokens": 1,
+      "total_tokens": 9,
+      "status": "SUCCEEDED",
+      "error_code": null
+    },
+    {
+      "call_index": 2,
+      "operation_type": "ANSWER_GENERATION",
+      "provider": "google",
+      "model": "models/gemini-3.5-flash",
+      "prompt_tokens": 13,
+      "completion_tokens": 7,
+      "total_tokens": 20,
+      "status": "SUCCEEDED",
+      "error_code": null
+    }
+  ],
   "usage": {
     "model": "models/gemini-3.5-flash",
     "prompt_tokens": 21,

@@ -39,14 +39,56 @@ async function findLatestForDocument(documentId, executor) {
   return rows[0] || null;
 }
 
+async function findLatestByType(documentId, jobType, executor) {
+  const [rows] = await db(executor).execute(
+    `SELECT * FROM document_processing_jobs
+     WHERE document_id = ? AND job_type = ?
+     ORDER BY created_at DESC, id DESC LIMIT 1`,
+    [documentId, jobType]
+  );
+  return rows[0] || null;
+}
+
 async function findActiveForDocument(documentId, executor) {
   const [rows] = await db(executor).execute(
     `SELECT * FROM document_processing_jobs
      WHERE document_id = ? AND status IN ('QUEUED','RUNNING')
+       AND job_type <> 'GENERATE_PDF_PREVIEW'
      ORDER BY created_at DESC, id DESC LIMIT 1 FOR UPDATE`,
     [documentId]
   );
   return rows[0] || null;
+}
+
+async function findNextRunnableByTypeForUpdate(jobType, retryDelaySeconds, executor) {
+  const [rows] = await db(executor).execute(
+    `SELECT * FROM document_processing_jobs
+     WHERE job_type = ?
+       AND attempt_count < max_attempts
+       AND (
+         status = 'QUEUED'
+         OR (status = 'FAILED'
+           AND updated_at <= DATE_SUB(CURRENT_TIMESTAMP(3), INTERVAL ? SECOND))
+       )
+     ORDER BY created_at ASC, id ASC
+     LIMIT 1 FOR UPDATE SKIP LOCKED`,
+    [jobType, retryDelaySeconds]
+  );
+  return rows[0] || null;
+}
+
+async function recoverRunningByType(jobType, staleSeconds, executor) {
+  const [result] = await db(executor).execute(
+    `UPDATE document_processing_jobs
+     SET status = 'FAILED',
+         error_code = 'WORKER_RESTARTED',
+         error_message = 'Worker restarted before this job completed.',
+         finished_at = CURRENT_TIMESTAMP(3)
+     WHERE job_type = ? AND status = 'RUNNING'
+       AND updated_at <= DATE_SUB(CURRENT_TIMESTAMP(3), INTERVAL ? SECOND)`,
+    [jobType, staleSeconds]
+  );
+  return result.affectedRows;
 }
 
 async function markRunning(id, executor) {
@@ -132,7 +174,10 @@ module.exports = {
   findById,
   findByIdForUpdate,
   findLatestForDocument,
+  findLatestByType,
   findActiveForDocument,
+  findNextRunnableByTypeForUpdate,
+  recoverRunningByType,
   markRunning,
   markProgress,
   markSucceeded,

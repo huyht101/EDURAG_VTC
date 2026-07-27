@@ -40,8 +40,20 @@ sys.modules.setdefault("llama_index.embeddings.google_genai", MagicMock())
 from services.ingestion import (
     _make_chunk_id,
     _make_attempt_key,
+    _ack_allows_activation,
     _ATTEMPT_FIELD,
 )
+
+
+def accepted_ack(job_id: str, attempt_count: int) -> dict:
+    return {
+        "jobId": job_id,
+        "attemptCount": attempt_count,
+        "outcome": "ACCEPTED",
+        "canActivate": True,
+        "status": "SUCCEEDED",
+        "reason": None,
+    }
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -77,8 +89,9 @@ class TestMakeChunkId:
         """Output phải là UUID string hợp lệ."""
         import uuid
         chunk_id = _make_chunk_id("doc1", "job1", 1, 5)
-        # Không raise → hợp lệ
-        uuid.UUID(chunk_id)
+        parsed = uuid.UUID(chunk_id)
+        assert parsed.version == 5
+        assert parsed.variant == uuid.RFC_4122
 
     def test_retry_same_attempt_produces_same_ids(self):
         """Retry cùng attempt → cùng IDs → Qdrant upsert overwrite, không duplicate."""
@@ -90,6 +103,19 @@ class TestMakeChunkId:
         """attempt_key phải có format doc_id::job_id::attempt_count."""
         key = _make_attempt_key("doc123", "job456", 2)
         assert key == "doc123::job456::2"
+
+    def test_activation_ack_is_fail_closed(self):
+        assert _ack_allows_activation(accepted_ack("job1", 1), "job1", 1)
+        for ack in [
+            None,
+            {},
+            {**accepted_ack("job1", 1), "jobId": "other"},
+            {**accepted_ack("job1", 1), "attemptCount": 2},
+            {**accepted_ack("job1", 1), "canActivate": False},
+            {**accepted_ack("job1", 1), "outcome": "REJECTED"},
+            {**accepted_ack("job1", 1), "status": "RUNNING"},
+        ]:
+            assert not _ack_allows_activation(ack, "job1", 1)
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -148,7 +174,10 @@ async def test_ingest_upserts_with_is_hidden_true(mock_qdrant_client, mock_inges
         patch("services.ingestion.get_embedding_model") as mock_embed_factory,
         patch("services.ingestion.get_qdrant_client", new=AsyncMock(return_value=mock_qdrant_client)),
         patch("services.ingestion.send_progress", new=AsyncMock(return_value=True)),
-        patch("services.ingestion.send_succeeded_ingest", new=AsyncMock(return_value=True)),
+        patch(
+            "services.ingestion.send_succeeded_ingest",
+            new=AsyncMock(return_value=accepted_ack("job_test", 1)),
+        ),
         patch("services.ingestion.send_failed", new=AsyncMock(return_value=True)),
         patch("services.ingestion._activate_attempt_points", new=AsyncMock(return_value=1)),
     ):
@@ -188,7 +217,10 @@ async def test_activate_called_after_ack_success(mock_qdrant_client, mock_ingest
         patch("services.ingestion.get_qdrant_client", new=AsyncMock(return_value=mock_qdrant_client)),
         patch("services.ingestion.send_progress", new=AsyncMock(return_value=True)),
         # ACK thành công
-        patch("services.ingestion.send_succeeded_ingest", new=AsyncMock(return_value=True)),
+        patch(
+            "services.ingestion.send_succeeded_ingest",
+            new=AsyncMock(return_value=accepted_ack("job_test", 1)),
+        ),
         patch("services.ingestion.send_failed", new=AsyncMock()),
         patch("services.ingestion._activate_attempt_points", activate_mock),
         patch("services.ingestion._cleanup_attempt_points", new=AsyncMock(return_value=0)),
@@ -224,6 +256,7 @@ async def test_cleanup_called_when_ack_fails(mock_qdrant_client, mock_ingest_req
 
     cleanup_mock = AsyncMock(return_value=1)
     activate_mock = AsyncMock(return_value=0)
+    send_failed_mock = AsyncMock()
 
     with (
         patch("services.ingestion.parse_document", new=AsyncMock(return_value=mock_pages)),
@@ -232,8 +265,8 @@ async def test_cleanup_called_when_ack_fails(mock_qdrant_client, mock_ingest_req
         patch("services.ingestion.get_qdrant_client", new=AsyncMock(return_value=mock_qdrant_client)),
         patch("services.ingestion.send_progress", new=AsyncMock(return_value=True)),
         # ACK thất bại
-        patch("services.ingestion.send_succeeded_ingest", new=AsyncMock(return_value=False)),
-        patch("services.ingestion.send_failed", new=AsyncMock()),
+        patch("services.ingestion.send_succeeded_ingest", new=AsyncMock(return_value=None)),
+        patch("services.ingestion.send_failed", send_failed_mock),
         patch("services.ingestion._activate_attempt_points", activate_mock),
         patch("services.ingestion._cleanup_attempt_points", cleanup_mock),
     ):
@@ -256,6 +289,8 @@ async def test_cleanup_called_when_ack_fails(mock_qdrant_client, mock_ingest_req
     )
     # Activate KHÔNG được gọi
     activate_mock.assert_not_called()
+    send_failed_mock.assert_called_once()
+    assert "ACTIVATION_ACK_UNAVAILABLE" in str(send_failed_mock.call_args)
 
 
 @pytest.mark.asyncio
@@ -368,7 +403,10 @@ async def test_ingest_payload_contains_attempt_key():
         patch("services.ingestion.get_embedding_model") as mock_embed_factory,
         patch("services.ingestion.get_qdrant_client", new=AsyncMock(return_value=mock_qdrant)),
         patch("services.ingestion.send_progress", new=AsyncMock()),
-        patch("services.ingestion.send_succeeded_ingest", new=AsyncMock(return_value=True)),
+        patch(
+            "services.ingestion.send_succeeded_ingest",
+            new=AsyncMock(return_value=accepted_ack("job1", 1)),
+        ),
         patch("services.ingestion.send_failed", new=AsyncMock()),
         patch("services.ingestion._activate_attempt_points", new=AsyncMock(return_value=1)),
         patch("services.ingestion._cleanup_attempt_points", new=AsyncMock(return_value=0)),

@@ -21,6 +21,67 @@ function terminalStatus(eventType) {
   return [JOB_STATUSES.SUCCEEDED, JOB_STATUSES.FAILED, JOB_STATUSES.CANCELLED].includes(eventType);
 }
 
+function isActivationCompensation(job, payload) {
+  return job.status === JOB_STATUSES.SUCCEEDED
+    && payload.eventType === JOB_STATUSES.FAILED
+    && [JOB_TYPES.INGEST, JOB_TYPES.REPROCESS].includes(job.job_type)
+    && ['ACTIVATION_FAILED', 'ACTIVATION_ACK_UNAVAILABLE'].includes(payload.error?.code);
+}
+
+function stableJson(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'string') {
+    try {
+      return stableJson(JSON.parse(value));
+    } catch (_error) {
+      return value;
+    }
+  }
+  if (Array.isArray(value)) return value.map(stableJson);
+  if (typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value).sort().map((key) => [key, stableJson(value[key])])
+    );
+  }
+  return value;
+}
+
+function comparableChunk(chunk, persisted = false) {
+  return {
+    chunkIndex: Number(persisted ? chunk.chunk_index : chunk.chunkIndex),
+    vectorNodeId: String(persisted ? chunk.vector_node_id : chunk.vectorNodeId).toLowerCase(),
+    chunkText: persisted ? chunk.chunk_text : chunk.chunkText,
+    contentHash: String(persisted ? chunk.content_hash : chunk.contentHash).toLowerCase(),
+    tokenCount: (persisted ? chunk.token_count : chunk.tokenCount) ?? null,
+    pageNumber: (persisted ? chunk.page_number : chunk.pageNumber) ?? null,
+    sectionTitle: (persisted ? chunk.section_title : chunk.sectionTitle) ?? null,
+    sourceLocator: stableJson((persisted ? chunk.source_locator : chunk.sourceLocator) ?? null)
+  };
+}
+
+async function manifestMatches(jobId, manifest, chunks, connection) {
+  if (!Array.isArray(manifest)) return false;
+  const persisted = await chunks.listByJob(jobId, connection);
+  if (persisted.length !== manifest.length) return false;
+  const expected = [...manifest]
+    .sort((left, right) => left.chunkIndex - right.chunkIndex)
+    .map((chunk) => comparableChunk(chunk));
+  const actual = persisted.map((chunk) => comparableChunk(chunk, true));
+  return JSON.stringify(actual) === JSON.stringify(expected);
+}
+
+function ack(job, payload, outcome, canActivate, reason = null, status = job.status) {
+  return {
+    acknowledged: true,
+    jobId: job.id,
+    attemptCount: Number(payload.attemptCount),
+    outcome,
+    canActivate,
+    reason,
+    status
+  };
+}
+
 const defaultDependencies = {
   withTransaction,
   jobRepo,
@@ -45,21 +106,40 @@ async function handleCallback(payload, dependencies = defaultDependencies) {
     }
 
     if (Number(payload.attemptCount) !== Number(job.attempt_count)) {
-      return { acknowledged: true, ignored: true, reason: 'STALE_ATTEMPT' };
+      return ack(job, payload, 'IGNORED', false, 'STALE_ATTEMPT');
+    }
+    if (isActivationCompensation(job, payload)) {
+      await jobs.markFailed(job.id, payload.error.code, payload.error.message, connection);
+      await documents.updateProcessingStatus(
+        job.document_id,
+        DOCUMENT_STATUSES.processing.FAILED,
+        connection
+      );
+      return ack(job, payload, 'ACCEPTED', false, 'ACTIVATION_COMPENSATED', JOB_STATUSES.FAILED);
     }
     if (terminalStatus(job.status)) {
       if (job.status === payload.eventType) {
-        return { acknowledged: true, duplicate: true, jobId: job.id };
+        if (payload.eventType === JOB_STATUSES.SUCCEEDED
+          && [JOB_TYPES.INGEST, JOB_TYPES.REPROCESS].includes(job.job_type)) {
+          if (!Array.isArray(payload.chunks)) {
+            throw appError(400, 'CHUNK_MANIFEST_REQUIRED', 'Callback success cần complete chunk manifest.');
+          }
+          if (!(await manifestMatches(job.id, payload.chunks, chunks, connection))) {
+            return ack(job, payload, 'REJECTED', false, 'MANIFEST_CONFLICT');
+          }
+          return ack(job, payload, 'IDEMPOTENT_REPLAY', true, null, JOB_STATUSES.SUCCEEDED);
+        }
+        return ack(job, payload, 'IDEMPOTENT_REPLAY', false, null);
       }
-      return { acknowledged: true, ignored: true, reason: 'JOB_ALREADY_TERMINAL' };
+      return ack(job, payload, 'REJECTED', false, 'JOB_ALREADY_TERMINAL');
     }
     if (job.status !== JOB_STATUSES.RUNNING) {
-      return { acknowledged: true, ignored: true, reason: 'JOB_NOT_RUNNING' };
+      return ack(job, payload, 'IGNORED', false, 'JOB_NOT_RUNNING');
     }
 
     if (payload.eventType === 'PROGRESS') {
       await jobs.markProgress(job.id, payload.stage || null, connection);
-      return { acknowledged: true, jobId: job.id, status: JOB_STATUSES.RUNNING };
+      return ack(job, payload, 'ACCEPTED', false, 'PROGRESS_ONLY', JOB_STATUSES.RUNNING);
     }
 
     if (payload.eventType === JOB_STATUSES.SUCCEEDED) {
@@ -96,7 +176,14 @@ async function handleCallback(payload, dependencies = defaultDependencies) {
         }, connection);
         await documents.updateVisibility(job.document_id, config.targetVisibility, connection);
       }
-      return { acknowledged: true, jobId: job.id, status: JOB_STATUSES.SUCCEEDED };
+      return ack(
+        job,
+        payload,
+        'ACCEPTED',
+        [JOB_TYPES.INGEST, JOB_TYPES.REPROCESS].includes(job.job_type),
+        null,
+        JOB_STATUSES.SUCCEEDED
+      );
     }
 
     const errorCode = payload.error?.code || `PROCESSING_${payload.eventType}`;
@@ -117,8 +204,15 @@ async function handleCallback(payload, dependencies = defaultDependencies) {
         connection
       );
     }
-    return { acknowledged: true, jobId: job.id, status: payload.eventType };
+    return ack(job, payload, 'ACCEPTED', false, null, payload.eventType);
   });
 }
 
-module.exports = { handleCallback };
+module.exports = {
+  handleCallback,
+  stableJson,
+  comparableChunk,
+  manifestMatches,
+  ack,
+  isActivationCompensation
+};

@@ -1,6 +1,8 @@
 const libraryRepo = require('../repositories/library-repository');
 const fileService = require('./document-file-service');
+const documentDto = require('./document-dto-service');
 const appError = require('../utils/app-error');
+const { normalizeListQuery } = require('../utils/document-list-query');
 
 function parseId(value) {
   const id = Number(value);
@@ -11,28 +13,20 @@ function parseId(value) {
 }
 
 async function publicDocument(document, files = fileService) {
-  return {
-    id: document.id,
-    title: document.title,
-    fileType: document.file_type,
-    fileSize: Number(document.file_size_bytes),
-    pageCount: null,
-    createdAt: document.created_at,
-    originalAvailable: await files.exists(document.storage_key)
-  };
+  return documentDto.libraryDocument(document, files);
 }
 
 async function listDocuments(query = {}, dependencies = {}) {
   const repository = dependencies.repository || libraryRepo;
   const files = dependencies.fileService || fileService;
-  const offset = Math.max(0, Number.parseInt(query.offset, 10) || 0);
-  const limit = Math.min(100, Math.max(1, Number.parseInt(query.limit, 10) || 20));
-  const search = query.search?.trim() || '';
-  const result = await repository.listEligibleDocuments({ offset, limit, search });
+  const filters = normalizeListQuery(query);
+  const result = await repository.listEligibleDocuments(filters);
   return {
-    offset,
-    limit,
+    offset: filters.offset,
+    page: filters.page,
+    limit: filters.limit,
     total: result.total,
+    totalPages: Math.ceil(result.total / filters.limit),
     documents: await Promise.all(result.documents.map((document) => publicDocument(document, files)))
   };
 }
@@ -67,4 +61,27 @@ async function openSource(idValue, dependencies = {}) {
   }
 }
 
-module.exports = { listDocuments, getDocument, openSource, publicDocument, parseId };
+async function openPreview(idValue, dependencies = {}) {
+  const repository = dependencies.repository || libraryRepo;
+  const files = dependencies.fileService || fileService;
+  const document = await repository.findEligibleById(parseId(idValue));
+  if (!document) throw appError(404, 'LIBRARY_DOCUMENT_NOT_FOUND', 'Không tìm thấy tài liệu.');
+  const storageKey = documentDto.previewStorageKey(document);
+  if (!storageKey || !(await files.exists(storageKey))) {
+    throw appError(409, 'PREVIEW_UNAVAILABLE', 'Bản xem trước hiện không khả dụng.');
+  }
+  try {
+    return {
+      ...(await files.open(storageKey)),
+      filename: `${document.title}.pdf`,
+      mimeType: document.preview_mime_type || 'application/pdf'
+    };
+  } catch (error) {
+    if (error.code === 'FILE_NOT_FOUND') {
+      throw appError(409, 'PREVIEW_UNAVAILABLE', 'Bản xem trước hiện không khả dụng.');
+    }
+    throw error;
+  }
+}
+
+module.exports = { listDocuments, getDocument, openSource, openPreview, publicDocument, parseId };

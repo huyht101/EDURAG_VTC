@@ -2,9 +2,9 @@
 
 ## Trạng thái hiện tại
 
-**PYTHON RAG SERVICE — TUẦN 4 HOÀN THIỆN**
+**SNAPSHOT PATCHED/OFFLINE-TESTABLE — LIVE E2E CHƯA XÁC NHẬN**
 
-Tất cả task tuần 4 của đội Python/Data-RAG đã được implement và có test coverage. Service sẵn sàng để test tích hợp với Node.js/Core.
+Các mục dưới đây mô tả tracked snapshot, không chứng minh upstream Python đã nhận patch hoặc live Python/Qdrant/provider lifecycle đã PASS. Action register canonical: [Python/Data-RAG handoff](../architecture/python-rag-handoff.md).
 
 ---
 
@@ -16,15 +16,15 @@ Tất cả task tuần 4 của đội Python/Data-RAG đã được implement v�
 
 **Fix đã làm** (`services/ingestion.py`):
 - Upsert Qdrant với `is_hidden=True` (fail-closed) — chưa retrieval-enabled.
-- Sau khi `send_succeeded_ingest()` trả `True` (Node.js ACK OK) → gọi `_activate_attempt_points()` để set `is_hidden=False`.
-- Nếu callback trả `False` (ACK thất bại) → gọi `_cleanup_attempt_points()` để xóa toàn bộ points attempt này.
+- Sau khi ACK JSON đúng job/attempt trả `canActivate=true` và accepted/exact replay → gọi `_activate_attempt_points()` để set `is_hidden=False`.
+- ACK stale/rejected/conflict/malformed hoặc callback failure không activate và cleanup exact attempt.
 
 ### RAG-002: Deterministic Point ID + Cleanup ✅
 
 **Vấn đề cũ**: `chunk_id = str(uuid.uuid4())` — mỗi lần chạy sinh UUID random. Khi retry sau failure, Qdrant tích lũy thêm points thay vì overwrite → orphan vectors, count lệch.
 
 **Fix đã làm** (`services/ingestion.py`):
-- `_make_chunk_id(doc_id, job_id, attempt_count, chunk_index)` — deterministic UUID từ SHA-256 hash.
+- `_make_chunk_id(doc_id, job_id, attempt_count, chunk_index)` — deterministic RFC-4122 UUID5.
 - Cùng attempt + index → cùng ID → Qdrant upsert overwrite, không duplicate.
 - Payload mỗi point có `ingest_attempt_key = f"{doc_id}::{job_id}::{attempt_count}"` để cleanup đúng attempt.
 - Khi `attempt_count > 1`: cleanup orphan points của `attempt_count - 1` trước khi bắt đầu.
@@ -34,15 +34,15 @@ Tất cả task tuần 4 của đội Python/Data-RAG đã được implement v�
 **Vấn đề cũ**: Chỉ track usage của answer LLM call. Router LLM call không được ghi nhận → Node.js dashboard thiếu dữ liệu LLM usage.
 
 **Fix đã làm** (`services/rag_engine.py` + `models/schemas.py`):
-- Thêm `UsageCall` schema: `call_index`, `operation`, `provider`, `model`, `prompt/completion/total_tokens`, `status`.
-- `_classify_intent()` trả `(intent, usage_call)` với `call_index=0`, `operation="QUERY_REWRITE"`.
-- Answer/chit-chat call có `call_index=1`, `operation="ANSWER_GENERATION"`.
+- Thêm `UsageCall` schema: 1-based `call_index`, `operation_type`, `provider`, `model`, `prompt/completion/total_tokens`, `status`, nullable `error_code`.
+- `_classify_intent()` trả `(intent, usage_call)` với `call_index=1`, `operation_type="QUERY_REWRITE"`.
+- Answer/chit-chat call có `call_index=2`, `operation_type="ANSWER_GENERATION"`.
 - `QueryResponse.usage_calls[]` chứa tất cả calls.
 - `QueryResponse.usage` vẫn giữ (legacy aggregate, backward-compatible).
 
 ### Citation Quality ✅
 
-- `_extract_citations()`: page_number < 1 → `None`; chapter/section rỗng → `None`.
+- `_extract_citations()`: reject marker không có source, renumber marker liên tục, chọn relevant source snippet; page_number < 1 → `None`.
 - `_finalize_rag_answer()`: không có citation → `no_answer=True`, fail-closed.
 - Retrieval filter `is_hidden != True` — chỉ chunk READY+VISIBLE.
 
