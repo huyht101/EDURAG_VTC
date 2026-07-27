@@ -4,12 +4,10 @@ models/schemas.py
 Định nghĩa các Pydantic models dùng để validate dữ liệu
 giao tiếp giữa Python RAG service và Node.js backend.
 
-Phiên bản v3 — Theo sơ đồ luồng:
-- Async pattern: IngestRequest có job_id + callback_url, trả 202.
-- Callback schemas: PROGRESS / SUCCEEDED / FAILED / CANCELLED.
-- Hide/Unhide/Delete schemas.
-- Query nâng cấp: history (multi-turn) + usage tracking.
-- Error response thống nhất.
+Phiên bản v4 (Tuần 4):
+- Thêm UsageCall schema cho multi-call tracking (RAG-004).
+- QueryResponse.usage_calls[] track từng LLM call riêng.
+- Legacy QueryResponse.usage giữ để backward-compatible với Node.
 """
 
 from datetime import datetime, timezone
@@ -214,7 +212,7 @@ class Citation(BaseModel):
     vector_node_id: str = Field(..., description="Qdrant point ID của retrieved chunk")
     doc_id: str = Field(..., description="ID của tài liệu được trích dẫn")
     snippet: str = Field(..., description="Đoạn trích ngắn từ tài liệu gốc")
-    page_number: Optional[int] = Field(default=None, description="Số trang chứa thông tin")
+    page_number: Optional[int] = Field(default=None, description="Số trang chứa thông tin (1-based)")
     chapter: Optional[str] = Field(
         default=None,
         description="Tên chương (H1) chứa đoạn trích dẫn"
@@ -227,7 +225,9 @@ class Citation(BaseModel):
 
 class UsageInfo(BaseModel):
     """
-    Thông tin sử dụng LLM — để Node.js lưu vào MySQL cho dashboard.
+    Thông tin sử dụng LLM — legacy aggregate field.
+    Giữ backward-compatible với Node.js contract hiện tại.
+    Nếu có usage_calls[], đây là tổng aggregate của tất cả calls SUCCEEDED.
     """
     prompt_tokens: int = Field(default=0, description="Số token trong prompt")
     completion_tokens: int = Field(default=0, description="Số token LLM sinh ra")
@@ -235,10 +235,54 @@ class UsageInfo(BaseModel):
     model: str = Field(default="", description="Tên model đã sử dụng")
 
 
+class UsageCall(BaseModel):
+    """
+    Thông tin sử dụng LLM cho MỘT lần gọi cụ thể (RAG-004).
+
+    Node.js lưu từng entry vào llm_usage_logs với:
+    - call_index: thứ tự stable trong request
+    - operation: loại call (QUERY_REWRITE = router, ANSWER_GENERATION = RAG answer)
+    - provider/model/tokens/status: metadata đầy đủ
+
+    Không double-count: mỗi LLM call thật → đúng 1 entry.
+    """
+    call_index: int = Field(
+        ...,
+        description="Thứ tự call trong request (0-based, stable per request)"
+    )
+    operation: Literal["QUERY_REWRITE", "ANSWER_GENERATION", "REFINE", "OTHER"] = Field(
+        ...,
+        description=(
+            "Loại operation: "
+            "QUERY_REWRITE = router/classifier call, "
+            "ANSWER_GENERATION = RAG answer hoặc chit-chat call"
+        )
+    )
+    provider: str = Field(default="google", description="Provider: 'google', 'openai', ...")
+    model: str = Field(..., description="Tên model đã dùng cho call này")
+    prompt_tokens: int = Field(default=0, description="Số token trong prompt của call này")
+    completion_tokens: int = Field(default=0, description="Số token output của call này")
+    total_tokens: int = Field(default=0, description="Tổng token của call này")
+    status: Literal["SUCCEEDED", "FAILED"] = Field(
+        default="SUCCEEDED",
+        description="Kết quả của call: SUCCEEDED hoặc FAILED"
+    )
+    error_message: Optional[str] = Field(
+        default=None,
+        description="Thông báo lỗi nếu status=FAILED"
+    )
+
+
 class QueryResponse(BaseModel):
     """
     Response trả về từ endpoint POST /api/query.
     Bao gồm câu trả lời, danh sách trích dẫn, đánh giá, và usage.
+
+    Invariants:
+    - no_answer=False → citations không rỗng (ít nhất 1 structured citation)
+    - no_answer=True  → citations=[], answer là thông báo không tìm thấy hoặc chit-chat
+    - usage_calls[]   → đầy đủ tất cả LLM calls trong request (RAG-004)
+    - usage           → legacy aggregate, luôn hiện diện để backward-compatible
     """
     answer: str = Field(..., description="Câu trả lời được sinh bởi LLM")
     citations: List[Citation] = Field(
@@ -253,7 +297,20 @@ class QueryResponse(BaseModel):
         default=False,
         description="True nếu không tìm thấy thông tin liên quan trong tài liệu"
     )
+    # Multi-call usage tracking (RAG-004)
+    usage_calls: List[UsageCall] = Field(
+        default=[],
+        description=(
+            "Danh sách usage của từng LLM call riêng (router, answer, ...). "
+            "Mỗi call thật → 1 entry với call_index stable. "
+            "Node.js lưu mỗi entry vào llm_usage_logs."
+        )
+    )
+    # Legacy single-call aggregate — backward-compatible với Node contract cũ
     usage: Optional[UsageInfo] = Field(
         default=None,
-        description="Thông tin sử dụng LLM (token counts, model name)"
+        description=(
+            "Legacy aggregate usage (backward-compatible). "
+            "Tổng token của tất cả usage_calls có status=SUCCEEDED."
+        )
     )

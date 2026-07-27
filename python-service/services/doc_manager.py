@@ -3,12 +3,17 @@ services/doc_manager.py
 -----------------------
 Quản lý trạng thái tài liệu trong Qdrant.
 
-Theo sơ đồ 6 (State Machines) + sơ đồ 8 (Hide/Show/Delete Flow):
-- Hide:   Set is_hidden=true trên tất cả points có doc_id → callback SUCCEEDED
-- Unhide: Set is_hidden=false trên tất cả points có doc_id → callback SUCCEEDED
-- Delete: Xóa tất cả points có doc_id khỏi Qdrant → callback SUCCEEDED
+Phiên bản v4 (Tuần 4):
+- Hide:   Set is_hidden=True trên tất cả points có doc_id → callback SUCCEEDED.
+- Unhide: Set is_hidden=False trên tất cả points có doc_id → callback SUCCEEDED.
+- Delete: Xóa tất cả points có doc_id khỏi Qdrant → callback SUCCEEDED.
+- Đếm số points THỰC SỰ bị ảnh hưởng sau mỗi operation (idempotent).
+- Tất cả đều chạy background + callback (async pattern).
 
-Tất cả đều chạy background + callback (async pattern).
+Invariants:
+- Hide/Unhide/Delete dùng MatchValue("doc_id") để chỉ thao tác đúng document.
+- Delete xóa toàn bộ kể cả is_hidden=True (cleanup triệt để).
+- Hide/Unhide không xóa points, chỉ thay đổi payload is_hidden.
 """
 
 import logging
@@ -28,132 +33,15 @@ from services.callback import (
 logger = logging.getLogger(__name__)
 
 
-async def hide_document_background(
-    doc_id: str,
-    job_id: str,
-    attempt_count: int,
-    callback_url: str,
-) -> None:
+# ══════════════════════════════════════════════════════════════════
+# HELPER: đếm points theo doc_id
+# ══════════════════════════════════════════════════════════════════
+
+def _count_doc_points(client, collection_name: str, doc_id: str) -> int:
     """
-    Ẩn tài liệu khỏi RAG: set is_hidden=true.
-    Khi search, filter is_hidden != true sẽ bỏ qua các chunks này.
+    Đếm số points trong collection có doc_id tương ứng.
+    Tính toàn bộ kể cả is_hidden=True/False.
     """
-    try:
-        await send_progress(callback_url, job_id, attempt_count, "hiding")
-
-        settings = get_settings()
-        client = await get_qdrant_client()
-
-        # Set payload is_hidden=true cho tất cả points có doc_id
-        result = client.set_payload(
-            collection_name=settings.QDRANT_COLLECTION_NAME,
-            payload={"is_hidden": True},
-            points=models.Filter(
-                must=[
-                    models.FieldCondition(
-                        key="doc_id",
-                        match=models.MatchValue(value=doc_id),
-                    )
-                ]
-            ),
-        )
-
-        # Đếm số points đã update
-        count = _count_points_by_doc_id(client, settings.QDRANT_COLLECTION_NAME, doc_id)
-
-        logger.info("[DOC_MANAGER] Đã ẩn doc_id=%s (%d chunks)", doc_id, count)
-
-        await send_succeeded_visibility(callback_url, job_id, attempt_count, updated_count=count)
-
-    except Exception as e:
-        logger.exception("[DOC_MANAGER] Lỗi khi ẩn doc_id=%s", doc_id)
-        await send_failed(callback_url, job_id, attempt_count, "HIDE_ERROR", str(e))
-
-
-async def unhide_document_background(
-    doc_id: str,
-    job_id: str,
-    attempt_count: int,
-    callback_url: str,
-) -> None:
-    """
-    Hiện lại tài liệu trong RAG: set is_hidden=false.
-    """
-    try:
-        await send_progress(callback_url, job_id, attempt_count, "unhiding")
-
-        settings = get_settings()
-        client = await get_qdrant_client()
-
-        client.set_payload(
-            collection_name=settings.QDRANT_COLLECTION_NAME,
-            payload={"is_hidden": False},
-            points=models.Filter(
-                must=[
-                    models.FieldCondition(
-                        key="doc_id",
-                        match=models.MatchValue(value=doc_id),
-                    )
-                ]
-            ),
-        )
-
-        count = _count_points_by_doc_id(client, settings.QDRANT_COLLECTION_NAME, doc_id)
-
-        logger.info("[DOC_MANAGER] Đã hiện lại doc_id=%s (%d chunks)", doc_id, count)
-
-        await send_succeeded_visibility(callback_url, job_id, attempt_count, updated_count=count)
-
-    except Exception as e:
-        logger.exception("[DOC_MANAGER] Lỗi khi hiện lại doc_id=%s", doc_id)
-        await send_failed(callback_url, job_id, attempt_count, "UNHIDE_ERROR", str(e))
-
-
-async def delete_document_background(
-    doc_id: str,
-    job_id: str,
-    attempt_count: int,
-    callback_url: str,
-) -> None:
-    """
-    Xóa toàn bộ vectors của tài liệu khỏi Qdrant.
-    Theo sơ đồ: xóa vẫn giữ file gốc và lịch sử MySQL (Node.js xử lý).
-    """
-    try:
-        await send_progress(callback_url, job_id, attempt_count, "deleting")
-
-        settings = get_settings()
-        client = await get_qdrant_client()
-
-        # Đếm trước khi xóa
-        count = _count_points_by_doc_id(client, settings.QDRANT_COLLECTION_NAME, doc_id)
-
-        # Xóa tất cả points có doc_id
-        client.delete(
-            collection_name=settings.QDRANT_COLLECTION_NAME,
-            points_selector=models.FilterSelector(
-                filter=models.Filter(
-                    must=[
-                        models.FieldCondition(
-                            key="doc_id",
-                            match=models.MatchValue(value=doc_id),
-                        )
-                    ]
-                )
-            ),
-        )
-
-        logger.info("[DOC_MANAGER] Đã xóa doc_id=%s (%d vectors)", doc_id, count)
-
-        await send_succeeded_delete(callback_url, job_id, attempt_count, deleted_count=count)
-
-    except Exception as e:
-        logger.exception("[DOC_MANAGER] Lỗi khi xóa doc_id=%s", doc_id)
-        await send_failed(callback_url, job_id, attempt_count, "DELETE_ERROR", str(e))
-
-
-def _count_points_by_doc_id(client, collection_name: str, doc_id: str) -> int:
-    """Đếm số points trong collection có doc_id tương ứng."""
     try:
         result = client.count(
             collection_name=collection_name,
@@ -169,3 +57,155 @@ def _count_points_by_doc_id(client, collection_name: str, doc_id: str) -> int:
         return result.count
     except Exception:
         return 0
+
+
+def _make_doc_filter(doc_id: str) -> models.Filter:
+    """Filter lọc theo doc_id."""
+    return models.Filter(
+        must=[
+            models.FieldCondition(
+                key="doc_id",
+                match=models.MatchValue(value=doc_id),
+            )
+        ]
+    )
+
+
+# ══════════════════════════════════════════════════════════════════
+# HIDE — Ẩn tài liệu khỏi retrieval
+# ══════════════════════════════════════════════════════════════════
+
+async def hide_document_background(
+    doc_id: str,
+    job_id: str,
+    attempt_count: int,
+    callback_url: str,
+) -> None:
+    """
+    Ẩn tài liệu khỏi RAG: set is_hidden=True trên toàn bộ points có doc_id.
+    Sau hide, query với filter is_hidden!=true sẽ bỏ qua chunks này.
+    Idempotent: gọi nhiều lần trên doc đã hide → kết quả như nhau.
+    """
+    try:
+        await send_progress(callback_url, job_id, attempt_count, "hiding")
+
+        settings = get_settings()
+        client = await get_qdrant_client()
+
+        # Đếm TRƯỚC để biết có bao nhiêu points bị ảnh hưởng
+        count = _count_doc_points(client, settings.QDRANT_COLLECTION_NAME, doc_id)
+
+        if count == 0:
+            logger.warning(
+                "[DOC_MANAGER] Không tìm thấy points để hide: doc_id=%s — "
+                "vẫn callback SUCCEEDED (idempotent)", doc_id,
+            )
+            await send_succeeded_visibility(callback_url, job_id, attempt_count, updated_count=0)
+            return
+
+        # Set is_hidden=True cho tất cả points của doc_id
+        client.set_payload(
+            collection_name=settings.QDRANT_COLLECTION_NAME,
+            payload={"is_hidden": True},
+            points=_make_doc_filter(doc_id),
+        )
+
+        logger.info("[DOC_MANAGER] Đã hide doc_id=%s (%d chunks)", doc_id, count)
+        await send_succeeded_visibility(callback_url, job_id, attempt_count, updated_count=count)
+
+    except Exception as e:
+        logger.exception("[DOC_MANAGER] Lỗi khi hide doc_id=%s", doc_id)
+        await send_failed(callback_url, job_id, attempt_count, "HIDE_ERROR", str(e))
+
+
+# ══════════════════════════════════════════════════════════════════
+# UNHIDE — Hiện lại tài liệu
+# ══════════════════════════════════════════════════════════════════
+
+async def unhide_document_background(
+    doc_id: str,
+    job_id: str,
+    attempt_count: int,
+    callback_url: str,
+) -> None:
+    """
+    Hiện lại tài liệu trong RAG: set is_hidden=False trên toàn bộ points có doc_id.
+    Idempotent: gọi nhiều lần trên doc đang visible → kết quả như nhau.
+    """
+    try:
+        await send_progress(callback_url, job_id, attempt_count, "unhiding")
+
+        settings = get_settings()
+        client = await get_qdrant_client()
+
+        count = _count_doc_points(client, settings.QDRANT_COLLECTION_NAME, doc_id)
+
+        if count == 0:
+            logger.warning(
+                "[DOC_MANAGER] Không tìm thấy points để unhide: doc_id=%s — "
+                "vẫn callback SUCCEEDED (idempotent)", doc_id,
+            )
+            await send_succeeded_visibility(callback_url, job_id, attempt_count, updated_count=0)
+            return
+
+        client.set_payload(
+            collection_name=settings.QDRANT_COLLECTION_NAME,
+            payload={"is_hidden": False},
+            points=_make_doc_filter(doc_id),
+        )
+
+        logger.info("[DOC_MANAGER] Đã unhide doc_id=%s (%d chunks)", doc_id, count)
+        await send_succeeded_visibility(callback_url, job_id, attempt_count, updated_count=count)
+
+    except Exception as e:
+        logger.exception("[DOC_MANAGER] Lỗi khi unhide doc_id=%s", doc_id)
+        await send_failed(callback_url, job_id, attempt_count, "UNHIDE_ERROR", str(e))
+
+
+# ══════════════════════════════════════════════════════════════════
+# DELETE — Xóa tài liệu khỏi Qdrant
+# ══════════════════════════════════════════════════════════════════
+
+async def delete_document_background(
+    doc_id: str,
+    job_id: str,
+    attempt_count: int,
+    callback_url: str,
+) -> None:
+    """
+    Xóa toàn bộ vectors của tài liệu khỏi Qdrant.
+    Xóa cả points đang is_hidden=True (cleanup triệt để).
+    File gốc và lịch sử MySQL vẫn được giữ (Node.js quản lý).
+    Idempotent: gọi nhiều lần trên doc đã xóa → deleted_count=0.
+    """
+    try:
+        await send_progress(callback_url, job_id, attempt_count, "deleting")
+
+        settings = get_settings()
+        client = await get_qdrant_client()
+
+        # Đếm TRƯỚC khi xóa để report deleted_count chính xác
+        count = _count_doc_points(client, settings.QDRANT_COLLECTION_NAME, doc_id)
+
+        if count == 0:
+            logger.info(
+                "[DOC_MANAGER] Không tìm thấy points để xóa: doc_id=%s — "
+                "callback SUCCEEDED với deleted_count=0 (idempotent)", doc_id,
+            )
+            await send_succeeded_delete(callback_url, job_id, attempt_count, deleted_count=0)
+            return
+
+        # Xóa toàn bộ points có doc_id (kể cả is_hidden=True)
+        client.delete(
+            collection_name=settings.QDRANT_COLLECTION_NAME,
+            points_selector=models.FilterSelector(
+                filter=_make_doc_filter(doc_id)
+            ),
+        )
+
+        logger.info("[DOC_MANAGER] Đã xóa doc_id=%s (%d vectors)", doc_id, count)
+        await send_succeeded_delete(callback_url, job_id, attempt_count, deleted_count=count)
+
+    except Exception as e:
+        logger.exception("[DOC_MANAGER] Lỗi khi xóa doc_id=%s", doc_id)
+        await send_failed(callback_url, job_id, attempt_count, "DELETE_ERROR", str(e))
