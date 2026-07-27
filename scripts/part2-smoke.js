@@ -328,6 +328,17 @@ async function main() {
     await request('/api/auth/register', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        email: `invalid-date.${suffix}@smoke.test`,
+        password: studentPassword,
+        fullName: 'Invalid Date',
+        role: 'STUDENT',
+        studentCode: `INVALID-${suffix}`,
+        dateOfBirth: '2024-02-31'
+      })
+    }, 400);
+    await request('/api/auth/register', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
         email: studentEmail, password: studentPassword, fullName: 'Student Smoke',
         role: 'STUDENT', studentCode: `SV-${suffix}`, dateOfBirth: '2004-01-02'
       })
@@ -1224,7 +1235,18 @@ async function main() {
       method: 'POST', headers: auth(studentToken, { 'content-type': 'application/json' }),
       body: JSON.stringify({ title: 'Smoke Chat' })
     }, 201)).payload.data;
+    await request('/api/chat/sessions', {
+      method: 'POST', headers: auth(studentToken, { 'content-type': 'application/json' }),
+      body: JSON.stringify([])
+    }, 400);
     await request('/api/chat/sessions', { headers: auth(studentToken) });
+    await request('/api/chat/sessions?limit=0', { headers: auth(studentToken) }, 400);
+    await request('/api/chat/sessions?limit=101', { headers: auth(studentToken) }, 400);
+    await request(
+      `/api/chat/sessions?offset=${Number.MAX_SAFE_INTEGER + 1}`,
+      { headers: auth(studentToken) },
+      400
+    );
     const clientRequestId = crypto.randomUUID();
     const chat = (await request(`/api/chat/sessions/${session.id}/messages`, {
       method: 'POST', headers: auth(studentToken, { 'content-type': 'application/json' }),

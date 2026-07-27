@@ -12,6 +12,8 @@ function notFound(req, res, next) {
  * Global centralized error handler middleware
  */
 function errorHandler(err, req, res, next) {
+  if (res.headersSent) return next(err);
+
   const parserErrors = {
     'entity.parse.failed': () => appError(400, 'INVALID_JSON', 'JSON body không hợp lệ.'),
     'entity.too.large': () => appError(413, 'REQUEST_BODY_TOO_LARGE', 'Request body vượt quá giới hạn.')

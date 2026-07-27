@@ -202,6 +202,8 @@ assert.deepEqual(Object.keys(uploadProperties), ['file', 'title', 'description',
 assert.equal(spec.components.schemas.DocumentUpdateBody.additionalProperties, false);
 assert.equal(spec.paths['/api/documents/jobs/{jobId}'].get.tags[0], 'Document Processing');
 assert.match(spec.paths['/api/citations/{id}/file'].get.description, /portable corpus/i);
+assert.match(spec.paths['/api/citations/{id}/file'].get.description, /DELETED.*unavailable/i);
+assert(spec.paths['/api/citations/{id}/file'].get.responses[404]);
 
 JSON.stringify(spec);
 console.log(`OPENAPI_OK operations=${operations} tags=${actualTags.length}`);

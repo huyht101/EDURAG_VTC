@@ -1,4 +1,5 @@
 const STATUSES = require('../constants/statuses');
+const { isValidDateOnly } = require('../utils/date-only');
 
 function validateUpdateProfile(body) {
   if (!body || Object.keys(body).length === 0) return { error: 'Dữ liệu cập nhật trống.' };
@@ -24,7 +25,7 @@ function validateUpdateProfile(body) {
     }
   }
   if (body.dateOfBirth !== undefined
-    && (typeof body.dateOfBirth !== 'string' || Number.isNaN(Date.parse(body.dateOfBirth)))) {
+    && !isValidDateOnly(body.dateOfBirth)) {
     return { error: 'Ngày sinh không hợp lệ.' };
   }
   return null;

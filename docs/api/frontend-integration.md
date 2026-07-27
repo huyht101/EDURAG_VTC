@@ -169,7 +169,7 @@ Node tạo PDF preview bất đồng bộ cho DOCX bằng durable preview job. K
 | PDF/DOCX/TXT original của document | `GET /api/documents/{id}/file` | `200`, MIME suy ra từ filename, `Content-Length`, `Content-Disposition: attachment` | User JWT; TEACHER uploader hoặc ADMIN. HIDDEN vẫn mở được; DELETED trả `404`. |
 | Management preview | `GET /api/documents/{id}/preview` | PDF inline | TEACHER uploader hoặc ADMIN; không mở cho Student. |
 | Citation snapshot | `GET /api/citations/{id}/source` hoặc `GET /api/citations/{id}` | JSON gồm snapshot và `originalAvailable` | User JWT và owner của chat session; snapshot vẫn tồn tại sau hide/delete. |
-| Original qua citation | `GET /api/citations/{id}/file` | Binary attachment như original | Session owner trước, sau đó current source authorization. Student thường nhận `409 ORIGINAL_SOURCE_UNAVAILABLE` khi source hidden/deleted/missing; uploader/Admin chỉ được hưởng quyền này trong session của chính họ. |
+| Original qua citation | `GET /api/citations/{id}/file` | Binary attachment như original | Session owner trước, sau đó current source authorization. `DELETED` luôn unavailable; `HIDDEN` chỉ uploader/Admin được mở trong session của chính họ; file thiếu trả `409 ORIGINAL_SOURCE_UNAVAILABLE`. |
 
 Upload document dùng Multer memory storage và cùng giới hạn `FILE_MAX_SIZE_BYTES` cho PDF/DOCX/TXT; default là `20 MiB`. Sai định dạng/signature trả `400`; quá giới hạn trả `413 FILE_TOO_LARGE`.
 

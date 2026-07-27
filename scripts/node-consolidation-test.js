@@ -23,7 +23,8 @@ const authConfig = require('../src/configs/auth');
 const { authMiddleware } = require('../src/middlewares/auth-middleware');
 const userRepo = require('../src/repositories/user-repository');
 const app = require('../src/app');
-const { validDocxArchive } = require('../src/services/document-file-service');
+const documentFileService = require('../src/services/document-file-service');
+const { validDocxArchive } = documentFileService;
 const { shutdown } = require('../src/server');
 const messageRepo = require('../src/repositories/chat-message-repository');
 const tokenRepo = require('../src/repositories/token-repository');
@@ -32,13 +33,26 @@ const dbPool = require('../src/configs/db');
 const userService = require('../src/services/user-service');
 const { validateRegister } = require('../src/validators/auth');
 const { validateUpdateProfile } = require('../src/validators/user');
+const { validateSessionCreate, validatePagination } = require('../src/validators/chat');
+
+const FETCH_BLOCKED_PORTS = new Set([
+  1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79,
+  87, 95, 101, 102, 103, 104, 109, 110, 111, 113, 115, 117, 119, 123, 135, 137,
+  139, 143, 161, 179, 389, 427, 465, 512, 513, 514, 515, 526, 530, 531, 532, 540,
+  548, 554, 556, 563, 587, 601, 636, 989, 990, 993, 995, 1719, 1720, 1723, 2049,
+  3659, 4045, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6697, 10080
+]);
 
 async function listen(application) {
-  return new Promise((resolve, reject) => {
-    const server = application.listen(0, '127.0.0.1');
-    server.once('listening', () => resolve(server));
-    server.once('error', reject);
-  });
+  while (true) {
+    const server = await new Promise((resolve, reject) => {
+      const candidate = application.listen(0, '127.0.0.1');
+      candidate.once('listening', () => resolve(candidate));
+      candidate.once('error', reject);
+    });
+    if (!FETCH_BLOCKED_PORTS.has(server.address().port)) return server;
+    await new Promise((resolve) => server.close(resolve));
+  }
 }
 
 async function testRateLimit() {
@@ -131,10 +145,18 @@ function testErrorSanitization() {
   assert.equal(expectedResponse.statusCode, 502);
   assert.equal(expectedResponse.payload.message, expected.message);
   assert.deepEqual(expectedResponse.payload.data, { requestId: 'safe-id' });
+
+  const streamError = new Error('stream failed after headers');
+  let delegated = null;
+  errorHandler(streamError, {}, { headersSent: true }, (error) => { delegated = error; });
+  assert.equal(delegated, streamError, 'Errors after streaming starts must be delegated to Express.');
 }
 
 async function testCitationOwnership() {
   const original = citationRepo.findContextById;
+  const originalExists = documentFileService.exists;
+  const originalOpen = documentFileService.open;
+  documentFileService.exists = async () => true;
   citationRepo.findContextById = async () => ({
     id: 7,
     message_id: 8,
@@ -150,6 +172,19 @@ async function testCitationOwnership() {
     const own = await citationService.getCitation({ id: 41, role: 'STUDENT' }, 7);
     assert.equal(own.id, 7);
     assert.equal(own.originalAvailable, false, 'Hidden/deleted source keeps snapshot but not general original access.');
+    citationRepo.findContextById = async () => ({
+      id: 7,
+      message_id: 8,
+      session_user_id: 41,
+      storage_key: 'documents/7/demo.pdf',
+      uploaded_by: 41,
+      processing_status: 'READY',
+      visibility_status: 'HIDDEN',
+      document_title_snapshot: 'Demo',
+      source_text_snapshot: 'Snapshot'
+    });
+    const hiddenOwner = await citationService.getCitation({ id: 41, role: 'TEACHER' }, 7);
+    assert.equal(hiddenOwner.originalAvailable, true, 'Uploader keeps access to a hidden current source.');
     await assert.rejects(
       () => citationService.getCitation({ id: 99, role: 'ADMIN' }, 7),
       (error) => error.status === 404 && error.code === 'CITATION_NOT_FOUND'
@@ -159,8 +194,47 @@ async function testCitationOwnership() {
       () => citationService.getCitation({ id: 41, role: 'STUDENT' }, 7),
       (error) => error.status === 404 && error.code === 'CITATION_NOT_FOUND'
     );
+    citationRepo.findContextById = async () => ({
+      id: 7,
+      message_id: 8,
+      session_user_id: 41,
+      storage_key: 'documents/7/deleted.pdf',
+      uploaded_by: 41,
+      processing_status: 'READY',
+      visibility_status: 'DELETED',
+      document_title_snapshot: 'Deleted source',
+      source_text_snapshot: 'Snapshot remains'
+    });
+    const deletedOwner = await citationService.getCitation({ id: 41, role: 'TEACHER' }, 7);
+    assert.equal(deletedOwner.originalAvailable, false);
+    const deletedAdmin = await citationService.getCitation({ id: 41, role: 'ADMIN' }, 7);
+    assert.equal(deletedAdmin.originalAvailable, false);
+    await assert.rejects(
+      () => citationService.openOriginal({ id: 41, role: 'ADMIN' }, 7),
+      (error) => error.status === 409 && error.code === 'ORIGINAL_SOURCE_UNAVAILABLE'
+    );
+    citationRepo.findContextById = async () => ({
+      id: 7,
+      message_id: 8,
+      session_user_id: 41,
+      storage_key: 'documents/7/missing.pdf',
+      uploaded_by: 12,
+      processing_status: 'READY',
+      visibility_status: 'VISIBLE',
+      document_title_snapshot: 'Missing source',
+      source_text_snapshot: 'Snapshot remains'
+    });
+    documentFileService.open = async () => {
+      throw appError(404, 'FILE_NOT_FOUND', 'File missing.');
+    };
+    await assert.rejects(
+      () => citationService.openOriginal({ id: 41, role: 'STUDENT' }, 7),
+      (error) => error.status === 409 && error.code === 'ORIGINAL_SOURCE_UNAVAILABLE'
+    );
   } finally {
     citationRepo.findContextById = original;
+    documentFileService.exists = originalExists;
+    documentFileService.open = originalOpen;
   }
 }
 
@@ -499,6 +573,19 @@ function testInputRoundTripAndStudentEmail() {
   const profile = { fullName: 'A&B', department: 'R&D' };
   assert.equal(validateUpdateProfile(profile), null);
   assert.deepEqual(profile, { fullName: 'A&B', department: 'R&D' });
+
+  assert.equal(validateRegister({ ...registration, dateOfBirth: '2024-02-29' }), null);
+  assert(validateRegister({ ...registration, dateOfBirth: '2024-02-31' }));
+  assert(validateRegister({ ...registration, dateOfBirth: '0001-01-01' }));
+  assert.equal(validateUpdateProfile({ dateOfBirth: '2024-02-29' }), null);
+  assert(validateUpdateProfile({ dateOfBirth: '2023-02-29' }));
+
+  assert.equal(validateSessionCreate({}), null);
+  assert(validateSessionCreate([]));
+  assert.equal(validatePagination({ offset: '0', limit: '100' }), null);
+  assert(validatePagination({ offset: String(Number.MAX_SAFE_INTEGER + 1) }));
+  assert(validatePagination({ limit: '0' }));
+  assert(validatePagination({ limit: '101' }));
 }
 
 async function testDevelopmentResetDeliveryGate() {

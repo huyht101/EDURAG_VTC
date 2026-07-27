@@ -36,9 +36,9 @@ Full syntax/OpenAPI/docs/audit/Compose verification phải được ghi theo k�
 
 ## Open handoff and limitations
 
-- Python snapshot vẫn upsert retrieval-enabled random point IDs trước Node ACK; callback/partial batch failure có thể để orphan. Cần activation protocol + deterministic retry/cleanup; có thể cần payload/point-ID migration và re-ingest.
-- Python overlay nhỏ ở `services/ingestion.py`, `services/rag_engine.py` và test phải upstream trước snapshot refresh; overlay không thay thế upstream acceptance.
-- Python hiện chỉ trả một final `usage`; Node đã backward-compatibly hỗ trợ `usage_calls[]`, instrumentation router/answer còn mở.
+- Tracked Python snapshot hiện có UUID5 deterministic, hidden upsert và activate sau machine-readable Node ACK; offline tests đi kèm không thay thế upstream acceptance hoặc live NodeJS → Python → Qdrant verification.
+- Các thay đổi snapshot nhỏ ở `services/ingestion.py`, `services/rag_engine.py` và test vẫn phải upstream trước snapshot refresh; snapshot không phải nguồn sở hữu Python.
+- Tracked snapshot đã khai báo ordered `usage_calls[]` cho router/answer; tính đúng đắn với provider/runtime thật vẫn là open integration evidence.
 - FastAPI `BackgroundTasks` không phải durable queue. Stale processing `RUNNING` chưa được Node tự retry để tránh duplicate points/cost.
 - Corpus coordinated recovery không phải distributed transaction. `CORPUS_RESTORE_ROLLBACK_FAILED` cần operator intervention; tool không tự merge partial stores.
 - In-memory rate limit chỉ phù hợp single Node instance; multi-instance cần shared store. HSTS phải do trusted HTTPS proxy/deployment quyết định.

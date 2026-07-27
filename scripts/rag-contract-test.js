@@ -270,6 +270,17 @@ async function testChatContract() {
     (error) => error.code === 'RAG_CITATION_INVALID'
   );
   assert.throws(
+    () => normalizeQueryResult({
+      answer: 'Whitespace is not evidence.',
+      no_answer: false,
+      citations: [{
+        vector_node_id: '11111111-1111-4111-8111-111111111111',
+        source_text: '   '
+      }]
+    }),
+    (error) => error.code === 'RAG_CITATION_INVALID'
+  );
+  assert.throws(
     () => normalizeQueryResult({ answer: 'Missing no-answer and citations fields.' }),
     (error) => error.code === 'RAG_QUERY_RESPONSE_INVALID' && error.status === 502
   );

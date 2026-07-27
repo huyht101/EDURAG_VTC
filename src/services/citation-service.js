@@ -16,7 +16,7 @@ function authorize(user, context) {
 }
 
 async function canOpenOriginal(user, context) {
-  if (!context.storage_key) return false;
+  if (!context.storage_key || context.visibility_status === 'DELETED') return false;
   const authorized = user.role === ROLES.ADMIN
     || Number(context.uploaded_by) === Number(user.id)
     || (context.processing_status === 'READY' && context.visibility_status === 'VISIBLE');
@@ -54,11 +54,18 @@ async function openOriginal(user, idValue) {
   if (!(await canOpenOriginal(user, context))) {
     throw appError(409, 'ORIGINAL_SOURCE_UNAVAILABLE', 'File gốc hiện không khả dụng; citation snapshot vẫn được giữ.');
   }
-  return {
-    ...(await fileService.open(context.storage_key)),
-    filename: context.original_filename,
-    mimeType: context.mime_type
-  };
+  try {
+    return {
+      ...(await fileService.open(context.storage_key)),
+      filename: context.original_filename,
+      mimeType: context.mime_type
+    };
+  } catch (error) {
+    if (error.code === 'FILE_NOT_FOUND') {
+      throw appError(409, 'ORIGINAL_SOURCE_UNAVAILABLE', 'File gốc hiện không khả dụng; citation snapshot vẫn được giữ.');
+    }
+    throw error;
+  }
 }
 
 module.exports = { getCitation, openOriginal };

@@ -103,7 +103,7 @@ function normalizeAcceptedResponse(payload, expectedJobId) {
 function normalizeCitation(citation) {
   const vectorNodeId = citation?.vector_node_id;
   const sourceText = citation?.source_text ?? citation?.snippet;
-  if (!UUID.test(vectorNodeId || '') || typeof sourceText !== 'string' || !sourceText) {
+  if (!UUID.test(vectorNodeId || '') || typeof sourceText !== 'string' || !sourceText.trim()) {
     throw appError(
       502,
       'RAG_CITATION_INVALID',

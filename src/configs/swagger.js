@@ -856,7 +856,7 @@ const definition = {
       get: { tags: ['Citations'], summary: 'Citation snapshot and original availability', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 200: response('Source snapshot.', 'SuccessResponse', citationSourceExample), 404: response('Not found.', 'ErrorResponse') } }
     },
     '/api/citations/{id}/file': {
-      get: { tags: ['Citations'], summary: 'Download authorized original source', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 200: originalFileResponse('Original PDF/DOCX/TXT attachment stream; no derived preview and no Range/206.'), 409: response('Original unavailable; snapshot remains.', 'ErrorResponse') } }
+      get: { tags: ['Citations'], summary: 'Download authorized original source', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 200: originalFileResponse('Original PDF/DOCX/TXT attachment stream; no derived preview and no Range/206.'), 404: response('Citation not found or not owned.', 'ErrorResponse'), 409: response('Original unavailable; snapshot remains.', 'ErrorResponse') } }
     },
     '/api/admin/dashboard/summary': {
       get: { tags: ['Admin Dashboard'], summary: 'Basic LLM-calls-only summary', security: [{ bearerAuth: [] }], parameters: [{ name: 'from', in: 'query', schema: { type: 'string', format: 'date-time' } }, { name: 'to', in: 'query', schema: { type: 'string', format: 'date-time' } }], responses: { 200: response('Dashboard summary.'), 403: response('ADMIN required.', 'ErrorResponse') } }
@@ -902,7 +902,7 @@ const operationDescriptions = {
   'POST /api/chat/sessions/{id}/messages': 'Actor: session owner. Supported contract là JSON text, không có multipart/image. Request mới persist USER + ASSISTANT PENDING, chờ Python/LLM và success trả assistant COMPLETED. Duplicate clientRequestId trả pair hiện hữu nên có thể PENDING/COMPLETED/FAILED; PENDING được theo dõi qua history. Không có SSE/WebSocket. no_answer=true là success hợp lệ; normal answer bắt buộc có verified structured citation.',
   'GET /api/citations/{id}': 'Actor: owner của chat session chứa citation. Đọc immutable citation snapshot; không phụ thuộc document hiện còn visible hoặc original file còn tồn tại.',
   'GET /api/citations/{id}/source': 'Actor: owner của chat session chứa citation. Đọc source-text snapshot và cờ originalAvailable; sourceLocator là opaque optional object và current Python không tạo locator/boxes. Đây không phải stream file.',
-  'GET /api/citations/{id}/file': 'Actor: owner của chat session chứa citation và current source authorization hợp lệ. Stream original as attachment; không có Range/206. Portable corpus thiếu original có thể trả ORIGINAL_SOURCE_UNAVAILABLE trong khi snapshot vẫn đọc được.',
+  'GET /api/citations/{id}/file': 'Actor: owner của chat session chứa citation và current source authorization hợp lệ. DELETED luôn unavailable; HIDDEN chỉ uploader/Admin được mở trong session của chính họ. Stream original as attachment; không có Range/206. Portable corpus thiếu original có thể trả ORIGINAL_SOURCE_UNAVAILABLE trong khi snapshot vẫn đọc được.',
   'GET /api/admin/dashboard/summary': 'Actor: ADMIN. Đọc document/chat/citation và LLM usage aggregates theo time range; không gọi đây là tổng OCR/embedding/Qdrant cost.'
 };
 

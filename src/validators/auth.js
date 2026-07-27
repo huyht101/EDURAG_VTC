@@ -1,5 +1,6 @@
 // Vanilla JavaScript Validation for Authentication Requests
 const ROLES = require('../constants/roles');
+const { isValidDateOnly } = require('../utils/date-only');
 
 // Helper to check email format
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -52,7 +53,7 @@ function validateRegister(body) {
     if (typeof studentCode !== 'string' || !studentCode.trim() || studentCode.trim().length > 32) {
       return { error: 'Mã sinh viên là bắt buộc đối với Sinh viên.' };
     }
-    if (typeof dateOfBirth !== 'string' || Number.isNaN(Date.parse(dateOfBirth))) {
+    if (!isValidDateOnly(dateOfBirth)) {
       return { error: 'Ngày sinh không hợp lệ (Định dạng mẫu YYYY-MM-DD).' };
     }
   }

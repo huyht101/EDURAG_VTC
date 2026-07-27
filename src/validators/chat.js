@@ -2,6 +2,9 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 
 function validateSessionCreate(body) {
   if (body === undefined || body === null) return null;
+  if (typeof body !== 'object' || Array.isArray(body)) {
+    return { error: 'Session body phải là object.' };
+  }
   const allowed = ['title'];
   if (Object.keys(body).some((key) => !allowed.includes(key))) return { error: 'Session body chứa field không hợp lệ.' };
   if (body.title !== undefined
@@ -12,9 +15,17 @@ function validateSessionCreate(body) {
 }
 
 function validatePagination(query) {
-  for (const field of ['offset', 'limit']) {
-    if (query[field] !== undefined && !/^\d+$/.test(String(query[field]))) {
-      return { error: `${field} phải là số nguyên không âm.` };
+  if (query.offset !== undefined) {
+    const offset = String(query.offset);
+    if (!/^\d+$/.test(offset) || !Number.isSafeInteger(Number(offset))) {
+      return { error: 'offset phải là số nguyên không âm an toàn.' };
+    }
+  }
+  if (query.limit !== undefined) {
+    const limit = String(query.limit);
+    const parsed = Number(limit);
+    if (!/^\d+$/.test(limit) || !Number.isSafeInteger(parsed) || parsed < 1 || parsed > 100) {
+      return { error: 'limit phải là số nguyên từ 1 đến 100.' };
     }
   }
   return null;

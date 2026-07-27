@@ -8,6 +8,7 @@ Student/Teacher registration, login, Admin OTP, password reset, profile, passwor
 
 - STUDENT đăng ký thành `ACTIVE` và có `student_profiles` trong cùng transaction.
 - TEACHER đăng ký thành `PENDING`; department/title/degree nullable.
+- `dateOfBirth` của STUDENT là ngày lịch thực theo đúng `YYYY-MM-DD`; ngày không tồn tại bị validation `400`.
 - Admin review: `PENDING → ACTIVE|REJECTED`; mở lại `REJECTED → PENDING` chỉ Admin.
 - Lock `ACTIVE → LOCKED` ghi actor/reason và tăng `auth_version`; unlock giữ document/chat/history.
 - Login chỉ verify password cho ACTIVE user. Admin tiếp tục qua OTP trước khi nhận JWT.

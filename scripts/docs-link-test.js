@@ -39,7 +39,9 @@ function main() {
     ['bootstrap/corpus/manifest.json', 'removed repository corpus manifest'],
     ['Portable corpus: BLOCKED BY DATA APPROVAL', 'resolved corpus approval status'],
     ['Corpus export/restore | BLOCKED', 'resolved corpus readiness status'],
-    ['Remote integration chưa được xác minh', 'obsolete remote verification claim']
+    ['Remote integration chưa được xác minh', 'obsolete remote verification claim'],
+    ['Python snapshot vẫn upsert retrieval-enabled random point IDs', 'obsolete Python point-ID/activation claim'],
+    ['Python hiện chỉ trả một final `usage`', 'obsolete Python usage claim']
   ];
   let checkedLinks = 0;
   let checkedCommands = 0;
