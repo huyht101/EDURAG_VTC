@@ -138,6 +138,7 @@ const documentRepo = require('../src/repositories/document-repository');
 const documentService = require('../src/services/document-service');
 const documentFileService = require('../src/services/document-file-service');
 const authService = require('../src/services/auth-service');
+const previewWorker = require('../src/workers/document-preview-worker');
 const { backfillDocument } = require('./backfill-document-previews');
 
 function accessToken(user) {
@@ -314,6 +315,7 @@ async function main() {
     console.warn = originalWarn;
   }
 
+  await previewWorker.start();
   try {
     await request('/api/admin/users?limit=5', { headers: auth(adminToken) });
     await request('/api/auth/register', {
@@ -1529,6 +1531,7 @@ async function main() {
 
     console.log('PART2_SMOKE_OK');
   } finally {
+    await previewWorker.stop();
     await new Promise((resolve) => server.close(resolve));
     await cleanupSmokeSuffix(suffix);
     await pool.end();

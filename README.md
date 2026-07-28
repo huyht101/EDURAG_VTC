@@ -21,21 +21,17 @@ Copy-Item .env.example .env
 
 Database hiện hữu chạy `npm run db:migrate`; page/preview cũ kiểm tra trước bằng `npm run documents:backfill -- --dry-run`. Chi tiết và recovery nằm tại [Documents](docs/modules/documents.md).
 
-Base Compose luôn ép `RAG_MODE=mock`; `.env.example` cũng dùng mock. Đây là runtime stub tối thiểu cho local/Part 2 regression, không phải bằng chứng Python integration:
-
-```powershell
-npm run docker:mock:up
-```
-
-Remote Python là integration path chính và chỉ được bật chủ động bởi Compose override:
-
-Full remote stack và optional selected-release bootstrap:
+Remote Python là integration path chính. Full remote stack và optional selected-release bootstrap dùng đúng một command canonical:
 
 ```powershell
 npm run docker:remote:dev
 ```
 
-`Ctrl+C` dừng containers nhưng giữ named volumes. Fresh volumes cần reader-capable GCS credential để restore release được pointer chọn; pointer không phải bằng chứng source data đã được phê duyệt. `CORPUS_BOOTSTRAP=auto` vẫn cho stack khởi động rỗng khi thiếu key. Live corpus acceptance chỉ chạy sau explicit data approval.
+Remote MySQL dành loopback `REMOTE_MYSQL_HOST_PORT` (mặc định `13306`) cho
+host-side E2E tooling; containers luôn dùng `db:3306`, nên dịch vụ khác đang
+giữ host port `3306` không chặn remote startup.
+
+Command này resolve remote Compose override và force-recreate app để áp dụng `RAG_MODE=remote`; không dùng `docker compose restart` khi chuyển mode vì restart giữ nguyên environment của container cũ. `Ctrl+C` dừng containers nhưng giữ named volumes. Fresh volumes cần reader-capable GCS credential để restore release được pointer chọn; pointer không phải bằng chứng source data đã được phê duyệt. `CORPUS_BOOTSTRAP=auto` vẫn cho stack khởi động rỗng khi thiếu key. Live corpus acceptance chỉ chạy sau explicit data approval.
 
 - Swagger: <http://localhost:5001/api-docs>
 - OpenAPI: <http://localhost:5001/api-docs.json>
@@ -47,3 +43,13 @@ Demo Admin local: `admin@example.com` / `123456`. Sau login, lấy `[DEV-ONLY AD
 Xem [documentation index](docs/README.md), đặc biệt [Remote Docker RAG](docs/setup/remote-rag-e2e.md) và [independent test plan](docs/testing/week3-remote-test-plan.md).
 
 Trạng thái hiện hành nằm tại [Week 3 integration readiness](docs/status/week3-integration-readiness.md). Project ở mức integration/demo, chưa production-ready.
+
+---
+
+## Phụ lục — Mock mode (REFERENCE ONLY)
+
+Mock chỉ dành cho regression/quick test; nó không kiểm chứng remote và không phải fallback khi remote lỗi.
+
+```powershell
+npm run docker:mock:up
+```

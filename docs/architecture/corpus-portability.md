@@ -68,9 +68,11 @@ npm run corpus:publish -- --confirm-reviewed
 npm run corpus:verify
 ```
 
-`npm run corpus:inspect` là local-only: chỉ đọc pointer trong repository và trạng thái local nếu service đang chạy; không đọc credential, không gọi GCS/provider/writer và không verify remote release. `--dry-run` yêu cầu MySQL/Qdrant hiện đang chạy và chỉ dùng read-only dump/scroll/stat. Nó không start/stop writer, không tạo/xóa Qdrant snapshot, không tạo staging artifact, không đọc credential, không gọi GCS và không đổi pointer hay persistent state. Plan gồm document ID, title/filename, processing/visibility, checksum, size và provisional release ID; final ID chỉ chốt sau frozen export.
+`npm run corpus:inspect` là local-only: chỉ đọc pointer trong repository và trạng thái local nếu service đang chạy; không đọc credential, không gọi GCS/provider/writer và không verify remote release. `--dry-run` yêu cầu MySQL/Qdrant hiện đang chạy và chỉ dùng read-only dump/scroll/stat. Nó không start/stop writer, không tạo/xóa Qdrant snapshot, không tạo staging artifact và không đổi pointer hay persistent state. Dry-run dùng cloud credential ở chế độ read-only để xác minh target hiện hành là private; nó không upload, đổi IAM/ACL hay gọi provider. Plan gồm document ID, title/filename, processing/visibility, checksum, size và provisional release ID; final ID chỉ chốt sau frozen export.
 
-`--confirm-reviewed` là xác nhận rõ ràng của operator rằng đã review PII/personal data, credential/secret, quyền chia sẻ và project scope. Đây không phải automated PII scanner. Tool vẫn chạy heuristic secret/path scan và mọi integrity guard nêu trên. Không còn tracked-fixture hoặc approval registry theo `documentId + checksum`.
+Private corpus được phép giữ toàn bộ account rows hợp lệ, email canonical và bcrypt password hash cần cho khôi phục đăng nhập. Account count/email là dữ liệu động trong scoped MySQL dump và làm thay đổi fingerprint; không dùng email allowlist và không log account values. Public distribution bị cấm. Plaintext password, reset token, OTP, access/refresh token, API/cloud credential, private key, `.env`, Authorization header, auth-token rows và artifact/bảng ngoài scope vẫn bị chặn.
+
+`--confirm-reviewed` là xác nhận rõ ràng của operator rằng đã review credential/secret, quyền chia sẻ và project scope. Tool vẫn chạy heuristic secret/path scan và mọi integrity guard nêu trên. Không còn tracked-fixture hoặc approval registry theo `documentId + checksum`.
 
 `--dry-run` không được kết hợp với `--confirm-reviewed`; thiếu confirmation hoặc option lạ đều fail. Publish interruption trước pointer có thể để lại immutable incomplete package làm cleanup candidate, nhưng release hiện hành không đổi và retry không được silently overwrite.
 

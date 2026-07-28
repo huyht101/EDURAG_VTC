@@ -30,6 +30,7 @@ function main() {
   const absolute = [];
   const missingCommands = [];
   const stale = [];
+  const mockAppendixErrors = [];
   const stalePatterns = [
     ['docs/setup/docker-demo.md', 'deleted Docker setup guide'],
     ['docs/status/python-snapshot-source.md', 'merged snapshot status document'],
@@ -73,11 +74,28 @@ function main() {
         missingCommands.push(`${path.relative(root, file)} -> npm run ${command}`);
       }
     }
+    if (content.includes('npm run docker:mock:up')) {
+      const heading = '## Phụ lục — Mock mode (REFERENCE ONLY)';
+      const appendix = content.indexOf(heading);
+      const remote = content.indexOf('npm run docker:remote:dev');
+      const firstMockCommand = content.indexOf('npm run docker:mock:');
+      if (appendix < 0 || !content.slice(0, appendix).endsWith('---\n\n')
+        || firstMockCommand < appendix
+        || content.slice(appendix + heading.length).includes('\n## ')
+        || remote < 0 || remote > appendix) {
+        mockAppendixErrors.push(path.relative(root, file));
+      }
+    }
   }
   assert.deepEqual(absolute, [], `Machine-specific paths found in: ${absolute.join(', ')}`);
   assert.deepEqual(missing, [], `Broken Markdown links:\n${missing.join('\n')}`);
   assert.deepEqual(missingCommands, [], `Unknown documented npm commands:\n${missingCommands.join('\n')}`);
   assert.deepEqual(stale, [], `Stale documentation references:\n${stale.join('\n')}`);
+  assert.deepEqual(
+    mockAppendixErrors,
+    [],
+    `Mock startup must be the final reference-only appendix after canonical remote setup:\n${mockAppendixErrors.join('\n')}`
+  );
   console.log(
     `DOCS_OK files=${files.length} relativeLinks=${checkedLinks} npmCommands=${checkedCommands}`
   );

@@ -4,6 +4,10 @@ services:
   db:
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}
+    # Host-side remote E2E tooling connects to MySQL directly. Replace the
+    # base/mock mapping instead of inheriting its conventional host port.
+    ports: !override
+      - "127.0.0.1:${REMOTE_MYSQL_HOST_PORT:-13306}:3306"
 
   app:
     environment:

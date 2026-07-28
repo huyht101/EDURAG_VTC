@@ -450,6 +450,8 @@ function buildPublishPlan(staged, config, currentPointer) {
     mutation: false,
     identity: staged.provisional ? 'PROVISIONAL_UNTIL_FROZEN_EXPORT' : 'FINAL',
     publicationPolicy: 'PRIVATE_INTERNAL',
+    containsAccountData: true,
+    publicDistribution: 'FORBIDDEN',
     currentReleaseId: currentPointer?.releaseId || null,
     proposedReleaseId: staged.manifest.releaseId,
     targetPrefix: staged.manifest.objectPrefix,
@@ -661,6 +663,14 @@ async function publishCorpus(options = {}) {
   if (intent.dryRun) {
     const planned = await (options.planSource
       || (options.stageSource ? options.stageSource : inspectReadOnlyPublishSource))(options, config);
+    const objectStore = options.objectStore || defaultObjectStore(config);
+    if (typeof objectStore.assertPrivateTarget !== 'function') {
+      throw releaseError(
+        'GCS_BUCKET_PRIVACY_UNVERIFIED',
+        'Corpus dry-run requires a read-only private-target verification.'
+      );
+    }
+    await objectStore.assertPrivateTarget();
     const currentPointer = options.pointer === undefined ? await readPointer(options) : options.pointer;
     const plan = buildPublishPlan(planned, config, currentPointer);
     console.log(JSON.stringify(plan));

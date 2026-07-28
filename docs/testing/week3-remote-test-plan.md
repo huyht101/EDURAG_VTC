@@ -21,17 +21,10 @@ npm run test:library
 npm run test:docs
 npm run test:contract
 npm run test:corpus
-npm run docker:mock:config
 npm run docker:remote:config
 ```
 
-Các gate trên không gọi paid provider. `test:corpus` là unit/local simulation bằng fake object store và fixture tạm; PASS chỉ chứng minh validation/identity/rollback/zero external mutation, không chứng minh live export/restore/query. Mock HTTP regression:
-
-```powershell
-npm run docker:mock:up
-npm run test:part2
-npm run docker:mock:down
-```
+Các gate trên không gọi paid provider. `test:corpus` là unit/local simulation bằng fake object store và fixture tạm; PASS chỉ chứng minh validation/identity/rollback/zero external mutation, không chứng minh live export/restore/query.
 
 ## 3. Partial-failure isolation
 
@@ -103,7 +96,7 @@ npm run corpus:publish -- --confirm-reviewed
 npm run corpus:verify
 ```
 
-Trước dry-run, giữ MySQL/Qdrant chạy. Dry-run không được start/stop writer, tạo snapshot/staging, đọc credential, gọi GCS hay đổi pointer; plan phải liệt kê ID, title/filename, trạng thái, visibility, checksum, size và provisional identity. Operator review PII/personal data, secret, quyền chia sẻ và project scope trước confirmation. Publish lần hai cùng source phải `uploaded=0`, không overwrite/delete. Reader-only tester không thực hiện bước này.
+Trước dry-run, giữ MySQL/Qdrant chạy. Dry-run không được start/stop writer, tạo snapshot/staging hay đổi pointer; nó chỉ dùng cloud credential read-only để xác minh target private và không upload/đổi ACL. Plan phải liệt kê ID, title/filename, trạng thái, visibility, checksum, size và provisional identity. Account rows/email canonical/bcrypt hash hợp lệ được phép trong private dump và không dùng email allowlist; tester vẫn phải xác nhận secret/token, artifact scope, quyền chia sẻ và project scope. Publish lần hai cùng source phải `uploaded=0`, không overwrite/delete.
 
 ## 8. Cleanup và evidence
 
@@ -113,3 +106,16 @@ Trước dry-run, giữ MySQL/Qdrant chạy. Dry-run không được start/stop 
 - Báo branch/commit, command, PASS/FAIL, status/counts, HTTP status/error code và logs đã redact.
 
 Setup canonical: [Remote Docker RAG](../setup/remote-rag-e2e.md). Endpoint semantics: Swagger và [Public API](../api/public-api.md).
+
+---
+
+## Phụ lục — Mock mode (REFERENCE ONLY)
+
+Mock chỉ dành cho regression/quick test; nó không kiểm chứng remote và không phải fallback khi remote lỗi.
+
+```powershell
+npm run docker:mock:config
+npm run docker:mock:up
+npm run test:part2
+npm run docker:mock:down
+```

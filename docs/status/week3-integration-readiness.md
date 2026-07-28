@@ -10,7 +10,7 @@
 
 - Corpus identity v2 bao phủ canonical scoped MySQL data, Qdrant vectors/payload và originals; timestamp/temp path/export order/DDL auto-increment không tham gia identity.
 - `auto` chỉ restore khi MySQL/Qdrant/uploads đều `EMPTY`; `PRESENT`/partial/in-progress được giữ, `UNKNOWN/ERROR` không bị coi là empty. `required` vẫn strict; `off` không truy cập cloud.
-- Publish dry-run chỉ đọc running stores, không writer lifecycle/snapshot/staging/credential/GCS/pointer mutation. Publish thật create-only, manifest-last, verify-before-pointer và giữ writer pause đến khi kết thúc.
+- Publish dry-run chỉ đọc running stores và metadata privacy của GCS target; không writer lifecycle/snapshot/staging/upload/ACL/pointer mutation. Publish thật create-only, manifest-last, verify-before-pointer và giữ writer pause đến khi kết thúc.
 - Restore verify trước apply, chỉ áp dụng trên empty stores, có recovery MySQL/Qdrant/originals và không có implicit force/replace.
 - Logout là logout-all bằng concurrency-safe `auth_version`; JWT khóa algorithm/issuer/audience/purpose/sub/jti/version/expiry. Reset token giả bị loại trước bcrypt; token hết hạn cleanup theo bounded batch.
 - Internal callback auth chạy trước large JSON parser. Helmet/CORS/rate limits, sanitized error boundary, bounded DB pool/query timeout và graceful shutdown đã có targeted regression.

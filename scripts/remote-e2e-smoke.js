@@ -9,6 +9,7 @@ const { main: runPreflight } = require('./remote-preflight');
 const {
   root,
   compose,
+  composeProject,
   composePort,
   delay,
   fetchWithTimeout
@@ -88,14 +89,29 @@ async function testCallbackEdges({ baseUrl, token, pool, documentId, ingestJob, 
   const duplicate = (await httpRequest(baseUrl, '/api/internal/rag/processing-callback', {
     method: 'POST', headers: internalHeaders, body: JSON.stringify(terminal)
   })).payload.data;
-  assert.equal(duplicate.duplicate, true);
+  assert.deepEqual(duplicate, {
+    acknowledged: true,
+    jobId: Number(ingestJob.id),
+    attemptCount: Number(ingestJob.attemptCount),
+    outcome: 'IDEMPOTENT_REPLAY',
+    canActivate: true,
+    reason: null,
+    status: 'SUCCEEDED'
+  });
 
   const stale = (await httpRequest(baseUrl, '/api/internal/rag/processing-callback', {
     method: 'POST', headers: internalHeaders,
     body: JSON.stringify({ ...terminal, attempt_count: Number(ingestJob.attemptCount) + 1 })
   })).payload.data;
-  assert.equal(stale.ignored, true);
-  assert.equal(stale.reason, 'STALE_ATTEMPT');
+  assert.deepEqual(stale, {
+    acknowledged: true,
+    jobId: Number(ingestJob.id),
+    attemptCount: Number(ingestJob.attemptCount) + 1,
+    outcome: 'IGNORED',
+    canActivate: false,
+    reason: 'STALE_ATTEMPT',
+    status: 'SUCCEEDED'
+  });
 
   await httpRequest(baseUrl, '/api/internal/rag/processing-callback', {
     method: 'POST', headers: internalHeaders,
@@ -169,6 +185,8 @@ async function testCallbackEdges({ baseUrl, token, pool, documentId, ingestJob, 
 async function main() {
   assert.equal(process.env.REMOTE_E2E_CONFIRM_ISOLATED, 'true',
     'Set REMOTE_E2E_CONFIRM_ISOLATED=true only for a dedicated Compose project/volume.');
+  assert.match(composeProject, /^edurag_remote_test_/,
+    'Remote E2E requires a dedicated REMOTE_COMPOSE_PROJECT with prefix edurag_remote_test_.');
   const preflight = await runPreflight();
   const baseUrl = `http://127.0.0.1:${preflight.nodePort}`;
   const dbPort = composePort('db', 3306);
@@ -230,6 +248,18 @@ async function main() {
       headers: bearer(token)
     })).payload.data;
     assert.equal(detail.document.processingStatus, 'READY');
+    const libraryList = (await httpRequest(baseUrl, `/api/library/documents?q=${encodeURIComponent(`Remote E2E ${suffix}`)}`, {
+      headers: bearer(token)
+    })).payload.data;
+    assert(libraryList.documents.some((document) => Number(document.id) === documentId));
+    const libraryDetail = (await httpRequest(baseUrl, `/api/library/documents/${documentId}`, {
+      headers: bearer(token)
+    })).payload.data;
+    assert.equal(Number(libraryDetail.document.id), documentId);
+    const librarySource = await httpRequest(baseUrl, `/api/library/documents/${documentId}/source`, {
+      headers: bearer(token)
+    });
+    assert.deepEqual(Buffer.from(await librarySource.response.arrayBuffer()), source);
 
     const [chunks] = await pool.execute(
       `SELECT id, processing_job_id, chunk_index, vector_node_id, chunk_text, content_hash,
@@ -251,6 +281,15 @@ async function main() {
       assert(!indexes.has(Number(chunk.chunk_index)));
       indexes.add(Number(chunk.chunk_index));
     }
+    const qdrantUrl = `http://127.0.0.1:${composePort('qdrant', 6333)}`;
+    const qdrantPoints = (await httpRequest(qdrantUrl, '/collections/education_docs/points', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ids: chunks.map((chunk) => chunk.vector_node_id), with_payload: true })
+    })).payload.result;
+    assert.equal(qdrantPoints.length, chunks.length);
+    assert(qdrantPoints.every((point) => Number(point.payload.doc_id) === documentId));
+    assert(qdrantPoints.every((point) => point.payload.is_hidden === false));
 
     if (process.env.REMOTE_E2E_REQUIRE_LLAMAPARSE !== 'false') {
       const logs = compose(['logs', '--no-color', '--since', ingestStarted.toISOString(), 'rag-service']);
@@ -269,6 +308,15 @@ async function main() {
     const citation = initialChat.answer.assistantMessage.citations.find(
       (item) => Number(item.documentId) === documentId
     );
+    const citationDetail = (await httpRequest(baseUrl, `/api/citations/${citation.id}`, {
+      headers: bearer(token)
+    })).payload.data;
+    assert.equal(Number(citationDetail.documentId), documentId);
+    assert(citationDetail.sourceText);
+    const citationFile = await httpRequest(baseUrl, `/api/citations/${citation.id}/file`, {
+      headers: bearer(token)
+    });
+    assert.deepEqual(Buffer.from(await citationFile.response.arrayBuffer()), source);
     const duplicateChat = (await httpRequest(
       baseUrl, `/api/chat/sessions/${initialChat.session.id}/messages`, {
         method: 'POST', headers: bearer(token, { 'content-type': 'application/json' }),
@@ -302,6 +350,12 @@ async function main() {
       headers: bearer(token)
     })).payload.data;
     assert.equal(hiddenDetail.document.visibilityStatus, 'HIDDEN');
+    await httpRequest(baseUrl, `/api/library/documents/${documentId}`, {
+      headers: bearer(token)
+    }, [404]);
+    await httpRequest(baseUrl, `/api/library/documents/${documentId}/source`, {
+      headers: bearer(token)
+    }, [404]);
     const hiddenChat = await createChatAnswer(baseUrl, token, question, `Hidden retrieval ${suffix}`);
     assert(!hiddenChat.answer.assistantMessage.citations.some(
       (item) => Number(item.documentId) === documentId
@@ -324,8 +378,8 @@ async function main() {
       Number(process.env.REMOTE_E2E_OPERATION_TIMEOUT_MS || 120000))).status, 'SUCCEEDED');
     const deletedDetail = (await httpRequest(baseUrl, `/api/documents/${documentId}`, {
       headers: bearer(token)
-    })).payload.data;
-    assert.equal(deletedDetail.document.visibilityStatus, 'DELETED');
+    }, [404])).payload;
+    assert.equal(deletedDetail.errorCode, 'DOCUMENT_NOT_FOUND');
     const deletedChat = await createChatAnswer(baseUrl, token, question, `Deleted retrieval ${suffix}`);
     assert(!deletedChat.answer.assistantMessage.citations.some(
       (item) => Number(item.documentId) === documentId
@@ -382,8 +436,9 @@ async function run() {
     process.exitCode = 1;
   } finally {
     const isolated = process.env.REMOTE_E2E_CONFIRM_ISOLATED === 'true';
+    const testNamespace = composeProject.startsWith('edurag_remote_test_');
     const cleanupEnabled = process.env.REMOTE_E2E_CLEANUP !== 'false';
-    if (isolated && cleanupEnabled) {
+    if (isolated && testNamespace && cleanupEnabled) {
       const result = compose(['down', '-v', '--remove-orphans'], { allowFailure: true });
       if (typeof result !== 'string' && result.status !== 0) {
         console.error('REMOTE_E2E_CLEANUP_FAILED: unable to remove the isolated Compose project.');

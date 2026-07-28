@@ -13,6 +13,10 @@ const { validateLibraryQuery } = require('../src/validators/library');
 const { validateDocumentQuery } = require('../src/validators/document');
 const ROLES = require('../src/constants/roles');
 const { normalizeListQuery } = require('../src/utils/document-list-query');
+const {
+  REQUIRED_DOCUMENT_COLUMNS,
+  checkDocumentSchema
+} = require('./document-schema-check');
 
 const readyDocument = {
   id: 12,
@@ -79,6 +83,38 @@ async function testRepositoryScope() {
   await libraryRepo.findEligibleById(12, detailExecutor);
   assert(detailSql[0].includes("d.processing_status = 'READY'"));
   assert(detailSql[0].includes("d.visibility_status = 'VISIBLE'"));
+}
+
+async function testRuntimeSchemaGuard() {
+  const legacyExecutor = {
+    async execute() {
+      return [[{ COLUMN_NAME: 'id' }, { COLUMN_NAME: 'title' }]];
+    }
+  };
+  await assert.rejects(
+    () => checkDocumentSchema(legacyExecutor),
+    (error) => error.code === 'DOCUMENT_SCHEMA_MIGRATION_REQUIRED'
+      && error.missingColumns.includes('description')
+      && error.missingColumns.includes('preview_status')
+  );
+
+  let call = 0;
+  const compatibleExecutor = {
+    async execute() {
+      call += 1;
+      if (call === 1) {
+        return [[
+          { COLUMN_NAME: 'id' },
+          ...REQUIRED_DOCUMENT_COLUMNS.map((COLUMN_NAME) => ({ COLUMN_NAME }))
+        ]];
+      }
+      if (call === 2 || call === 4) return [[{ total: 0 }]];
+      return [[]];
+    }
+  };
+  const result = await checkDocumentSchema(compatibleExecutor);
+  assert.deepEqual(result, { requiredColumns: 6, repositoryQueries: 4 });
+  assert.equal(call, 7, 'Schema guard must execute real management/library list and detail queries.');
 }
 
 async function testDtoAndFixedQueryScope() {
@@ -452,6 +488,7 @@ async function testStorageBoundaryAndStreamErrors() {
 
 async function main() {
   await testRepositoryScope();
+  await testRuntimeSchemaGuard();
   await testDtoAndFixedQueryScope();
   await testManagementFiltersAndOwnership();
   await testDetailAndSourceStates();

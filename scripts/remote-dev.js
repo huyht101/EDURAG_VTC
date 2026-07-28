@@ -2,6 +2,7 @@
 
 const {
   assertRemoteEnvironment,
+  assertRemoteDbHostPortAvailable,
   compose,
   redacted,
   spawnCompose
@@ -42,10 +43,13 @@ async function main() {
   installSignalHandlers();
   assertRemoteEnvironment();
   compose(['config', '--quiet']);
+  const dbHostPort = await assertRemoteDbHostPortAvailable();
+  console.log(`REMOTE_DEV_TOPOLOGY db=db:3306 hostDbPort=${dbHostPort} mode=remote`);
 
   compose(['build', 'app', 'rag-service']);
   compose(['up', '-d', '--wait', 'db', 'qdrant']);
-  compose(['create', 'app']);
+  compose(['create', '--force-recreate', 'app']);
+  console.log('REMOTE_DEV_RECREATED service=app mode=remote volumes=retained');
   const corpus = await bootstrapCorpus();
   console.log(`REMOTE_DEV_CORPUS state=${corpus.status || corpus.reason || 'UNKNOWN'}`);
   compose(['up', '-d', '--wait', 'app', 'rag-service']);

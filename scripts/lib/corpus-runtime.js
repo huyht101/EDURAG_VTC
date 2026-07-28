@@ -24,6 +24,12 @@ const MYSQL_SERVER_SERIES = '8.4.';
 const QDRANT_SERVER_VERSION = '1.18.2';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA256 = /^[0-9a-f]{64}$/i;
+const BCRYPT_HASH = /^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/;
+const SCOPED_MYSQL_TABLES = new Set([
+  'schema_migrations', 'roles', 'users', 'student_profiles', 'teacher_profiles',
+  'auth_tokens', 'documents', 'document_processing_jobs', 'document_chunks',
+  'chat_sessions', 'chat_messages', 'citations', 'llm_usage_logs'
+]);
 
 function corpusError(code, message) {
   const error = new Error(message);
@@ -333,27 +339,52 @@ function scanSensitiveText(label, value, options = {}) {
     ['JWT', /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/],
     ['AWS_KEY', /\bAKIA[0-9A-Z]{16}\b/],
     ['BEARER', /Bearer\s+[0-9A-Za-z._~-]{12,}/i],
-    ['SECRET_ASSIGNMENT', /(?:GOOGLE_API_KEY|LLAMA_CLOUD_API_KEY|RAG_INTERNAL_TOKEN|INTERNAL_SECRET)\s*=/i],
-    ['CREDENTIAL_ASSIGNMENT', /(?:password|passwd|pwd|otp|access[_ -]?token|refresh[_ -]?token)\s*[:=]\s*\S{4,}/i],
-    ['PHONE_NUMBER', /(?:\+84|0)(?:3|5|7|8|9)\d{8}\b/],
-    ['PII_LABEL', /(?:địa chỉ|address|phone|điện thoại|cccd|cmnd)\s*[:=]\s*\S+/i],
+    ['SECRET_ASSIGNMENT', /(?:GOOGLE_API_KEY|LLAMA_CLOUD_API_KEY|RAG_INTERNAL_TOKEN|INTERNAL_SECRET|CLOUD_CREDENTIAL)\s*=/i],
+    ['CREDENTIAL_ASSIGNMENT', /(?:password|passwd|pwd|otp|api[_ -]?key|reset[_ -]?token|access[_ -]?token|refresh[_ -]?token|authorization)\s*[:=]\s*\S{4,}/i],
     ['WINDOWS_PATH', options.serializedSql ? /\b[A-Za-z]:\\\\[^\s]+/ : /\b[A-Za-z]:\\[^\s]+/],
     ['FILE_URI', /file:\/\//i]
   ];
   for (const [rule, pattern] of rules) {
     if (pattern.test(text)) throw corpusError('CORPUS_SECRET_SCAN_FAILED', `${label} matched ${rule}; export aborted.`);
   }
-  for (const match of text.matchAll(/[A-Z0-9._%+-]+@([A-Z0-9.-]+\.[A-Z]{2,})/gi)) {
-    const email = match[0].toLowerCase();
-    if (email !== 'admin@example.com' && !email.endsWith('@smoke.test')) {
-      throw corpusError('CORPUS_PII_REVIEW_REQUIRED', `${label} contains an unapproved email; export aborted.`);
-    }
+}
+
+function assertScopedMysqlTables(sql) {
+  const referenced = new Set();
+  const tableReference = /\b(?:CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?|INSERT\s+INTO|DROP\s+TABLE(?:\s+IF\s+EXISTS)?|ALTER\s+TABLE|LOCK\s+TABLES)\s+`([^`]+)`/gi;
+  for (const match of sql.matchAll(tableReference)) referenced.add(match[1]);
+  const outsideScope = [...referenced].filter((table) => !SCOPED_MYSQL_TABLES.has(table));
+  if (outsideScope.length) {
+    throw corpusError(
+      'CORPUS_MYSQL_TABLE_OUT_OF_SCOPE',
+      `Portable MySQL dump references ${outsideScope.length} table(s) outside the scoped corpus.`
+    );
   }
+}
+
+function validatePrivateAccountRows(users) {
+  for (const user of users) {
+    const email = String(user.email || '');
+    if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email)
+      || /[\u0000-\u001f\u007f]/.test(email)) {
+      throw corpusError('CORPUS_ACCOUNT_DATA_INVALID', 'Private corpus contains an invalid account email.');
+    }
+    if (!BCRYPT_HASH.test(String(user.passwordHash || ''))) {
+      throw corpusError(
+        'CORPUS_ACCOUNT_PASSWORD_HASH_INVALID',
+        'Private corpus account password must be a bcrypt hash; plaintext credentials are forbidden.'
+      );
+    }
+    scanSensitiveText(`users:${user.id}:fullName`, user.fullName);
+    scanSensitiveText(`users:${user.id}:phone`, user.phone);
+  }
+  return { accountRows: users.length, containsAccountData: users.length > 0 };
 }
 
 function assertSafeMysqlDump(value) {
   const sql = Buffer.isBuffer(value) ? value.toString('utf8') : String(value);
   scanSensitiveText('portable MySQL dump', sql, { serializedSql: true });
+  assertScopedMysqlTables(sql);
   if (/INSERT\s+INTO\s+`?auth_tokens`?/i.test(sql)
     || /\b(?:CREATE\s+USER|GRANT\s+.+\s+TO|DEFINER\s*=)/i.test(sql)) {
     throw corpusError('CORPUS_MYSQL_DUMP_UNSAFE', 'MySQL dump contains auth-token data or host privilege statements.');
@@ -384,17 +415,7 @@ async function assertSanitizedSource(points = [], options = {}) {
       'phone', phone, 'passwordHash', password_hash)
     FROM users ORDER BY id;
   `);
-  if (users.some((user) => user.email !== 'admin@example.com' || user.phone
-    || !/^\$2[aby]\$\d{2}\$/.test(user.passwordHash || ''))) {
-    throw corpusError(
-      'CORPUS_PII_REVIEW_REQUIRED',
-      'Only the documented demo Admin with no phone may be exported automatically.'
-    );
-  }
-  users.forEach((user) => {
-    scanSensitiveText(`users:${user.id}:email`, user.email);
-    scanSensitiveText(`users:${user.id}:fullName`, user.fullName);
-  });
+  const accounts = validatePrivateAccountRows(users);
   const authTokens = mysqlJsonRows(`
     SELECT JSON_OBJECT('id', id, 'type', token_type, 'hash', token_hash)
     FROM auth_tokens ORDER BY id;
@@ -451,6 +472,10 @@ async function assertSanitizedSource(points = [], options = {}) {
   });
   return {
     policy: 'private-internal-operator-review',
+    distribution: 'private',
+    containsAccountData: accounts.containsAccountData,
+    accountRows: accounts.accountRows,
+    publicDistribution: 'forbidden',
     operatorReview: options.reviewConfirmed ? 'CONFIRMED' : 'PENDING',
     authTokens: 'schema included; all auth token rows excluded',
     clientRequestIds: 'retained as random business idempotency state; not credentials',
@@ -909,6 +934,7 @@ module.exports = {
   activeChunkInventory,
   assertSafeMysqlDump,
   assertSanitizedSource,
+  assertScopedMysqlTables,
   bootstrapEmpty,
   createScopedMysqlDump,
   createScopedMysqlExport,
@@ -925,5 +951,7 @@ module.exports = {
   recoverEmptyQdrantState,
   resumeWriters,
   restoreCorpus,
+  scanSensitiveText,
+  validatePrivateAccountRows,
   verifyBundle
 };

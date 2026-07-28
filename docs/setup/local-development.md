@@ -9,15 +9,15 @@ Copy-Item .env.example .env
 
 Root `.env` là cấu hình local duy nhất của Node/Compose. Không commit file này. `python-service/.env` chỉ dành cho Python chạy standalone và không được root Compose đọc.
 
-## Mock stack
+## Remote integration path
 
-`.env.example` mặc định `RAG_MODE=mock`, và base `docker-compose.yml` ép app dùng mock để lệnh có tên `docker:mock:*` không thể vô tình gọi Python. Remote Compose override mới chuyển app sang `remote`.
+Remote là startup path canonical:
 
 ```powershell
-npm run docker:mock:config
-npm run docker:mock:up
-npm run docker:mock:ps
+npm run docker:remote:dev
 ```
+
+Command resolve remote Compose override và recreate app khi cần. Không dùng `docker compose restart` để chuyển từ mock sang remote vì restart giữ environment của container cũ. Setup, preflight và troubleshooting canonical nằm tại [Remote Docker RAG](remote-rag-e2e.md).
 
 Browser frontend khác origin phải nằm trong comma-separated `CORS_ALLOWED_ORIGINS`; Postman/server-to-server không có `Origin` vẫn được phép. `TRUST_PROXY_HOPS=0` là mặc định an toàn; chỉ đặt số hop chính xác khi deployment thực sự có reverse proxy. Auth limiter hiện dùng memory của từng Node process, cấu hình qua `AUTH_*_RATE_LIMIT_*`; nhiều replica cần shared store ở phase production.
 
@@ -25,19 +25,12 @@ JWT local/remote dùng cùng `JWT_ISSUER` và `JWT_AUDIENCE`; đổi hai giá tr
 
 `GET /health` là process liveness. `GET /ready` chạy một MySQL probe nhẹ; endpoint này không chứng minh Python/Qdrant/provider khỏe. Docker healthcheck tiếp tục dùng liveness để dependency DB gián đoạn không tự gây restart loop cho Node.
 
-Mock stack chạy NodeJS + MySQL, không gọi Python/Qdrant/provider. Fresh volume tự chạy `schema.sql` rồi `demo_seed.sql`.
-
-Disposition: **RUNTIME RETAINED WITH EVIDENCE** vì `docker:mock:*` và `test:part2` là consumer thực tế. Stub chỉ mô phỏng accepted operations, deterministic no-answer/failure và sourced answer khi test cung cấp một `vector_node_id` đã tồn tại; nó không tự tạo citation giả. Remote error không bao giờ silently fallback sang mock, và mock PASS không được gọi là Python/live E2E PASS.
-
 ```powershell
 npm run check
 npm run test:openapi
 npm run test:library
 npm run test:contract
-npm run test:part2
 ```
-
-`test:part2` dùng HTTP thật với RAG mock và cần MySQL development đang healthy. Test tạo dữ liệu tạm; không chạy trên database cần giữ.
 
 ## Chạy Node trực tiếp
 
@@ -50,12 +43,20 @@ npm start
 
 Node đọc `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` từ root `.env`. Với Node chạy trên host, `DB_HOST=localhost` và `DB_PORT` phải trùng host port của MySQL.
 
-## Dừng và reset mock
+Full Node + Python + Qdrant dùng [Remote Docker RAG](remote-rag-e2e.md). Contract tests không phải live E2E.
+
+---
+
+## Phụ lục — Mock mode (REFERENCE ONLY)
+
+Mock chỉ dành cho regression/quick test; nó không kiểm chứng remote và không phải fallback khi remote lỗi. Base `docker-compose.yml` ép app dùng mock để command này không thể vô tình gọi Python.
 
 ```powershell
+npm run docker:mock:config
+npm run docker:mock:up
+npm run docker:mock:ps
+npm run test:part2
 npm run docker:mock:down
 ```
 
-`docker:mock:down` giữ named volumes. `npm run docker:mock:reset` xóa database/upload volumes của `COMPOSE_PROJECT_NAME`; chỉ dùng với project test.
-
-Full Node + Python + Qdrant dùng [Remote Docker RAG](remote-rag-e2e.md). Contract tests không phải live E2E.
+`test:part2` dùng HTTP thật với RAG mock và cần MySQL disposable đang healthy. `docker:mock:down` giữ named volumes; `docker:mock:reset` có tính phá hủy và chỉ dành cho project test đã xác nhận.

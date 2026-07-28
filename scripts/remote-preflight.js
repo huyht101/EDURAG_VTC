@@ -2,6 +2,8 @@
 
 const assert = require('assert/strict');
 const crypto = require('crypto');
+const mysql = require('mysql2/promise');
+const { checkDocumentSchema } = require('./document-schema-check');
 const {
   docker,
   compose,
@@ -46,6 +48,21 @@ async function main() {
   const running = new Set(compose(['ps', '--status', 'running', '--services']).split(/\r?\n/).filter(Boolean));
   for (const service of ['db', 'app', 'rag-service', 'qdrant']) {
     assert(running.has(service), `${service} is not running.`);
+  }
+
+  const dbPort = composePort('db', 3306);
+  const database = mysql.createPool({
+    host: '127.0.0.1',
+    port: dbPort,
+    user: process.env.DB_USER || 'root',
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME || 'edurag',
+    connectionLimit: 1
+  });
+  try {
+    await checkDocumentSchema(database);
+  } finally {
+    await database.end();
   }
 
   const nodePort = composePort('app', 5000);

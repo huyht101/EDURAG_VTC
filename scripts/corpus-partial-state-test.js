@@ -52,6 +52,7 @@ async function main() {
   );
   assertProjectUnused();
   process.env.MYSQL_HOST_PORT = '0';
+  process.env.REMOTE_MYSQL_HOST_PORT = '0';
   process.env.QDRANT_HTTP_HOST_PORT = '0';
   process.env.QDRANT_GRPC_HOST_PORT = '0';
   try {

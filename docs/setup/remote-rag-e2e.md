@@ -17,10 +17,12 @@ Copy-Item .env.example .env
 Điền trong root `.env`:
 
 - app/database/auth secrets;
-- `RAG_INTERNAL_TOKEN` tối thiểu 32 ký tự; remote Compose override tự đặt `RAG_MODE=remote`, không cần đổi mock default trong `.env`;
+- `RAG_INTERNAL_TOKEN` tối thiểu 32 ký tự; `.env.example` và remote Compose override đều chọn `RAG_MODE=remote`;
 - `GOOGLE_API_KEY`, `LLAMA_CLOUD_API_KEY`;
 - `GEMINI_LLM_MODEL=models/gemini-3.5-flash`;
 - `GEMINI_EMBEDDING_MODEL=models/gemini-embedding-001`, `EMBEDDING_DIMENSION=768`;
+- `REMOTE_MYSQL_HOST_PORT=13306` là loopback port cho host-side E2E tooling;
+  containers luôn kết nối MySQL bằng `db:3306`;
 - `CORPUS_BOOTSTRAP=auto`;
 - `GCS_PROJECT_ID`, `GCS_BUCKET`, `GCS_OBJECT_PREFIX`, `GCS_CREDENTIALS_FILE`.
 
@@ -33,6 +35,22 @@ npm run docker:remote:config
 npm run docker:remote:dev
 ```
 
+`docker:remote:dev` là command startup/chuyển mode canonical. Nó resolve remote override rồi force-recreate riêng app trước bootstrap, vì `docker compose restart app` chỉ restart container hiện có và **giữ nguyên environment đã được resolve khi container được tạo**. Nếu app trước đó chạy mock, restart không chuyển nó sang remote; named volumes vẫn được giữ cả khi app được recreate.
+
+Remote override thay mapping MySQL của base Compose bằng
+`127.0.0.1:${REMOTE_MYSQL_HOST_PORT}:3306`. Biến `MYSQL_HOST_PORT` của
+base/mock không được kế thừa. Nếu `13306` cũng không khả dụng, chọn một
+loopback port trống rồi chạy lại command canonical:
+
+```powershell
+$env:REMOTE_MYSQL_HOST_PORT='13316'
+npm run docker:remote:dev
+```
+
+Không đổi `DB_HOST`/`DB_PORT` của app sang host port. Startup báo
+`REMOTE_DB_HOST_PORT_UNAVAILABLE` cùng tên biến cần đổi nếu mapping remote
+bị chiếm.
+
 Foreground orchestration:
 
 1. validate root environment và Compose;
@@ -43,6 +61,15 @@ Foreground orchestration:
 6. start Node + Python;
 7. chạy remote preflight;
 8. attach `app`/`rag-service` logs.
+
+Sau khi chuyển từ mock, xác nhận mode thực tế:
+
+```powershell
+npm run preflight:remote
+docker compose --profile rag -f docker-compose.yml -f docker-compose.remote.yml exec -T app node -e "console.log(process.env.RAG_MODE)"
+```
+
+Kết quả phải là `remote` và `REMOTE_PREFLIGHT_OK`. Python/Qdrant đang healthy không tự chứng minh Node dùng remote; app có thể vẫn giữ environment mock nếu chỉ được restart. Remote lỗi phải fail rõ, không fallback sang mock.
 
 Node gọi `http://rag-service:8000`; Python callback `http://app:5000`; Qdrant là `http://qdrant:6333`. Node mount uploads read/write, Python mount cùng volume read-only. GCS key không được mount/inject.
 
@@ -65,11 +92,12 @@ Chọn mode theo mục đích:
 
 ```powershell
 npm run corpus:inspect
+npm run corpus:audit
 npm run corpus:verify
 npm run corpus:restore
 ```
 
-`inspect` là local-only. `verify` và `restore` đọc selected remote release/credential; chỉ chạy trong isolated project sau data approval. Manager dùng writer credential trên source quiescent đã được phê duyệt. Xem plan trước:
+`inspect` là local-only. `audit` và `verify` chỉ đọc selected release: tải artifact vào thư mục tạm, kiểm checksum/manifest và cleanup sau kiểm tra; `audit` bổ sung file-format, duplicate, mapping và quality flags nhưng không thay thế content approval. `restore` có ghi dữ liệu và không thuộc pre-publish audit read-only. Manager dùng writer credential trên source quiescent đã được phê duyệt. Xem plan trước:
 
 ```powershell
 npm run corpus:publish -- --dry-run
@@ -79,7 +107,7 @@ npm run corpus:verify
 
 `--confirm-reviewed` xác nhận operator đã kiểm tra PII/personal data, secret, quyền chia sẻ và project scope; không phải automated PII scanner. Policy đơn giản này chỉ dùng với private/internal bucket. Publish/restore không ingest, parse hoặc document-embed. `publish` create-only và pointer-last; `restore` không overwrite incompatible stores/files. Xem [Cloud corpus portability](../architecture/corpus-portability.md).
 
-`corpus:inspect` là local-only: không đọc credential, không gọi GCS/provider/writer và không verify remote release. Dry-run là read-only và yêu cầu MySQL/Qdrant đã chạy: không start/stop writer, không tạo snapshot/staging, không đọc cloud credential và không gọi GCS. Publish thật pause app/Python xuyên suốt frozen export + upload/read-back/pointer update, rồi resume trong `finally`; `Ctrl+C` có signal guard best-effort. Restore stage/verify trước apply và có recovery về empty state; không có implicit replace-local.
+`corpus:inspect` là local-only: không đọc credential, không gọi GCS/provider/writer và không verify remote release. Dry-run là read-only và yêu cầu MySQL/Qdrant đã chạy: không start/stop writer, không tạo snapshot/staging hoặc đổi pointer; nó chỉ đọc metadata IAM/Public Access Prevention để fail closed nếu target không chứng minh được là private, không upload hay đổi ACL. Publish thật pause app/Python xuyên suốt frozen export + upload/read-back/pointer update, rồi resume trong `finally`; `Ctrl+C` có signal guard best-effort. Restore stage/verify trước apply và có recovery về empty state; không có implicit replace-local.
 
 Workflow manager chuẩn:
 
@@ -89,7 +117,7 @@ Workflow manager chuẩn:
 4. Upload/process document mới và poll đến `READY`.
 5. Nhấn `Ctrl+C`; containers dừng, volumes được giữ.
 6. Chuyển sang writer credential qua kênh an toàn.
-7. Chạy dry-run, review exact originals/PII/secret/quyền chia sẻ/project scope.
+7. Chạy dry-run, review exact originals/secret/quyền chia sẻ private/project scope. Account rows hợp lệ, email canonical và bcrypt hash được giữ trong private dump; plaintext credential/token vẫn bị chặn.
 8. Chạy publish với `--confirm-reviewed`, sau đó `npm run corpus:verify`.
 
 Local divergence trong development là hợp lệ. Public corpus hoặc compliance audit cần policy riêng; không dùng confirmation flag này để hạ guard cho public bucket.
@@ -142,5 +170,16 @@ Approved corpus đã restore có thể dùng cho chat/citation mà không upload
 | `401` public API | Dùng user JWT, không dùng internal token. |
 | Original unavailable | Corpus/original chưa restore; citation snapshot vẫn dùng được nếu structured local data tồn tại. |
 | Chat timeout | Kiểm tra Python/provider health và `RAG_QUERY_TIMEOUT_MS`. |
+| Python/Qdrant healthy nhưng preflight báo app không phải remote | App có thể được tạo bởi base/mock Compose rồi chỉ restart. Chạy command canonical `npm run docker:remote:dev` để recreate app với resolved remote environment; không xóa volume để “sửa” lỗi configuration. |
 
 Quy trình kiểm thử đầy đủ: [Independent test plan](../testing/week3-remote-test-plan.md).
+
+---
+
+## Phụ lục — Mock mode (REFERENCE ONLY)
+
+Mock chỉ dành cho regression/quick test; nó không kiểm chứng remote và không phải fallback khi remote lỗi.
+
+```powershell
+npm run docker:mock:up
+```

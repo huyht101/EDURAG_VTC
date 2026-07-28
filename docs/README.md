@@ -5,8 +5,8 @@ Tài liệu hiện hành của NodeJS/Core. Khi có khác biệt, ưu tiên runt
 | Mục đích | Tài liệu canonical |
 |---|---|
 | Chạy nhanh | [Root README](../README.md) |
-| Chạy mock/Node local | [Local development](setup/local-development.md) |
-| Chạy full Docker, optional approved cloud restore và Swagger | [Remote Docker RAG](setup/remote-rag-e2e.md) |
+| Chạy full Docker remote, optional approved cloud restore và Swagger | [Remote Docker RAG](setup/remote-rag-e2e.md) |
+| Node local và mock reference | [Local development](setup/local-development.md) |
 | Hiểu system ownership | [System overview](architecture/system-overview.md) |
 | Hiểu cloud corpus release | [Corpus portability](architecture/corpus-portability.md) |
 | Tích hợp Web/Mobile | [Frontend integration contract](api/frontend-integration.md) |

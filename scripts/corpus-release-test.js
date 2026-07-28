@@ -28,12 +28,14 @@ const {
   credentialState,
   loadCloudConfig,
   manifestObjectKey,
+  parseDocumentsFromDump,
   releaseError,
   sha256Buffer,
   validateReleaseManifest
 } = require('./lib/corpus-release');
 const corpusRuntime = require('./lib/corpus-runtime');
 const { approvedCorpusConfig } = require('./restored-corpus-live-smoke');
+const { auditDownloadedRelease } = require('./corpus-prepublish-audit');
 
 const config = Object.freeze({
   projectId: 'test-project',
@@ -195,6 +197,176 @@ function reconciledFixture() {
 }
 
 async function main() {
+  const validPasswordHash = `$2b$12$${'a'.repeat(53)}`;
+  const accountPolicy = corpusRuntime.validatePrivateAccountRows([
+    {
+      id: 1,
+      email: 'canonical.user@private.example',
+      fullName: 'Canonical User',
+      phone: null,
+      passwordHash: validPasswordHash
+    },
+    {
+      id: 2,
+      email: 'another-account@example.vn',
+      fullName: 'Another User',
+      phone: '0900000000',
+      passwordHash: validPasswordHash
+    }
+  ]);
+  assert.deepEqual(accountPolicy, { accountRows: 2, containsAccountData: true });
+  const singleAccountDump = (
+    `CREATE TABLE \`users\` (\`email\` varchar(255), \`password_hash\` varchar(255));\n`
+    + `INSERT INTO \`users\` VALUES ('canonical.user@private.example','${validPasswordHash}');`
+  );
+  const multipleAccountDump = `${singleAccountDump}\n`
+    + `INSERT INTO \`users\` VALUES ('another-account@example.vn','${validPasswordHash}');`;
+  corpusRuntime.assertSafeMysqlDump(singleAccountDump);
+  corpusRuntime.assertSafeMysqlDump(multipleAccountDump);
+  assert.throws(
+    () => corpusRuntime.validatePrivateAccountRows([{
+      id: 3,
+      email: 'plaintext@example.com',
+      fullName: 'Plaintext Rejected',
+      phone: null,
+      passwordHash: 'plaintext-password'
+    }]),
+    (error) => error.code === 'CORPUS_ACCOUNT_PASSWORD_HASH_INVALID'
+  );
+  for (const value of [
+    'password=plaintext-secret',
+    'reset_token=reset-secret-value',
+    'otp=123456',
+    'api_key=api-secret-value',
+    'cloud_credential=cloud-secret-value',
+    'Authorization: Bearer abcdefghijklmnop',
+    '-----BEGIN PRIVATE KEY-----'
+  ]) {
+    assert.throws(
+      () => corpusRuntime.scanSensitiveText('policy regression', value),
+      (error) => error.code === 'CORPUS_SECRET_SCAN_FAILED'
+    );
+  }
+  assert.throws(
+    () => corpusRuntime.assertSafeMysqlDump('CREATE TABLE `outside_scope` (`id` bigint);'),
+    (error) => error.code === 'CORPUS_MYSQL_TABLE_OUT_OF_SCOPE'
+  );
+  assert.throws(
+    () => corpusRuntime.assertSafeMysqlDump(
+      'CREATE TABLE `auth_tokens` (`id` bigint); INSERT INTO `auth_tokens` VALUES (1);'
+    ),
+    (error) => error.code === 'CORPUS_MYSQL_DUMP_UNSAFE'
+  );
+
+  const auditDirectory = await fsp.mkdtemp(path.join(os.tmpdir(), 'edurag-corpus-audit-test-'));
+  temporaryDirectories.add(auditDirectory);
+  const auditBytes = Buffer.from('Safe corpus audit fixture with enough readable text for validation.', 'utf8');
+  const auditReleaseId = 'v1-000000000000000000000000';
+  const auditReleasePrefix = `test/releases/${auditReleaseId}`;
+  const auditKey = `${auditReleasePrefix}/documents/1.txt`;
+  const auditFile = path.join(auditDirectory, 'document.txt');
+  await fsp.writeFile(auditFile, auditBytes);
+  const auditManifestKey = `${auditReleasePrefix}/manifest.json`;
+  const auditMysqlKey = `${auditReleasePrefix}/mysql/corpus.sql.gz`;
+  const auditQdrantKey = `${auditReleasePrefix}/qdrant/education_docs.snapshot`;
+  const auditResult = await auditDownloadedRelease({
+    manifest: {
+      releaseId: auditReleaseId,
+      objectPrefix: auditReleasePrefix,
+      expectedCounts: { qdrantPoints: 1 },
+      sanitization: { secretAndPathScan: 'passed' },
+      inventory: {
+        activeDocuments: ['1'],
+        chunks: [{
+          documentId: '1',
+          vectorNodeId: '9589059b-c74b-40b8-896a-47aa77ed4601',
+          contentHash: 'e7600f3da27237e68019ee627b32f0e059824b52f2d38f2bbe01ad9388ad1cf0',
+          hidden: false
+        }]
+      },
+      artifacts: {
+        mysql: { objectKey: auditMysqlKey },
+        qdrant: { objectKey: auditQdrantKey },
+        documents: [{
+          documentId: '1', objectKey: auditKey, originalFilename: 'tai-lieu.txt',
+          mimeType: 'text/plain', sha256: sha256Buffer(auditBytes), sizeBytes: auditBytes.length
+        }]
+      }
+    },
+    key: auditManifestKey,
+    config: { objectPrefix: 'test' },
+    objectStore: {
+      list: async (prefix) => prefix === auditReleasePrefix
+        ? [auditManifestKey, auditMysqlKey, auditQdrantKey, auditKey]
+          .map((objectKey) => ({ objectKey }))
+        : [auditManifestKey, auditMysqlKey, auditQdrantKey, auditKey]
+          .map((objectKey) => ({ objectKey }))
+    },
+    files: new Map([[auditKey, auditFile]])
+  }, {
+    environment: {
+      CORPUS_APPROVED_BUNDLE_CONFIRMED: 'true',
+      CORPUS_APPROVED_RELEASE_ID: auditReleaseId
+    }
+  });
+  assert.equal(auditResult.status, 'CORPUS_PREPUBLISH_AUDIT_CONDITIONAL');
+  assert.equal(auditResult.mutation, false);
+  assert.equal(auditResult.inventory.mechanicalValidationCoverage, '1/1');
+  assert.equal(auditResult.inventory.textExtractionCoverage, '1/1');
+  assert.equal(auditResult.inventory.bucket.unexpectedObjects, 0);
+  assert.equal(auditResult.inventory.bucket.releaseVersions, 1);
+  assert.deepEqual(auditResult.distribution, {
+    access: 'PRIVATE',
+    containsAccountData: true,
+    publicDistribution: 'FORBIDDEN'
+  });
+  assert(!auditResult.findings.some((finding) => finding.severity === 'BLOCKER'));
+  const blockedAudit = await auditDownloadedRelease({
+    manifest: auditResult.releaseId === auditReleaseId
+      ? {
+        releaseId: auditReleaseId,
+        objectPrefix: auditReleasePrefix,
+        expectedCounts: { qdrantPoints: 1 },
+        sanitization: { secretAndPathScan: 'passed' },
+        inventory: {
+          activeDocuments: ['1'],
+          chunks: [{
+            documentId: '1',
+            vectorNodeId: '9589059b-c74b-40b8-896a-47aa77ed4601',
+            contentHash: 'e7600f3da27237e68019ee627b32f0e059824b52f2d38f2bbe01ad9388ad1cf0',
+            hidden: false
+          }]
+        },
+        artifacts: {
+          mysql: { objectKey: auditMysqlKey },
+          qdrant: { objectKey: auditQdrantKey },
+          documents: [{
+            documentId: '1', objectKey: auditKey, originalFilename: 'tai-lieu.txt',
+            mimeType: 'text/plain', sha256: sha256Buffer(auditBytes), sizeBytes: auditBytes.length
+          }]
+        }
+      }
+      : null,
+    key: auditManifestKey,
+    config: { objectPrefix: 'test' },
+    objectStore: {
+      list: async (prefix) => {
+        const keys = [auditManifestKey, auditMysqlKey, auditQdrantKey, auditKey];
+        if (prefix === auditReleasePrefix) keys.push(`${auditReleasePrefix}/.env`);
+        return keys.map((objectKey) => ({ objectKey }));
+      }
+    },
+    files: new Map([[auditKey, auditFile]])
+  }, {
+    environment: {
+      CORPUS_APPROVED_BUNDLE_CONFIRMED: 'true',
+      CORPUS_APPROVED_RELEASE_ID: auditReleaseId
+    }
+  });
+  assert.equal(blockedAudit.status, 'CORPUS_PREPUBLISH_AUDIT_BLOCKED');
+  assert(blockedAudit.findings.some((finding) =>
+    finding.code === 'BUCKET_SELECTED_RELEASE_HAS_UNEXPECTED_OBJECT'));
+
   const sqlTuples = [
     "INSERT INTO `chat_messages` VALUES (1,'INSERT INTO citations VALUES (999);');",
     "INSERT INTO `citations` VALUES (1,'plain',NULL,1,'2026-07-22 10:11:12.123');",
@@ -277,6 +449,17 @@ async function main() {
     schemaAutoIncrement: 123456
   }), identity, 'Logical identity must ignore runtime/export metadata that is not corpus content.');
   assert.notEqual(sourceFingerprint({ ...identityInput, mysqlContentSha256: '4'.repeat(64) }), identity);
+  assert.notEqual(
+    sourceFingerprint({
+      ...identityInput,
+      mysqlContentSha256: sha256Buffer(Buffer.from(singleAccountDump))
+    }),
+    sourceFingerprint({
+      ...identityInput,
+      mysqlContentSha256: sha256Buffer(Buffer.from(multipleAccountDump))
+    }),
+    'Account-row changes in the scoped MySQL dump must produce a new logical release identity.'
+  );
   assert.notEqual(sourceFingerprint({ ...identityInput, qdrantContentSha256: '5'.repeat(64) }), identity);
   const changedDocuments = new Map(identityInput.documents);
   changedDocuments.set('1', { ...changedDocuments.get('1'), sha256: '6'.repeat(64) });
@@ -336,6 +519,16 @@ async function main() {
     1,
     'Hidden READY documents remain publishable with hidden retrieval state.'
   );
+  const currentDocumentDump = parseDocumentsFromDump(
+    `INSERT INTO \`documents\` VALUES `
+    + `(1,2,'Demo','Description','Author','demo.pdf','LOCAL','documents/2026/07/example.pdf',`
+    + `'PDF','application/pdf',10,'${'b'.repeat(64)}',2,'READY',NULL,'application/pdf',`
+    + `'READY','VISIBLE','2026-07-28 00:00:00.000',NULL,`
+    + `'2026-07-28 00:00:00.000','2026-07-28 00:00:00.000');`
+  ).get('1');
+  assert.equal(currentDocumentDump.localStorageKey, readyDocument.localStorageKey);
+  assert.equal(currentDocumentDump.originalFilename, readyDocument.originalFilename);
+  assert.equal(currentDocumentDump.processingStatus, 'READY');
 
   const originalTestDirectory = await fsp.mkdtemp(path.join(os.tmpdir(), 'edurag-original-stage-test-'));
   const originalBytes = Buffer.from('verified original');
@@ -505,8 +698,10 @@ async function main() {
   assert.equal(dryRun.identity, 'PROVISIONAL_UNTIL_FROZEN_EXPORT');
   assert.equal(dryRun.documents[0].processingStatus, 'READY');
   assert.equal(dryRun.documents[0].visibilityStatus, 'VISIBLE');
+  assert.equal(dryRun.containsAccountData, true);
+  assert.equal(dryRun.publicDistribution, 'FORBIDDEN');
   assert.equal(dryRunStore.objects.size, 0, 'Dry-run must not upload cloud objects.');
-  assert.equal(dryRunStore.privacyChecks, 0, 'Dry-run must not call GCS bucket APIs.');
+  assert.equal(dryRunStore.privacyChecks, 1, 'Dry-run must verify that the target is private without mutation.');
   assert.equal(dryRunPointerWrites, 0, 'Dry-run must not update the release pointer.');
 
   const inspectLogs = [];
@@ -875,7 +1070,8 @@ async function main() {
   console.log(
     'CORPUS_RELEASE_TEST_OK manifest=validated publish=create-only+manifest-last+idempotent '
     + 'restore=staged+empty+compatible+rollback bootstrap=empty+local-retained+partial-safe+required-strict '
-    + 'publish=dry-run-zero-mutation+review-confirmation+pointer-last+writer-resume'
+    + 'publish=dry-run-zero-mutation+review-confirmation+pointer-last+writer-resume '
+    + 'prepublish-audit=read-only+mechanical-validation'
   );
 }
 

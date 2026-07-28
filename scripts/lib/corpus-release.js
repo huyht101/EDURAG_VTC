@@ -139,22 +139,34 @@ function parseDocumentsFromDump(sql) {
   const documents = new Map();
   for (const tuple of splitSqlValueTuples(valueList)) {
     const fields = splitSqlTuple(tuple);
-    if (fields.length < 16) {
+    if (![16, 22].includes(fields.length)) {
       throw releaseError('CORPUS_MYSQL_DUMP_INVALID', 'Documents row does not match schema 1.0.0.');
     }
+    const currentSchema = fields.length === 22;
+    const index = currentSchema
+      ? {
+        originalFilename: 5, storageType: 6, localStorageKey: 7, fileType: 8,
+        mimeType: 9, sizeBytes: 10, sha256: 11, processingStatus: 16,
+        visibilityStatus: 17, deletedAt: 19
+      }
+      : {
+        originalFilename: 3, storageType: 4, localStorageKey: 5, fileType: 6,
+        mimeType: 7, sizeBytes: 8, sha256: 9, processingStatus: 10,
+        visibilityStatus: 11, deletedAt: 13
+      };
     const document = {
       documentId: String(fields[0]),
       title: String(fields[2]),
-      originalFilename: String(fields[3]),
-      storageType: String(fields[4]),
-      localStorageKey: validateLocalStorageKey(fields[5]),
-      fileType: String(fields[6]),
-      mimeType: String(fields[7]),
-      sizeBytes: Number(fields[8]),
-      sha256: String(fields[9]).toLowerCase(),
-      processingStatus: String(fields[10]),
-      visibilityStatus: String(fields[11]),
-      deletedAt: fields[13]
+      originalFilename: String(fields[index.originalFilename]),
+      storageType: String(fields[index.storageType]),
+      localStorageKey: validateLocalStorageKey(fields[index.localStorageKey]),
+      fileType: String(fields[index.fileType]),
+      mimeType: String(fields[index.mimeType]),
+      sizeBytes: Number(fields[index.sizeBytes]),
+      sha256: String(fields[index.sha256]).toLowerCase(),
+      processingStatus: String(fields[index.processingStatus]),
+      visibilityStatus: String(fields[index.visibilityStatus]),
+      deletedAt: fields[index.deletedAt]
     };
     if (!/^\d+$/.test(document.documentId) || document.storageType !== 'LOCAL'
       || !Number.isSafeInteger(document.sizeBytes) || document.sizeBytes <= 0

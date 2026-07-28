@@ -1,6 +1,7 @@
 'use strict';
 
 const { spawn, spawnSync } = require('child_process');
+const net = require('net');
 const path = require('path');
 
 const root = path.resolve(__dirname, '..');
@@ -67,6 +68,17 @@ function spawnCompose(args, options = {}) {
   });
 }
 
+function runComposeCli() {
+  const result = spawnSync('docker', composeCommandArgs(process.argv.slice(2)), {
+    cwd: root,
+    stdio: 'inherit',
+    windowsHide: true,
+    env: process.env
+  });
+  if (result.error) throw result.error;
+  process.exitCode = result.status ?? 1;
+}
+
 function composeExec(service, command) {
   return compose(['exec', '-T', service, ...command]);
 }
@@ -76,6 +88,47 @@ function composePort(service, containerPort) {
   const match = output.match(/:(\d+)$/);
   if (!match) throw new Error(`Cannot resolve published port for ${service}:${containerPort}.`);
   return Number(match[1]);
+}
+
+function resolvedComposeConfig() {
+  return JSON.parse(compose(['config', '--format', 'json']));
+}
+
+function publishedPort(config, service, containerPort) {
+  const ports = config.services?.[service]?.ports || [];
+  const mapping = ports.find((entry) => Number(entry.target) === Number(containerPort));
+  return mapping ? Number(mapping.published) : null;
+}
+
+function existingProjectDbUsesPort(port) {
+  const result = compose(['ps', '-q', 'db'], { allowFailure: true });
+  if (typeof result !== 'string' || !result.trim()) return false;
+  const bindings = JSON.parse(docker([
+    'inspect', '--format', '{{json .NetworkSettings.Ports}}', result.trim()
+  ]));
+  return (bindings['3306/tcp'] || []).some((binding) => Number(binding.HostPort) === port);
+}
+
+async function assertRemoteDbHostPortAvailable() {
+  const port = publishedPort(resolvedComposeConfig(), 'db', 3306);
+  if (!port || existingProjectDbUsesPort(port)) return port;
+  await new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.unref();
+    server.once('error', (cause) => {
+      const error = new Error(
+        `Remote MySQL host port ${port} is unavailable (${cause.code || 'bind failed'}). `
+        + 'Set REMOTE_MYSQL_HOST_PORT to a free loopback port and rerun '
+        + '`npm run docker:remote:dev`.'
+      );
+      error.code = 'REMOTE_DB_HOST_PORT_UNAVAILABLE';
+      reject(error);
+    });
+    server.listen({ host: '127.0.0.1', port, exclusive: true }, () => {
+      server.close(resolve);
+    });
+  });
+  return port;
 }
 
 function assertRemoteEnvironment() {
@@ -117,8 +170,13 @@ module.exports = {
   spawnCompose,
   composeExec,
   composePort,
+  resolvedComposeConfig,
+  publishedPort,
+  assertRemoteDbHostPortAvailable,
   REMOTE_REQUIRED_ENVIRONMENT,
   assertRemoteEnvironment,
   delay,
   fetchWithTimeout
 };
+
+if (require.main === module) runComposeCli();

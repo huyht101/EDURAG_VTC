@@ -81,6 +81,20 @@ class GcsObjectStore {
     }
   }
 
+  async list(objectPrefix) {
+    try {
+      const prefix = `${String(objectPrefix).replace(/\/+$/, '')}/`;
+      const [files] = await this.bucket.getFiles({ prefix });
+      return files.map((file) => ({
+        objectKey: file.name,
+        sizeBytes: Number(file.metadata?.size || 0),
+        generation: String(file.metadata?.generation || '')
+      }));
+    } catch (error) {
+      throw mapReadError(error);
+    }
+  }
+
   async uploadCreateOnly(sourceFile, objectKey, metadata) {
     try {
       await this.bucket.upload(sourceFile, {
