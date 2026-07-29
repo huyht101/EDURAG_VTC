@@ -14,6 +14,8 @@ Upload multipart hỗ trợ PDF/DOCX/TXT với `file` và optional `title`, `des
 
 Preview states là `PENDING`, `READY`, `FAILED`, `NOT_APPLICABLE`. PDF dùng original làm preview (`READY`) và `pageCount` là số trang vật lý, kể cả trang trắng. DOCX giữ original, tạo PDF bằng LibreOffice trong DB-backed `GENERATE_PDF_PREVIEW` job; upload không chờ conversion, và chỉ khi publish atomic thành công mới cập nhật preview path/MIME/page count. TXT `NOT_APPLICABLE`, `pageCount=null`. Preview failure không thay đổi RAG processing status. PPTX chưa được upload/RAG trong CURRENT; worker/adapter chỉ được thiết kế để thêm converter sau này.
 
+Docker image cài font Noto/Liberation qua Alpine `fontconfig` để LibreOffice thay thế Arial, Times New Roman và Calibri, gồm glyph tiếng Việt. Thay đổi font chỉ áp dụng khi convert; preview đã sinh không tự động được regenerate.
+
 Original endpoint trả `attachment`; preview endpoint trả authenticated PDF `inline`; cả hai stream server-side, chưa hỗ trợ byte Range/`206`. Library source/preview trả `404` khi document không còn `READY + VISIBLE`; original hợp lệ nhưng thiếu file trả `409 ORIGINAL_SOURCE_UNAVAILABLE`, preview pending/failed/missing trả `409 PREVIEW_UNAVAILABLE`. Relative URL không phải public URL và client phải gửi Bearer.
 
 Transaction đầu tạo `documents`, INGEST job và DOCX preview job khi cần; dispatch Python diễn ra sau commit. Invalid PDF/metadata không lưu file; DB failure xóa đúng file vừa lưu. Remote dispatch failure giữ document/file, đánh dấu INGEST/document `FAILED`; preview lifecycle độc lập.

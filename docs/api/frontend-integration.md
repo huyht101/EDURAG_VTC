@@ -165,9 +165,9 @@ Node tạo PDF preview bất đồng bộ cho DOCX bằng durable preview job. K
 |---|---|---|---|
 | Document Library metadata | `GET /api/library/documents`, `GET /api/library/documents/{id}` | JSON allowlist; list có `q`, `fileType`, `author`, `page`, `limit`, `sort` và trả `offset/page/limit/total/totalPages/documents` | User JWT; STUDENT/TEACHER/ADMIN nhận cùng DTO; server cố định `READY + VISIBLE`. |
 | Document Library original | `GET /api/library/documents/{id}/source` | Binary attachment, `Content-Length`, `Content-Disposition` | STUDENT/TEACHER/ADMIN; `404` nếu không còn `READY + VISIBLE`, `409` nếu record hợp lệ nhưng original thiếu. |
-| Document Library preview | `GET /api/library/documents/{id}/preview` | PDF inline; original PDF hoặc generated DOCX PDF | STUDENT/TEACHER/ADMIN; cùng fixed Library scope; `409` nếu pending/failed/not applicable/missing. |
+| Document Library preview | `GET /api/library/documents/{id}/preview` | PDF inline; original PDF hoặc generated DOCX PDF; tên UTF-8 ở `filename*` theo RFC 5987, kèm ASCII fallback | STUDENT/TEACHER/ADMIN; cùng fixed Library scope; `409` nếu pending/failed/not applicable/missing. |
 | PDF/DOCX/TXT original của document | `GET /api/documents/{id}/file` | `200`, MIME suy ra từ filename, `Content-Length`, `Content-Disposition: attachment` | User JWT; TEACHER uploader hoặc ADMIN. HIDDEN vẫn mở được; DELETED trả `404`. |
-| Management preview | `GET /api/documents/{id}/preview` | PDF inline | TEACHER uploader hoặc ADMIN; không mở cho Student. |
+| Management preview | `GET /api/documents/{id}/preview` | PDF inline; tên UTF-8 ở `filename*` theo RFC 5987, kèm ASCII fallback | TEACHER uploader hoặc ADMIN; không mở cho Student. |
 | Citation snapshot | `GET /api/citations/{id}/source` hoặc `GET /api/citations/{id}` | JSON gồm snapshot và `originalAvailable` | User JWT và owner của chat session; snapshot vẫn tồn tại sau hide/delete. |
 | Original qua citation | `GET /api/citations/{id}/file` | Binary attachment như original | Session owner trước, sau đó current source authorization. `DELETED` luôn unavailable; `HIDDEN` chỉ uploader/Admin được mở trong session của chính họ; file thiếu trả `409 ORIGINAL_SOURCE_UNAVAILABLE`. |
 

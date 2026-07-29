@@ -13,96 +13,20 @@ const { PDFDocument } = require('pdf-lib');
 const DEMO_ADMIN_EMAIL = 'admin@example.com';
 const DEMO_ADMIN_PASSWORD = '123456';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-function crc32(buffer) {
-  let crc = 0xffffffff;
-  for (const byte of buffer) {
-    crc ^= byte;
-    for (let bit = 0; bit < 8; bit += 1) {
-      crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
-    }
-  }
-  return (crc ^ 0xffffffff) >>> 0;
-}
-
-function storedZip(entries) {
-  const localParts = [];
-  const centralParts = [];
-  let offset = 0;
-  for (const [name, contents] of entries) {
-    const filename = Buffer.from(name, 'utf8');
-    const data = Buffer.from(contents, 'utf8');
-    const checksum = crc32(data);
-    const local = Buffer.alloc(30);
-    local.writeUInt32LE(0x04034b50, 0);
-    local.writeUInt16LE(20, 4);
-    local.writeUInt32LE(checksum, 14);
-    local.writeUInt32LE(data.length, 18);
-    local.writeUInt32LE(data.length, 22);
-    local.writeUInt16LE(filename.length, 26);
-    localParts.push(local, filename, data);
-
-    const central = Buffer.alloc(46);
-    central.writeUInt32LE(0x02014b50, 0);
-    central.writeUInt16LE(20, 4);
-    central.writeUInt16LE(20, 6);
-    central.writeUInt32LE(checksum, 16);
-    central.writeUInt32LE(data.length, 20);
-    central.writeUInt32LE(data.length, 24);
-    central.writeUInt16LE(filename.length, 28);
-    central.writeUInt32LE(offset, 42);
-    centralParts.push(central, filename);
-    offset += local.length + filename.length + data.length;
-  }
-  const centralSize = centralParts.reduce((total, part) => total + part.length, 0);
-  const end = Buffer.alloc(22);
-  end.writeUInt32LE(0x06054b50, 0);
-  end.writeUInt16LE(entries.length, 8);
-  end.writeUInt16LE(entries.length, 10);
-  end.writeUInt32LE(centralSize, 12);
-  end.writeUInt32LE(offset, 16);
-  return Buffer.concat([...localParts, ...centralParts, end]);
-}
-
-function minimalDocxBytes() {
-  return storedZip([
-    ['[Content_Types].xml',
-      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-      + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
-      + '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
-      + '<Default Extension="xml" ContentType="application/xml"/>'
-      + '<Override PartName="/word/document.xml" '
-      + 'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
-      + '</Types>'],
-    ['_rels/.rels',
-      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-      + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-      + '<Relationship Id="rId1" '
-      + 'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
-      + 'Target="word/document.xml"/>'
-      + '</Relationships>'],
-    ['word/document.xml',
-      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-      + '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
-      + '<w:body><w:p><w:r><w:t>EDURAG DOCX page one</w:t></w:r></w:p>'
-      + '<w:p><w:r><w:br w:type="page"/></w:r></w:p>'
-      + '<w:p><w:r><w:t>EDURAG DOCX page two</w:t></w:r></w:p>'
-      + '<w:sectPr><w:pgSz w:w="12240" w:h="15840"/>'
-      + '<w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/>'
-      + '</w:sectPr></w:body></w:document>']
-  ]);
-}
+const { vietnameseDocxBytes } = require('./lib/vietnamese-docx-fixture');
 
 const LIBRARY_SOURCE_FIXTURES = [
   {
     fileType: 'PDF',
     filename: 'library-source.pdf',
+    title: 'Kế hoạch thực tập 2026',
     mimeType: 'application/pdf',
     bytes: Buffer.from('%PDF-1.7\nEDURAG PDF source bytes\n%%EOF\n')
   },
   {
     fileType: 'DOCX',
     filename: 'library-source.docx',
+    title: 'Báo "cáo"/(A_B) 100% \\ tiếng Việt',
     mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     bytes: Buffer.from(
       'UEsDBBQAAAAAAGx5+FwcQqjh7gAAAO4AAAATAAAAW0NvbnRlbnRfVHlwZXNdLnhtbDxUeXBlcyB4bWxucz0iaHR0cDovL3NjaGVtYXMub3BlbnhtbGZvcm1hdHMub3JnL3BhY2thZ2UvMjAwNi9jb250ZW50LXR5cGVzIj48RGVmYXVsdCBFeHRlbnNpb249InJlbHMiIENvbnRlbnRUeXBlPSJhcHBsaWNhdGlvbi92bmQub3BlbnhtbGZvcm1hdHMtcGFja2FnZS5yZWxhdGlvbnNoaXBzK3htbCIvPjxEZWZhdWx0IEV4dGVuc2lvbj0ieG1sIiBDb250ZW50VHlwZT0iYXBwbGljYXRpb24veG1sIi8+PC9UeXBlcz5QSwMEFAAAAAAAbHn4XGF7L0PyAAAA8gAAAAsAAABfcmVscy8ucmVsczxSZWxhdGlvbnNoaXBzIHhtbG5zPSJodHRwOi8vc2NoZW1hcy5vcGVueG1sZm9ybWF0cy5vcmcvcGFja2FnZS8yMDA2L3JlbGF0aW9uc2hpcHMiPjxSZWxhdGlvbnNoaXAgSWQ9InJJZDEiIFR5cGU9Imh0dHA6Ly9zY2hlbWFzLm9wZW54bWxmb3JtYXRzLm9yZy9vZmZpY2VEb2N1bWVudC8yMDA2L3JlbGF0aW9uc2hpcHMvb2ZmaWNlRG9jdW1lbnQiIFRhcmdldD0id29yZC9kb2N1bWVudC54bWwiLz48L1JlbGF0aW9uc2hpcHM+UEsDBBQAAAAAAGx5+FxG0CYzqgAAAKoAAAARAAAAd29yZC9kb2N1bWVudC54bWw8dzpkb2N1bWVudCB4bWxuczp3PSJodHRwOi8vc2NoZW1hcy5vcGVueG1sZm9ybWF0cy5vcmcvd29yZHByb2Nlc3NpbmdtbC8yMDA2L21haW4iPjx3OmJvZHk+PHc6cD48dzpyPjx3OnQ+RURVUkFHIERPQ1ggc291cmNlIGJ5dGVzPC93OnQ+PC93OnI+PC93OnA+PC93OmJvZHk+PC93OmRvY3VtZW50PlBLAQIUABQAAAAAAGx5+FwcQqjh7gAAAO4AAAATAAAAAAAAAAAAAACAAQAAAABbQ29udGVudF9UeXBlc10ueG1sUEsBAhQAFAAAAAAAbHn4XGF7L0PyAAAA8gAAAAsAAAAAAAAAAAAAAIABHwEAAF9yZWxzLy5yZWxzUEsBAhQAFAAAAAAAbHn4XEbQJjOqAAAAqgAAABEAAAAAAAAAAAAAAIABOgIAAHdvcmQvZG9jdW1lbnQueG1sUEsFBgAAAAADAAMAuQAAABMDAAAAAA==',
@@ -139,10 +63,19 @@ const documentService = require('../src/services/document-service');
 const documentFileService = require('../src/services/document-file-service');
 const authService = require('../src/services/auth-service');
 const previewWorker = require('../src/workers/document-preview-worker');
+const { sanitizeFilename } = require('../src/utils/content-disposition');
 const { backfillDocument } = require('./backfill-document-previews');
 
 function accessToken(user) {
   return authService.signJwt(user);
+}
+
+function assertInlineUtf8Filename(header, expectedFilename) {
+  assert.match(header, /^inline;/i);
+  assert(!/[\r\n]/.test(header));
+  const match = /filename\*=UTF-8''([^;]+)/i.exec(header);
+  assert(match, `Missing RFC 5987 filename*: ${header}`);
+  assert.equal(decodeURIComponent(match[1]), sanitizeFilename(expectedFilename));
 }
 
 async function createActiveUser(role, suffix) {
@@ -261,7 +194,7 @@ async function main() {
   pdf.addPage([300, 400]);
   pdf.addPage([300, 400]);
   LIBRARY_SOURCE_FIXTURES[0].bytes = Buffer.from(await pdf.save());
-  LIBRARY_SOURCE_FIXTURES[1].bytes = minimalDocxBytes();
+  LIBRARY_SOURCE_FIXTURES[1].bytes = vietnameseDocxBytes();
   const suffix = `${Date.now()}-${crypto.randomInt(1000, 9999)}`;
   const teacher1 = await createActiveUser('TEACHER', `one-${suffix}`);
   const teacher2 = await createActiveUser('TEACHER', `two-${suffix}`);
@@ -981,9 +914,7 @@ async function main() {
         new Blob([fixture.bytes], { type: fixture.mimeType }),
         fixture.filename
       );
-      if (fixture.fileType !== 'PDF') {
-        fixtureForm.append('title', `Library ${fixture.fileType} bytes`);
-      }
+      fixtureForm.append('title', fixture.title || `Library ${fixture.fileType} bytes`);
       const fixtureUpload = (await request('/api/documents', {
         method: 'POST',
         headers: auth(teacher1Token),
@@ -1014,7 +945,7 @@ async function main() {
       assert.equal(fixtureDetail.fileType, fixture.fileType);
       assert.equal(fixtureDetail.originalAvailable, true);
       if (fixture.fileType === 'PDF') {
-        assert.equal(fixtureDetail.title, 'library-source');
+        assert.equal(fixtureDetail.title, fixture.title);
         assert.equal(fixtureDetail.pageCount, 3);
         assert.equal(fixtureDetail.previewStatus, 'READY');
         assert.equal(fixtureDetail.previewAvailable, true);
@@ -1024,7 +955,10 @@ async function main() {
             { headers: auth(token), signal: AbortSignal.timeout(15_000) }
           );
           assert.equal(previewResponse.status, 200);
-          assert.match(previewResponse.headers.get('content-disposition') || '', /inline/i);
+          assertInlineUtf8Filename(
+            previewResponse.headers.get('content-disposition') || '',
+            `${fixture.title}.pdf`
+          );
           assert.deepEqual(Buffer.from(await previewResponse.arrayBuffer()), fixture.bytes);
         }
         for (const [token, status] of [
@@ -1037,7 +971,16 @@ async function main() {
             { headers: auth(token), signal: AbortSignal.timeout(15_000) }
           );
           assert.equal(managementPreview.status, status);
-          if (status === 200) await managementPreview.arrayBuffer();
+          if (status === 200) {
+            assertInlineUtf8Filename(
+              managementPreview.headers.get('content-disposition') || '',
+              `${fixture.title}.pdf`
+            );
+            assert.deepEqual(
+              Buffer.from(await managementPreview.arrayBuffer()),
+              fixture.bytes
+            );
+          }
         }
       } else if (fixture.fileType === 'TXT') {
         assert.equal(fixtureDetail.pageCount, null);
@@ -1062,6 +1005,10 @@ async function main() {
         });
         assert.equal(previewResponse.status, 200);
         assert.match(previewResponse.headers.get('content-type') || '', /^application\/pdf/);
+        assertInlineUtf8Filename(
+          previewResponse.headers.get('content-disposition') || '',
+          `${fixture.title}.pdf`
+        );
         const previewBytes = Buffer.from(await previewResponse.arrayBuffer());
         assert.equal(previewBytes.subarray(0, 5).toString('ascii'), '%PDF-');
         assert.equal(await documentFileService.countPdfPages(previewBytes), docxDetail.pageCount);

@@ -2,14 +2,24 @@
 
 const assert = require('assert/strict');
 const fs = require('fs/promises');
+const http = require('http');
 const os = require('os');
 const path = require('path');
+const { Readable } = require('stream');
+const express = require('express');
 const { PDFDocument } = require('pdf-lib');
 
+const documentController = require('../src/controllers/document-controller');
+const libraryController = require('../src/controllers/library-controller');
 const documentFileService = require('../src/services/document-file-service');
 const documentService = require('../src/services/document-service');
+const libraryService = require('../src/services/library-service');
 const documentDto = require('../src/services/document-dto-service');
 const previewService = require('../src/services/document-preview-service');
+const {
+  inlineContentDisposition,
+  sanitizeFilename
+} = require('../src/utils/content-disposition');
 const { backfillDocument } = require('./backfill-document-previews');
 const { validateDocumentUpdate } = require('../src/validators/document');
 const { splitStatements } = require('./migrate');
@@ -52,6 +62,131 @@ async function testPdfCountAndMetadata() {
   assert.equal(documentService.initialPreview({ fileType: 'TXT' }).previewStatus, 'NOT_APPLICABLE');
   assert(validateDocumentUpdate({ pageCount: 99 })?.error);
   assert.equal(validateDocumentUpdate({ description: null, author: 'A&B' }), null);
+}
+
+function decodedExtendedFilename(header) {
+  const match = /filename\*=UTF-8''([^;]+)/i.exec(header);
+  assert(match, `Missing RFC 5987 filename*: ${header}`);
+  return decodeURIComponent(match[1]);
+}
+
+async function testUnicodePreviewHeadersAndBytes() {
+  const cases = [
+    'Kế hoạch thực tập 2026.pdf',
+    '  Báo "cáo"/(A_B) 100% \\ quý\r\n4.pdf  '
+  ];
+  for (const filename of cases) {
+    const header = inlineContentDisposition(filename);
+    assert.match(header, /^inline; filename="[ -~]+"; filename\*=UTF-8''/);
+    assert(!/[^\x20-\x7e]/.test(header), 'HTTP header must contain ASCII bytes only.');
+    assert(!/[\r\n]/.test(header), 'HTTP header must not allow line injection.');
+    assert.equal(decodedExtendedFilename(header), sanitizeFilename(filename));
+  }
+
+  const payload = await pdfBytes(2);
+  const filename = 'Kế hoạch "thực/tập" (2026) 100%.pdf';
+  const originalLibraryOpen = libraryService.openPreview;
+  const originalManagementOpen = documentService.openManagedPreview;
+  libraryService.openPreview = async () => ({
+    filename,
+    mimeType: 'application/pdf',
+    size: payload.length,
+    stream: Readable.from(payload)
+  });
+  documentService.openManagedPreview = async () => ({
+    filename,
+    mimeType: 'application/pdf',
+    size: payload.length,
+    stream: Readable.from(payload)
+  });
+
+  let streamedError = null;
+  const server = http.createServer((req, res) => {
+    const controller = req.url === '/library'
+      ? libraryController.streamPreview
+      : documentController.streamPreview;
+    controller(
+      { params: { id: '1' }, user: { id: 1, role: 'ADMIN' } },
+      res,
+      (error) => {
+        streamedError = error;
+        if (!res.headersSent) {
+          res.statusCode = 500;
+          res.end();
+        }
+      }
+    );
+  });
+  try {
+    await new Promise((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    for (const route of ['library', 'management']) {
+      const response = await fetch(`http://127.0.0.1:${server.address().port}/${route}`);
+      assert.equal(response.status, 200);
+      const header = response.headers.get('content-disposition') || '';
+      assert.match(header, /^inline;/i);
+      assert.equal(decodedExtendedFilename(header), sanitizeFilename(filename));
+      assert.deepEqual(Buffer.from(await response.arrayBuffer()), payload);
+    }
+    assert.equal(streamedError, null);
+  } finally {
+    libraryService.openPreview = originalLibraryOpen;
+    documentService.openManagedPreview = originalManagementOpen;
+    if (server.listening) await new Promise((resolve) => server.close(resolve));
+  }
+}
+
+async function testUnicodeSourceHeadersRemainAttachments() {
+  const payload = await pdfBytes(1);
+  const filename = 'Kế hoạch nguồn 2026.pdf';
+  const originalLibraryOpen = libraryService.openSource;
+  const originalManagementOpen = documentService.openManagedFile;
+  libraryService.openSource = async () => ({
+    filename,
+    mimeType: 'application/pdf',
+    size: payload.length,
+    stream: Readable.from(payload)
+  });
+  documentService.openManagedFile = async () => ({
+    document: {
+      mime_type: 'application/pdf',
+      original_filename: filename
+    },
+    size: payload.length,
+    stream: Readable.from(payload)
+  });
+
+  const app = express();
+  app.get('/library', (req, res, next) => {
+    req.params.id = '1';
+    return libraryController.streamSource(req, res, next);
+  });
+  app.get('/management', (req, res, next) => {
+    req.params.id = '1';
+    req.user = { id: 1, role: 'ADMIN' };
+    return documentController.streamFile(req, res, next);
+  });
+  app.use((error, _req, res, _next) => res.status(500).json({ code: error.code || error.name }));
+  const server = await new Promise((resolve, reject) => {
+    const instance = app.listen(0, '127.0.0.1', () => resolve(instance));
+    instance.once('error', reject);
+  });
+  try {
+    for (const route of ['library', 'management']) {
+      const response = await fetch(`http://127.0.0.1:${server.address().port}/${route}`);
+      assert.equal(response.status, 200);
+      const header = response.headers.get('content-disposition') || '';
+      assert.match(header, /^attachment;/i);
+      assert.equal(decodedExtendedFilename(header), filename);
+      assert.deepEqual(Buffer.from(await response.arrayBuffer()), payload);
+    }
+  } finally {
+    libraryService.openSource = originalLibraryOpen;
+    documentService.openManagedFile = originalManagementOpen;
+    await new Promise((resolve) => server.close(resolve));
+  }
 }
 
 function fakePreviewDependencies(document) {
@@ -301,11 +436,13 @@ async function testBackfillBehavior() {
 
 async function main() {
   await testPdfCountAndMetadata();
+  await testUnicodePreviewHeadersAndBytes();
+  await testUnicodeSourceHeadersRemainAttachments();
   await testPreviewSuccessFailureAndRetry();
   await testLibreOfficeArgumentsAreIsolated();
   await testDtoSafetyAndMigrationParser();
   await testBackfillBehavior();
-  console.log('DOCUMENT_PREVIEW_TESTS_OK pdf=physical-pages metadata=allowlist preview=durable-job');
+  console.log('DOCUMENT_PREVIEW_TESTS_OK pdf=physical-pages metadata=allowlist preview=durable-job headers=rfc5987');
 }
 
 main().catch((error) => {

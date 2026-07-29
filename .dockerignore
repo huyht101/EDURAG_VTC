@@ -8,7 +8,6 @@ node_modules
 !.env.example
 week2_nodejs_core_ref
 /python-service
-/new python-service
 /secrets
 /artifacts
 /bootstrap/corpus

@@ -1,4 +1,5 @@
 const libraryService = require('../services/library-service');
+const { inlineContentDisposition } = require('../utils/content-disposition');
 
 async function list(req, res, next) {
   try {
@@ -32,10 +33,9 @@ async function streamSource(req, res, next) {
 async function streamPreview(req, res, next) {
   try {
     const result = await libraryService.openPreview(req.params.id);
-    const filename = result.filename.replace(/[\r\n"\\/]/g, '_');
     res.setHeader('Content-Type', result.mimeType);
     res.setHeader('Content-Length', result.size);
-    res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+    res.setHeader('Content-Disposition', inlineContentDisposition(result.filename));
     result.stream.on('error', next);
     return result.stream.pipe(res);
   } catch (error) {

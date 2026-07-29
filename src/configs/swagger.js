@@ -40,8 +40,11 @@ const previewFileResponse = (description) => ({
   description,
   headers: {
     'Content-Disposition': {
-      description: 'Inline PDF filename; clients still fetch with Bearer authentication.',
-      schema: { type: 'string', example: 'inline; filename="document.pdf"' }
+      description: 'Inline PDF filename with an ASCII fallback and RFC 5987 UTF-8 filename*; clients still fetch with Bearer authentication.',
+      schema: {
+        type: 'string',
+        example: "inline; filename=\"Ke hoach.pdf\"; filename*=UTF-8''K%E1%BA%BF%20ho%E1%BA%A1ch.pdf"
+      }
     },
     'Content-Length': {
       description: 'Full preview size. Byte Range/206 is not implemented.',

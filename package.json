@@ -18,6 +18,7 @@
     "test:library": "node scripts/library-contract-test.js",
     "test:document-schema": "node scripts/document-schema-check.js",
     "test:documents": "node scripts/document-preview-test.js",
+    "test:docx-preview:docker": "node scripts/docker-docx-preview-test.js",
     "test:node-consolidation": "node scripts/node-consolidation-test.js",
     "test:part2": "node scripts/part2-smoke.js",
     "docker:mock:config": "docker compose config --quiet",
