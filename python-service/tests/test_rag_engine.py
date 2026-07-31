@@ -48,6 +48,7 @@ from services.rag_engine import (
     _extract_usage_info,
     _format_history,
     _build_context,
+    _build_rag_prompt,
 )
 
 
@@ -218,6 +219,43 @@ class TestExtractCitations:
         normalized, citations = _extract_citations("Theo [3], rồi [1], lại [3].", results)
         assert normalized == "Theo [1], rồi [2], lại [1]."
         assert [item.doc_id for item in citations] == ["3", "1"]
+
+    def test_preserves_markdown_latex_and_chart_block(self):
+        answer = (
+            "So sánh từ nguồn [1]:\n\n"
+            "| Mô hình | Accuracy |\n"
+            "|---|---:|\n"
+            "| CNN | 91.2% |\n\n"
+            "Công thức: $w = w - \\eta \\nabla L$\n\n"
+            "Dữ liệu sau có thể biểu diễn bằng biểu đồ:\n\n"
+            "```edurag-chart\n"
+            '{"type":"bar","citationOrder":1,'
+            '"data":[{"label":"CNN","value":91.2}]}\n'
+            "```"
+        )
+        results = [self._make_result("uuid-1", "1", "CNN đạt 91.2%.")]
+
+        normalized, citations = _extract_citations(answer, results)
+
+        assert normalized == answer
+        assert len(citations) == 1
+
+
+def test_rag_prompt_allows_rich_content_and_requires_grounded_charts():
+    prompt = _build_rag_prompt(
+        question="So sánh kết quả và nêu công thức.",
+        context="[1] CNN đạt accuracy 91.2%.",
+        history=[],
+    )
+
+    assert "Markdown" in prompt
+    assert "`$...$`" in prompt
+    assert "`$$...$$`" in prompt
+    assert "`edurag-chart`" in prompt
+    assert '"citationOrder":1' in prompt
+    assert "JSON nghiêm ngặt" in prompt
+    assert "Không nội suy, ước lượng" in prompt
+    assert "KHÔNG tạo biểu đồ" in prompt
 
 
 # ──────────────────────────────────────────────────────────────────

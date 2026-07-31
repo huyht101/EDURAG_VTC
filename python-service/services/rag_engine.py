@@ -452,7 +452,32 @@ def _build_rag_prompt(
         "3. KHÔNG ĐƯỢC tự bịa thông tin hoặc sử dụng kiến thức bên ngoài.\n"
         "4. Nếu CONTEXT không đủ thông tin để trả lời, hãy nói rõ ràng rằng "
         "không tìm thấy thông tin.\n"
-        "5. Trả lời bằng tiếng Việt, rõ ràng, có cấu trúc.\n"
+        "5. Trả lời bằng tiếng Việt, rõ ràng, có cấu trúc. Được phép và nên dùng "
+        "Markdown khi giúp nội dung dễ hiểu hơn: bảng, danh sách, **in đậm**, "
+        "code inline và fenced code block.\n"
+        "6. Với công thức toán, dùng LaTeX: `$...$` cho công thức inline và "
+        "`$$...$$` cho công thức dạng khối. Giữ nguyên ký hiệu LaTeX, không escape "
+        "dấu `$` hoặc dấu `\\` và không đặt công thức trong code block.\n"
+        "7. Khi CONTEXT có sẵn dữ liệu số phù hợp để so sánh, có thể chèn đúng một "
+        "khối fenced code mang tag chính xác `edurag-chart` ngay tại vị trí phù hợp. "
+        "Luôn viết một câu mô tả bằng văn bản ngay trước khối biểu đồ.\n"
+        "8. CHỈ tạo biểu đồ từ các số liệu được nêu rõ trong một nguồn CONTEXT mà "
+        "câu trả lời thực sự trích dẫn. Không nội suy, ước lượng, suy diễn, chuyển đổi "
+        "số liệu bằng kiến thức nền hoặc tự tạo số. Nếu nguồn không có đủ số liệu thì "
+        "KHÔNG tạo khối `edurag-chart`.\n"
+        "9. Nội dung khối `edurag-chart` phải là JSON nghiêm ngặt, không comment, "
+        "không trailing comma, theo schema: "
+        '{"type":"bar|line|pie","title":"không bắt buộc","citationOrder":1,'
+        '"xLabel":"không bắt buộc","yLabel":"không bắt buộc",'
+        '"data":[{"label":"chuỗi","value":0}]}. '
+        "`type` chỉ được là `bar`, `line` hoặc `pie`; `data` có tối đa 30 phần tử "
+        "và chỉ một chuỗi dữ liệu; mỗi `value` phải là số JSON thuần, không kèm đơn "
+        "vị hay dấu `%`; không dùng `xLabel`/`yLabel` cho biểu đồ `pie`.\n"
+        "10. `citationOrder` là bắt buộc và phải là thứ tự (bắt đầu từ 1) của nguồn "
+        "trong danh sách citation của chính câu trả lời, tức thứ tự xuất hiện lần đầu "
+        "của các citation khác nhau. Khối biểu đồ phải đặt sau marker citation nguồn "
+        "tương ứng để có thể truy vết rõ ràng. Nếu không xác định chắc chắn được "
+        "`citationOrder`, KHÔNG tạo biểu đồ.\n"
     )
 
     history_text = _format_history(history)
