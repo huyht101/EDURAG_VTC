@@ -1,0 +1,72 @@
+[
+  {
+    "query": "Kích thước ảnh chuẩn để xử lý trong bài tập tải dataset ảnh từ Kaggle là bao nhiêu?",
+    "expected_doc_id": "file.pdf",
+    "expected_page": 1,
+    "expected_text_snippet": "Resize ảnh về kích thước chuẩn 224x224 pixels",
+    "expect_no_answer": false
+  },
+  {
+    "query": "Làm thế nào để chuẩn hóa giá trị pixel của ảnh?",
+    "expected_doc_id": "file.pdf",
+    "expected_page": 1,
+    "expected_text_snippet": "Chuẩn hóa giá trị pixel về range [0, 1]",
+    "expect_no_answer": false
+  },
+  {
+    "query": "Có những phương pháp data augmentation nào được dùng cho bài tập xử lý ảnh?",
+    "expected_doc_id": "file.pdf",
+    "expected_page": 1,
+    "expected_text_snippet": "Tạo ảnh mới bằng xoay, lật, điều chỉnh độ sáng",
+    "expect_no_answer": false
+  },
+  {
+    "query": "Cần bao nhiêu hệ số khi trích xuất đặc trưng MFCC từ âm thanh?",
+    "expected_doc_id": "file.pdf",
+    "expected_page": 2,
+    "expected_text_snippet": "Trích xuất đặc trưng MFCC (40 hệ số)",
+    "expect_no_answer": false
+  },
+  {
+    "query": "Khi chuẩn hóa MFCC, giá trị trung bình và độ lệch chuẩn bằng bao nhiêu?",
+    "expected_doc_id": "file.pdf",
+    "expected_page": 2,
+    "expected_text_snippet": "Chuẩn hóa MFCC (trung bình = 0, độ lệch chuẩn = 1)",
+    "expect_no_answer": false
+  },
+  {
+    "query": "Đầu ra của bài tập xử lý âm thanh là gì?",
+    "expected_doc_id": "file.pdf",
+    "expected_page": 2,
+    "expected_text_snippet": "Vẽ biểu đồ MFCC",
+    "expect_no_answer": false
+  },
+  {
+    "query": "Với dataset UCF101, cần trích xuất frame ở tốc độ nào?",
+    "expected_doc_id": "file.pdf",
+    "expected_page": 3,
+    "expected_text_snippet": "Trích frame (10fps)",
+    "expect_no_answer": false
+  },
+  {
+    "query": "Mô hình pre-trained nào được sử dụng để trích xuất đặc trưng từ video?",
+    "expected_doc_id": "file.pdf",
+    "expected_page": 3,
+    "expected_text_snippet": "Trích đặc trưng với ResNet50 (pre-trained)",
+    "expect_no_answer": false
+  },
+  {
+    "query": "Những phương pháp data augmentation nào áp dụng cho video UCF101?",
+    "expected_doc_id": "file.pdf",
+    "expected_page": 3,
+    "expected_text_snippet": "Augmentation: flip, rotate, brightness",
+    "expect_no_answer": false
+  },
+  {
+    "query": "Làm cách nào để xử lý ngôn ngữ tự nhiên (NLP) với bộ dữ liệu văn bản?",
+    "expected_doc_id": "file.pdf",
+    "expected_page": null,
+    "expected_text_snippet": "",
+    "expect_no_answer": true
+  }
+]

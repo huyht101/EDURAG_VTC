@@ -16,7 +16,7 @@ Strategy:
 import logging
 import re
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, List
 
 from core.config import get_settings
 
@@ -106,6 +106,7 @@ async def _parse_with_llamaparse(file_path: str, api_key: str) -> list[dict]:
             api_key=api_key,
             result_type="markdown",
             language="vi",
+            premium_mode=True,
         )
 
         documents = await parser.aload_data(file_path)

@@ -32,7 +32,7 @@ import uuid
 from qdrant_client import models
 
 # pyrefly: ignore [missing-import]
-from llama_index.core.node_parser import SentenceSplitter
+from llama_index.core.node_parser import MarkdownNodeParser, SentenceSplitter
 # pyrefly: ignore [missing-import]
 from llama_index.core.schema import Document as LlamaDocument
 
@@ -247,11 +247,16 @@ async def ingest_document_background(request: IngestRequest) -> None:
             teacher_metadata=request.teacher_metadata or {},
         )
 
+        # Sử dụng MarkdownNodeParser để giữ cấu trúc Header
+        markdown_parser = MarkdownNodeParser()
+        md_nodes = markdown_parser.get_nodes_from_documents(documents)
+
+        # Sử dụng SentenceSplitter để đảm bảo chunk_size
         splitter = SentenceSplitter(
             chunk_size=settings.CHUNK_SIZE,
             chunk_overlap=settings.CHUNK_OVERLAP,
         )
-        nodes = splitter.get_nodes_from_documents(documents)
+        nodes = splitter.get_nodes_from_documents(md_nodes)
 
         if not nodes:
             await send_failed(
