@@ -220,18 +220,13 @@ class TestExtractCitations:
         assert normalized == "Theo [1], rồi [2], lại [1]."
         assert [item.doc_id for item in citations] == ["3", "1"]
 
-    def test_preserves_markdown_latex_and_chart_block(self):
+    def test_preserves_markdown_latex_and_table(self):
         answer = (
             "So sánh từ nguồn [1]:\n\n"
             "| Mô hình | Accuracy |\n"
             "|---|---:|\n"
             "| CNN | 91.2% |\n\n"
-            "Công thức: $w = w - \\eta \\nabla L$\n\n"
-            "Dữ liệu sau có thể biểu diễn bằng biểu đồ:\n\n"
-            "```edurag-chart\n"
-            '{"type":"bar","citationOrder":1,'
-            '"data":[{"label":"CNN","value":91.2}]}\n'
-            "```"
+            "Công thức: $w = w - \\eta \\nabla L$"
         )
         results = [self._make_result("uuid-1", "1", "CNN đạt 91.2%.")]
 
@@ -241,7 +236,7 @@ class TestExtractCitations:
         assert len(citations) == 1
 
 
-def test_rag_prompt_allows_rich_content_and_requires_grounded_charts():
+def test_rag_prompt_allows_rich_markdown_without_chart_protocol():
     prompt = _build_rag_prompt(
         question="So sánh kết quả và nêu công thức.",
         context="[1] CNN đạt accuracy 91.2%.",
@@ -251,11 +246,12 @@ def test_rag_prompt_allows_rich_content_and_requires_grounded_charts():
     assert "Markdown" in prompt
     assert "`$...$`" in prompt
     assert "`$$...$$`" in prompt
-    assert "`edurag-chart`" in prompt
-    assert '"citationOrder":1' in prompt
-    assert "JSON nghiêm ngặt" in prompt
-    assert "Không nội suy, ước lượng" in prompt
-    assert "KHÔNG tạo biểu đồ" in prompt
+    assert "bảng" in prompt
+    assert "fenced code block" in prompt
+    assert "raw HTML" in prompt
+    assert "structured visualizations" in prompt
+    assert "citationOrder" not in prompt
+    assert '"type":"bar|line|pie"' not in prompt
 
 
 # ──────────────────────────────────────────────────────────────────

@@ -37,7 +37,7 @@ Boundary JSON dùng `snake_case`; internal NodeJS code giữ `camelCase`.
 | Query | `POST /api/query` | Implemented | Implemented |
 | Processing callback | `POST /api/internal/rag/processing-callback` | Sender implemented | Receiver implemented |
 
-Dispatch/operation timeout dùng `RAG_REQUEST_TIMEOUT_MS`; query dùng `RAG_QUERY_TIMEOUT_MS`. `RAG_CALLBACK_BODY_LIMIT` chỉ áp dụng cho internal complete-manifest callback. NodeJS không tự retry network request.
+Dispatch/operation timeout dùng `RAG_REQUEST_TIMEOUT_MS`; query dùng `RAG_QUERY_TIMEOUT_MS`. `RAG_CALLBACK_BODY_LIMIT` chỉ áp dụng cho internal complete-manifest callback. NodeJS không tự retry network request. Riêng ingest dispatch timeout là kết quả vận chuyển chưa xác định: Node trả `503` nhưng giữ exact attempt `RUNNING` để complete-manifest hợp lệ đến sau vẫn có thể được xử lý; rejection/failure xác định mới chuyển job/document sang `FAILED`.
 
 ## Ingest
 
@@ -148,7 +148,10 @@ Current snapshot khai báo `question`, `conversation_id`, `history`, optional `r
 
 Current snapshot response có:
 
-- `answer`: string, kể cả no-answer;
+- `answer`: string, kể cả no-answer. String có thể chứa Markdown subset/GFM-compatible
+  (đoạn văn, heading nhẹ, emphasis, list, table và inline/fenced code); Node lưu và
+  trả nguyên văn, không parse thành HTML/JSON. Raw HTML, `edurag-chart`, chart JSON
+  và `visualizations` không thuộc CURRENT contract;
 - `citations[]`;
 - `confidence`: string `high|medium|low`;
 - `no_answer`: boolean;

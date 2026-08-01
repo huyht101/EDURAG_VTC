@@ -63,6 +63,8 @@ assert.match(chatPost.requestBody.content['application/json'].examples.safeRetry
 assert(chatPost.responses[200].content['application/json'].example.data.clientRequestId);
 assert(chatPost.responses[200].content['application/json'].example.data.assistantMessage.citations.length > 0);
 assert.match(chatPost.description, /structured citation/i);
+assert.match(chatPost.description, /Markdown subset\/GFM-compatible/i);
+assert.match(chatPost.description, /Raw HTML.*edurag-chart.*visualizations/i);
 assert.deepEqual(Object.keys(chatPost.requestBody.content), ['application/json']);
 assert.match(chatPost.description, /không (nhận|có) multipart\/image/i);
 assert(!Object.hasOwn(

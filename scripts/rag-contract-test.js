@@ -221,6 +221,21 @@ async function testChatContract() {
   assert.equal(result.usageCalls[1].callIndex, 2);
   assert.equal(result.usageCalls[1].operationType, 'ANSWER_GENERATION');
 
+  const markdownAnswer = [
+    '## Kết quả',
+    '',
+    '| Mục | Giá trị |',
+    '|---|---:|',
+    '| Dòng có nguồn [1] | 42 |',
+    '',
+    '```js',
+    'const first = array[0];',
+    '```'
+  ].join('\n');
+  const normalizedMarkdown = normalizeQueryResult({ ...answer, answer: markdownAnswer });
+  assert.equal(normalizedMarkdown.answer, markdownAnswer);
+  assert.equal(normalizedMarkdown.sources[0].vectorNodeId, answer.citations[0].vector_node_id);
+
   const multiUsage = normalizeQueryResult({
     ...answer,
     usage: undefined,

@@ -24,6 +24,7 @@ const { authMiddleware } = require('../src/middlewares/auth-middleware');
 const userRepo = require('../src/repositories/user-repository');
 const app = require('../src/app');
 const documentFileService = require('../src/services/document-file-service');
+const documentService = require('../src/services/document-service');
 const { validDocxArchive } = documentFileService;
 const { shutdown } = require('../src/server');
 const messageRepo = require('../src/repositories/chat-message-repository');
@@ -504,6 +505,118 @@ function testCitationContract() {
   assert.deepEqual(noAnswer.sources, []);
 }
 
+async function testMarkdownPersistenceAndIngestTimeout() {
+  const markdownAnswer = [
+    '## Kết quả',
+    '',
+    '| Mục | Giá trị |',
+    '|---|---:|',
+    '| Nguồn [1] | `array[0]` |',
+    '',
+    '```js',
+    'const first = array[0];',
+    '```'
+  ].join('\n');
+  let persistedContent = null;
+  const updateExecutor = {
+    async execute(sql, values) {
+      assert.match(sql, /SET content = \?/);
+      persistedContent = values[0];
+      return [{ affectedRows: 1 }];
+    }
+  };
+  assert.equal(await messageRepo.updateAssistantCompleted(
+    42,
+    { content: markdownAnswer, noAnswer: false },
+    updateExecutor
+  ), true);
+  assert.equal(persistedContent, markdownAnswer);
+
+  let readCount = 0;
+  const history = await messageRepo.listMessages(9, 0, 50, {
+    async execute() {
+      readCount += 1;
+      if (readCount === 1) return [[{ total: 1 }]];
+      return [[{
+        id: 42,
+        session_id: 9,
+        sender_type: 'ASSISTANT',
+        message_order: 2,
+        content: persistedContent,
+        status: 'COMPLETED',
+        no_answer: false
+      }]];
+    }
+  });
+  assert.equal(history.messages[0].content, markdownAnswer);
+
+  const sourceText = 'Nguồn snapshot giữ độc lập với bảng Markdown.';
+  let persistedSource = null;
+  await citationRepo.insertCitation({
+    messageId: 42,
+    documentId: 7,
+    chunkId: 8,
+    vectorNodeId: crypto.randomUUID(),
+    citationOrder: 1,
+    documentTitle: 'Tài liệu',
+    pageNumber: 1,
+    sourceText
+  }, {
+    async execute(_sql, values) {
+      persistedSource = values[8];
+      return [{ insertId: 99 }];
+    }
+  });
+  assert.equal(persistedSource, sourceText);
+
+  assert.equal(
+    documentService.isIngestDispatchOutcomeUnknown({ code: 'RAG_REQUEST_TIMEOUT' }),
+    true,
+    'A dispatch timeout must leave the RUNNING attempt eligible for a later callback.'
+  );
+  assert.equal(
+    documentService.isIngestDispatchOutcomeUnknown({ code: 'RAG_DISPATCH_REJECTED' }),
+    false
+  );
+
+  let timeoutMutations = 0;
+  assert.equal(await documentService.recordIngestDispatchFailure(
+    7,
+    8,
+    { code: 'RAG_REQUEST_TIMEOUT', message: 'ambiguous' },
+    {
+      async withTransaction(work) { timeoutMutations += 1; return work({}); },
+      jobRepo: { async markDispatchFailed() { timeoutMutations += 1; } },
+      documentRepo: { async updateProcessingStatus() { timeoutMutations += 1; } }
+    }
+  ), false);
+  assert.equal(timeoutMutations, 0, 'Timeout must not create a definitive FAILED mutation.');
+
+  const definitiveMutations = [];
+  assert.equal(await documentService.recordIngestDispatchFailure(
+    7,
+    8,
+    { code: 'RAG_DISPATCH_REJECTED', message: 'rejected' },
+    {
+      async withTransaction(work) { return work({ transaction: true }); },
+      jobRepo: {
+        async markDispatchFailed(jobId, code) {
+          definitiveMutations.push(['job', jobId, code]);
+        }
+      },
+      documentRepo: {
+        async updateProcessingStatus(documentId, status) {
+          definitiveMutations.push(['document', documentId, status]);
+        }
+      }
+    }
+  ), true);
+  assert.deepEqual(definitiveMutations, [
+    ['job', 8, 'RAG_DISPATCH_REJECTED'],
+    ['document', 7, 'FAILED']
+  ]);
+}
+
 async function testChangePasswordOrdering() {
   const currentHash = 'current-password-hash';
   const baseUsers = {
@@ -645,6 +758,7 @@ async function main() {
   await testPendingRecoveryAndMockDisposition();
   await testGracefulShutdown();
   testCitationContract();
+  await testMarkdownPersistenceAndIngestTimeout();
   await testChangePasswordOrdering();
   testInputRoundTripAndStudentEmail();
   await testDevelopmentResetDeliveryGate();

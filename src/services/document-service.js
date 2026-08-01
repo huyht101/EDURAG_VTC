@@ -105,6 +105,31 @@ function initialPreview(stored) {
   };
 }
 
+function isIngestDispatchOutcomeUnknown(error) {
+  return error?.code === 'RAG_REQUEST_TIMEOUT';
+}
+
+async function recordIngestDispatchFailure(documentId, jobId, error, dependencies = {}) {
+  if (isIngestDispatchOutcomeUnknown(error)) return false;
+  const runTransaction = dependencies.withTransaction || withTransaction;
+  const jobs = dependencies.jobRepo || jobRepo;
+  const documents = dependencies.documentRepo || documentRepo;
+  await runTransaction(async (connection) => {
+    await jobs.markDispatchFailed(
+      jobId,
+      error.code || 'RAG_DISPATCH_FAILED',
+      error.message,
+      connection
+    );
+    await documents.updateProcessingStatus(
+      documentId,
+      DOCUMENT_STATUSES.processing.FAILED,
+      connection
+    );
+  });
+  return true;
+}
+
 async function uploadDocument(user, file, metadataInput = {}) {
   const metadata = normalizeUploadMetadata(file, metadataInput);
   const stored = await fileService.persist(file);
@@ -170,14 +195,10 @@ async function uploadDocument(user, file, metadataInput = {}) {
     });
     if (!dispatch.accepted) throw appError(503, 'RAG_DISPATCH_REJECTED', 'Python RAG service từ chối ingest job.');
   } catch (error) {
-    await withTransaction(async (connection) => {
-      await jobRepo.markDispatchFailed(jobId, error.code || 'RAG_DISPATCH_FAILED', error.message, connection);
-      await documentRepo.updateProcessingStatus(
-        documentId,
-        DOCUMENT_STATUSES.processing.FAILED,
-        connection
-      );
-    });
+    // A timed-out dispatch request is ambiguous: Python may still finish and callback.
+    // Keep the exact RUNNING attempt eligible for its complete-manifest instead of
+    // turning a transport timeout into a definitive whole-document failure.
+    await recordIngestDispatchFailure(documentId, jobId, error);
     throw appError(503, error.code || 'RAG_DISPATCH_FAILED', 'Không thể dispatch document sang RAG service.', {
       documentId,
       jobId
@@ -395,5 +416,7 @@ module.exports = {
   parseId,
   normalizeUploadMetadata,
   normalizeUpdateMetadata,
-  initialPreview
+  initialPreview,
+  isIngestDispatchOutcomeUnknown,
+  recordIngestDispatchFailure
 };

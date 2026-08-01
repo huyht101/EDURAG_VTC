@@ -52,6 +52,19 @@ Với logical request mới, đây là synchronous HTTP: Node tạo USER và ASS
 }
 ```
 
+### Rich Markdown answer
+
+`assistantMessage.content` và history `message.content` vẫn là string. Với assistant
+`COMPLETED`, string có thể chứa Markdown subset/GFM-compatible: đoạn văn, heading nhẹ,
+bold/italic, danh sách, bảng, inline code và fenced code. Node lưu/trả nguyên văn; không
+chuyển Markdown thành HTML/JSON và không cung cấp `visualizations` hay chart protocol.
+
+FE/Web/Mobile cần dùng renderer hỗ trợ GFM và table. Tắt raw HTML hoặc sanitize bằng thư
+viện đáng tin cậy; bảng rộng cần horizontal scroll; Markdown malformed phải fallback về
+plain text an toàn. Citation `[N]` trong đoạn văn hoặc ô bảng phải click được, nhưng `[N]`
+trong inline/fenced code và array indexing như `array[0]` không phải citation. Không cần
+chart library.
+
 Trạng thái assistant trong MySQL là `PENDING`, `COMPLETED` hoặc `FAILED`; `COMPLETED` và `FAILED` là terminal. FE không poll cho response `duplicate=false` thành công. Nếu duplicate trả `PENDING`, poll `GET /api/chat/sessions/{id}/messages` và match `assistantMessage.id`; sau timeout có thể retry cùng request ID để stale recovery chuyển row cũ sang `FAILED`. Timeout/upstream/contract failure của request mới trả HTTP error và best-effort chuyển row sang `FAILED`. Nếu process crash đúng khoảng này, row có thể còn `PENDING`. Không có SSE/WebSocket hoặc assistant-status endpoint riêng.
 
 ### Chat history

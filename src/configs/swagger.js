@@ -686,7 +686,7 @@ const definition = {
           400: response('Invalid file.', 'ErrorResponse'),
           403: response('TEACHER or ADMIN role required.', 'ErrorResponse'),
           413: response('File too large.', 'ErrorResponse'),
-          503: response('Remote RAG dispatch failed; document/job are marked FAILED.', 'ErrorResponse')
+          503: response('Remote RAG dispatch failed. A request timeout leaves the RUNNING attempt eligible for a later callback; other definitive dispatch failures mark document/job FAILED.', 'ErrorResponse')
         }
       }
     },
@@ -902,7 +902,7 @@ const operationDescriptions = {
   'GET /api/chat/sessions/{id}': 'Actor: session owner. Đọc session detail kèm paginated messages/citations; endpoint read-only và không mở quyền ADMIN đọc session người khác.',
   'DELETE /api/chat/sessions/{id}': 'Actor: session owner. Soft-delete session; messages, citations và usage vẫn được giữ trong MySQL nhưng session không còn xuất hiện qua public history APIs.',
   'GET /api/chat/sessions/{id}/messages': 'Actor: session owner. Đọc messages theo message_order với offset/limit; PENDING/COMPLETED/FAILED đều xuất hiện và assistant message gồm citation snapshots, không bao gồm usage rows.',
-  'POST /api/chat/sessions/{id}/messages': 'Actor: session owner. Supported contract là JSON text, không có multipart/image. Request mới persist USER + ASSISTANT PENDING, chờ Python/LLM và success trả assistant COMPLETED. Duplicate clientRequestId trả pair hiện hữu nên có thể PENDING/COMPLETED/FAILED; PENDING được theo dõi qua history. Không có SSE/WebSocket. no_answer=true là success hợp lệ; normal answer bắt buộc có verified structured citation.',
+  'POST /api/chat/sessions/{id}/messages': 'Actor: session owner. Supported contract là JSON text, không có multipart/image. Request mới persist USER + ASSISTANT PENDING, chờ Python/LLM và success trả assistant COMPLETED. Duplicate clientRequestId trả pair hiện hữu nên có thể PENDING/COMPLETED/FAILED; PENDING được theo dõi qua history. Không có SSE/WebSocket. no_answer=true là success hợp lệ; normal answer bắt buộc có verified structured citation. Assistant content vẫn là string và có thể chứa Markdown subset/GFM-compatible (paragraphs, light headings, emphasis, lists, tables, inline/fenced code); Node lưu/trả nguyên văn và không parse thành HTML/JSON. Raw HTML, edurag-chart và visualizations không thuộc CURRENT contract.',
   'GET /api/citations/{id}': 'Actor: owner của chat session chứa citation. Đọc immutable citation snapshot; không phụ thuộc document hiện còn visible hoặc original file còn tồn tại.',
   'GET /api/citations/{id}/source': 'Actor: owner của chat session chứa citation. Đọc source-text snapshot và cờ originalAvailable; sourceLocator là opaque optional object và current Python không tạo locator/boxes. Đây không phải stream file.',
   'GET /api/citations/{id}/file': 'Actor: owner của chat session chứa citation và current source authorization hợp lệ. DELETED luôn unavailable; HIDDEN chỉ uploader/Admin được mở trong session của chính họ. Stream original as attachment; không có Range/206. Portable corpus thiếu original có thể trả ORIGINAL_SOURCE_UNAVAILABLE trong khi snapshot vẫn đọc được.',

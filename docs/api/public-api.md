@@ -56,6 +56,8 @@ Library list nhận `q`, `fileType`, `author`, `page`, `limit`, `sort`. `q` tìm
 
 Client tạo session, sau đó gửi question vào session do mình sở hữu. Node persist USER + ASSISTANT `PENDING` trước network call; completion lưu answer, citations và usage. `no_answer=true` là HTTP success hợp lệ.
 
+Assistant `content` vẫn là string và có thể chứa Markdown subset/GFM-compatible: đoạn văn, heading nhẹ, bold/italic, danh sách, bảng và inline/fenced code. Node lưu/trả nguyên văn, không chuyển Markdown thành HTML/JSON và không parse `[N]` trong answer để tạo citation. Raw HTML, generated chart, `edurag-chart` và field `visualizations` không thuộc CURRENT contract.
+
 Với `no_answer=false`, answer bắt buộc có ít nhất một structured citation map được tới chunk/document `READY + VISIBLE` tại thời điểm completion. Response thiếu hoặc không xác minh được nguồn trả lỗi upstream và assistant chuyển `FAILED`; Node không tạo citation giả hay parse marker `[1]`.
 
 Không có breaking public API change: `clientRequestId` được nới từ required thành optional theo hướng backward-compatible.

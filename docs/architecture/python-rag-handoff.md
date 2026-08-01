@@ -2,6 +2,9 @@
 
 Đây là canonical action register cho Python upstream. `python-service/` chỉ là tracked integration snapshot; mọi patch dưới đây phải được upstream vào repository Python. Node contract ở [internal RAG contract](../api/internal-rag-contract.md). Offline/mock/contract PASS không phải live Python–Qdrant–provider E2E PASS.
 
+Handoff có scope riêng cho OCR và rich Markdown nằm tại
+[python-rag-ocr-markdown-handoff.md](python-rag-ocr-markdown-handoff.md).
+
 ## Action register
 
 | ID | Bằng chứng/hiện trạng | Ảnh hưởng | Expected behavior | Acceptance criteria/test bắt buộc | Out of scope |
