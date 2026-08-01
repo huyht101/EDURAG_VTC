@@ -9,6 +9,7 @@ const crypto = require('crypto');
 const fs = require('fs/promises');
 const jwt = require('jsonwebtoken');
 const { PDFDocument } = require('pdf-lib');
+const sharp = require('sharp');
 
 const DEMO_ADMIN_EMAIL = 'admin@example.com';
 const DEMO_ADMIN_PASSWORD = '123456';
@@ -18,7 +19,7 @@ const { vietnameseDocxBytes } = require('./lib/vietnamese-docx-fixture');
 const LIBRARY_SOURCE_FIXTURES = [
   {
     fileType: 'PDF',
-    filename: 'library-source.pdf',
+    filename: 'Kế hoạch thực tập 😀.pdf',
     title: 'Kế hoạch thực tập 2026',
     mimeType: 'application/pdf',
     bytes: Buffer.from('%PDF-1.7\nEDURAG PDF source bytes\n%%EOF\n')
@@ -78,6 +79,18 @@ function assertInlineUtf8Filename(header, expectedFilename) {
   assert.equal(decodeURIComponent(match[1]), sanitizeFilename(expectedFilename));
 }
 
+function assertAttachmentUtf8Filename(header, expectedFilename) {
+  assert.match(header, /^attachment;/i);
+  assert(!/[\r\n]/.test(header));
+  const match = /filename\*=UTF-8''([^;]+)/i.exec(header);
+  if (match) {
+    assert.equal(decodeURIComponent(match[1]), sanitizeFilename(expectedFilename));
+  } else {
+    assert(/^[\x20-\x7e]+$/.test(expectedFilename), `Missing RFC 5987 filename*: ${header}`);
+    assert(header.includes(`filename="${expectedFilename}"`));
+  }
+}
+
 async function createActiveUser(role, suffix) {
   const email = `${role.toLowerCase()}.${suffix}@smoke.test`;
   const password = 'SmokePass@2026';
@@ -119,7 +132,7 @@ async function cleanupSmokeSuffix(suffix) {
   const emailMarker = `%${suffix}%`;
   const storageKeys = await withTransaction(async (connection) => {
     const [users] = await connection.execute(
-      'SELECT id FROM users WHERE email LIKE ?',
+      'SELECT id, avatar_storage_key FROM users WHERE email LIKE ?',
       [emailMarker]
     );
     const userIds = users.map((row) => row.id);
@@ -164,7 +177,10 @@ async function cleanupSmokeSuffix(suffix) {
       [emailMarker]
     );
     assert.equal(Number(remaining[0].total), 0, 'Smoke cleanup must remove every user sharing the test marker.');
-    return documents.flatMap((row) => [row.storage_key, row.preview_storage_key]).filter(Boolean);
+    return [
+      ...users.map((row) => row.avatar_storage_key),
+      ...documents.flatMap((row) => [row.storage_key, row.preview_storage_key])
+    ].filter(Boolean);
   });
   await Promise.all(storageKeys.map((storageKey) => documentFileService.remove(storageKey).catch(() => {})));
 }
@@ -296,6 +312,82 @@ async function main() {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ email: studentEmail, password: 'StudentNew@2026' })
     })).payload.data.token;
+
+    await request('/api/profile/avatar', {}, 401);
+    let previousAvatarKey = null;
+    for (const [format, mimeType, extension] of [
+      ['jpeg', 'image/jpeg', '.jpg'], ['png', 'image/png', '.png'], ['webp', 'image/webp', '.webp']
+    ]) {
+      const bytes = await sharp({
+        create: { width: 4, height: 3, channels: 3, background: '#1d4ed8' }
+      })[format]().toBuffer();
+      const form = new FormData();
+      form.append('avatar', new Blob([bytes], { type: mimeType }), `ảnh ${format}${extension}`);
+      const uploadedAvatar = (await request('/api/profile/avatar', {
+        method: 'POST', headers: auth(studentToken), body: form
+      })).payload.data;
+      assert.deepEqual(uploadedAvatar, {
+        avatarAvailable: true,
+        avatarUrl: '/api/profile/avatar',
+        avatarMimeType: mimeType
+      });
+      const profileWithAvatar = (await request('/api/profile', {
+        headers: auth(studentToken)
+      })).payload.data;
+      assert.equal(profileWithAvatar.avatarAvailable, true);
+      assert.equal(profileWithAvatar.avatarUrl, '/api/profile/avatar');
+      assert.equal(profileWithAvatar.avatarMimeType, mimeType);
+      assert(!Object.hasOwn(profileWithAvatar, 'avatar_storage_key'));
+      assert(!Object.hasOwn(profileWithAvatar, 'avatar_mime_type'));
+      const [[storedAvatar]] = await pool.execute(
+        'SELECT avatar_storage_key, avatar_mime_type FROM users WHERE id = ?',
+        [Number(jwt.decode(studentToken).id)]
+      );
+      assert.match(storedAvatar.avatar_storage_key, new RegExp(`^avatars/[0-9a-f-]{36}\\${extension}$`, 'i'));
+      assert.equal(storedAvatar.avatar_mime_type, mimeType);
+      assert(!JSON.stringify(uploadedAvatar).includes(storedAvatar.avatar_storage_key));
+      assert.equal(await documentFileService.exists(storedAvatar.avatar_storage_key), true);
+      if (previousAvatarKey) assert.equal(await documentFileService.exists(previousAvatarKey), false);
+      previousAvatarKey = storedAvatar.avatar_storage_key;
+      const fetchedAvatar = await fetch(`${base}/api/profile/avatar`, {
+        headers: auth(studentToken), signal: AbortSignal.timeout(15_000)
+      });
+      assert.equal(fetchedAvatar.status, 200);
+      assert.equal(fetchedAvatar.headers.get('content-type'), mimeType);
+      assert.deepEqual(Buffer.from(await fetchedAvatar.arrayBuffer()), bytes);
+    }
+    const svgAvatar = new FormData();
+    svgAvatar.append('avatar', new Blob([
+      '<svg xmlns="http://www.w3.org/2000/svg"><rect width="1" height="1"/></svg>'
+    ], { type: 'image/svg+xml' }), 'avatar.svg');
+    await request('/api/profile/avatar', {
+      method: 'POST', headers: auth(studentToken), body: svgAvatar
+    }, 400);
+    await request('/api/profile/avatar', { method: 'DELETE', headers: auth(studentToken) });
+    await request('/api/profile/avatar', { method: 'DELETE', headers: auth(studentToken) });
+    const [[clearedAvatar]] = await pool.execute(
+      'SELECT avatar_storage_key, avatar_mime_type FROM users WHERE id = ?',
+      [Number(jwt.decode(studentToken).id)]
+    );
+    assert.equal(clearedAvatar.avatar_storage_key, null);
+    assert.equal(clearedAvatar.avatar_mime_type, null);
+    assert.equal(await documentFileService.exists(previousAvatarKey), false);
+
+    await request('/api/admin/users/export', {}, 401);
+    await request('/api/admin/users/export', { headers: auth(teacher1Token) }, 403);
+    const exportedUsers = await fetch(`${base}/api/admin/users/export?search=${encodeURIComponent(suffix)}`, {
+      headers: auth(adminToken), signal: AbortSignal.timeout(15_000)
+    });
+    assert.equal(exportedUsers.status, 200);
+    assert.match(exportedUsers.headers.get('content-type') || '', /^text\/csv; charset=utf-8/i);
+    assert.equal(exportedUsers.headers.get('content-disposition'), 'attachment; filename="users.csv"');
+    const exportedBytes = Buffer.from(await exportedUsers.arrayBuffer());
+    assert.deepEqual([...exportedBytes.subarray(0, 3)], [0xef, 0xbb, 0xbf]);
+    const exportedText = exportedBytes.subarray(3).toString('utf8');
+    assert.match(exportedText, /^"id","fullName","email","role","status","createdAt"/);
+    for (const forbidden of ['password_hash', 'auth_version', 'token_hash', 'otp']) {
+      assert(!exportedText.toLowerCase().includes(forbidden));
+    }
 
     const pendingEmail = `pending.${suffix}@smoke.test`;
     await request('/api/auth/register', {
@@ -920,6 +1012,17 @@ async function main() {
         headers: auth(teacher1Token),
         body: fixtureForm
       }, 202)).payload.data;
+      assert.equal(fixtureUpload.document.originalFilename, fixture.filename);
+      const [[storedOriginalName]] = await pool.execute(
+        'SELECT original_filename FROM documents WHERE id = ?',
+        [fixtureUpload.document.id]
+      );
+      assert.equal(storedOriginalName.original_filename, fixture.filename);
+      const managementDetail = (await request(
+        `/api/documents/${fixtureUpload.document.id}`,
+        { headers: auth(teacher1Token) }
+      )).payload.data.document;
+      assert.equal(managementDetail.originalFilename, fixture.filename);
       const fixtureText = `verified ${fixture.fileType} source`;
       await request('/api/internal/rag/processing-callback', {
         method: 'POST',
@@ -1021,8 +1124,7 @@ async function main() {
       assert.equal(Number(fixtureSource.headers.get('content-length')), fixture.bytes.length);
       assert.match(fixtureSource.headers.get('content-type') || '', new RegExp(`^${fixture.mimeType}`));
       const disposition = fixtureSource.headers.get('content-disposition') || '';
-      assert.match(disposition, /attachment/i);
-      assert(disposition.includes(fixture.filename));
+      assertAttachmentUtf8Filename(disposition, fixture.filename);
       assert(!/documents[\\/]/i.test(disposition));
       const received = Buffer.from(await fixtureSource.arrayBuffer());
       assert.equal(

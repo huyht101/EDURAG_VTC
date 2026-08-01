@@ -152,6 +152,34 @@ for (const path of [
   assert(spec.paths[path].get.responses[401], `${path} must document unauthenticated access.`);
 }
 assert.match(spec.paths['/api/documents'].get.description, /STUDENT bị từ chối/);
+const avatarPath = spec.paths['/api/profile/avatar'];
+assert(!Object.hasOwn(spec.components.schemas.Profile.properties, 'avatar_storage_key'));
+assert(!Object.hasOwn(spec.components.schemas.Profile.properties, 'avatarStorageKey'));
+assert.equal(spec.components.schemas.Profile.properties.avatarUrl.example, '/api/profile/avatar');
+assert.deepEqual(Object.keys(avatarPath).sort(), ['delete', 'get', 'post']);
+assert.deepEqual(Object.keys(avatarPath.post.requestBody.content), ['multipart/form-data']);
+assert.deepEqual(
+  avatarPath.post.requestBody.content['multipart/form-data'].schema.required,
+  ['avatar']
+);
+assert.deepEqual(
+  Object.keys(avatarPath.get.responses[200].content).sort(),
+  ['image/jpeg', 'image/png', 'image/webp']
+);
+assert(avatarPath.post.responses[413]);
+assert.match(avatarPath.get.description, /Bearer-authenticated/);
+assert.match(avatarPath.get.description, /no public\/static upload URL/);
+
+const userExport = spec.paths['/api/admin/users/export'].get;
+assert.deepEqual(userExport.parameters.map((parameter) => parameter.name), ['search', 'role', 'status']);
+assert(userExport.security?.[0]?.bearerAuth);
+assert(userExport.responses[401]);
+assert(userExport.responses[403]);
+assert(userExport.responses[200].content['text/csv']);
+assert.match(userExport.responses[200].description, /every row/i);
+assert.match(userExport.description, /id\/fullName\/email\/role\/status\/createdAt/);
+assert.match(userExport.description, /formula/i);
+
 const managementList = spec.paths['/api/documents'].get;
 assert.deepEqual(
   managementList.parameters.map((parameter) => parameter.name),

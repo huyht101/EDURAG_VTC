@@ -36,6 +36,13 @@ async function save(buffer, extension) {
   return key;
 }
 
+async function saveBuffer(storageKey, buffer) {
+  const target = resolveStorageKey(storageKey);
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  await fs.writeFile(target, buffer, { flag: 'wx' });
+  return storageKey;
+}
+
 async function publish(sourcePath, storageKey) {
   const target = resolveStorageKey(storageKey);
   const temporaryTarget = `${target}.${crypto.randomUUID()}.tmp`;
@@ -84,4 +91,4 @@ async function exists(storageKey) {
   }
 }
 
-module.exports = { save, publish, remove, open, exists, resolveStorageKey };
+module.exports = { save, saveBuffer, publish, remove, open, exists, resolveStorageKey };

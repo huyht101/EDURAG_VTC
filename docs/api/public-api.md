@@ -38,6 +38,12 @@ ADMIN không tự động đọc chat session của user khác. Document Library
 
 Student đăng ký thành `ACTIVE`; Teacher thành `PENDING` và cần Admin review. Admin login đúng password vẫn cần OTP trước khi nhận JWT. Change/reset password, lock account và logout làm JWT cũ mất hiệu lực qua `auth_version`. Logout hiện là logout-all cho mọi token/thiết bị phát trước request; client vẫn xóa token local.
 
+### Avatar và Admin user export
+
+Avatar của chính user dùng `POST|GET|DELETE /api/profile/avatar` với Bearer token. Upload field là `avatar`, mặc định tối đa 5 MiB và chỉ JPEG/PNG/WebP một frame sau content decode; SVG và ảnh động/multi-page bị từ chối. `avatarUrl` là authenticated relative endpoint, không phải public storage URL. Không có API đọc avatar user khác trong CURRENT.
+
+Admin CSV dùng `GET /api/admin/users/export` với `search`, `role`, `status`. Endpoint chỉ dành cho ADMIN, xuất toàn bộ hàng khớp filter theo batch thay vì áp dụng page-size của list, có UTF-8 BOM/escaping/formula neutralization và chỉ gồm `id`, `fullName`, `email`, `role`, `status`, `createdAt`. Credential, token, OTP, password hash và `auth_version` không thuộc export.
+
 ### Document ingest
 
 `POST /api/documents` nhận `multipart/form-data` với `file` và optional `title`, `description`, `author`; hỗ trợ PDF/DOCX/TXT. Blank title dùng filename bỏ extension. Node sở hữu `pageCount`: original PDF physical pages; DOCX generated-PDF preview pages sau conversion; TXT null. DOCX phải là bounded OOXML ZIP có core members, không chỉ mang ZIP magic bytes. Response `202` chỉ xác nhận document/jobs đã được tạo và dispatch, chưa có nghĩa RAG hoặc preview đã hoàn tất.

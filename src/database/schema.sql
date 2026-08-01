@@ -37,6 +37,8 @@ CREATE TABLE IF NOT EXISTS `users` (
   `email` VARCHAR(254) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL,
   `password_hash` VARCHAR(255) NOT NULL,
   `phone` VARCHAR(20) CHARACTER SET ascii COLLATE ascii_general_ci NULL DEFAULT NULL,
+  `avatar_storage_key` VARCHAR(512) CHARACTER SET ascii COLLATE ascii_bin NULL DEFAULT NULL,
+  `avatar_mime_type` VARCHAR(64) CHARACTER SET ascii COLLATE ascii_general_ci NULL DEFAULT NULL,
   `status` VARCHAR(20) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'PENDING',
   `auth_version` INT UNSIGNED NOT NULL DEFAULT 1,
   `email_verified_at` DATETIME(3) NULL DEFAULT NULL,
@@ -57,7 +59,14 @@ CREATE TABLE IF NOT EXISTS `users` (
   CONSTRAINT `fk_users_reviewed_by` FOREIGN KEY (`reviewed_by`) REFERENCES `users` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
   CONSTRAINT `fk_users_locked_by` FOREIGN KEY (`locked_by`) REFERENCES `users` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
   CONSTRAINT `chk_users_status` CHECK (status IN ('PENDING','ACTIVE','LOCKED','REJECTED')),
-  CONSTRAINT `chk_users_auth_version` CHECK (auth_version >= 1)
+  CONSTRAINT `chk_users_auth_version` CHECK (auth_version >= 1),
+  CONSTRAINT `chk_users_avatar_pair` CHECK (
+    (`avatar_storage_key` IS NULL AND `avatar_mime_type` IS NULL)
+    OR (`avatar_storage_key` IS NOT NULL AND `avatar_mime_type` IS NOT NULL)
+  ),
+  CONSTRAINT `chk_users_avatar_mime` CHECK (
+    `avatar_mime_type` IS NULL OR `avatar_mime_type` IN ('image/jpeg','image/png','image/webp')
+  )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Tài khoản đăng nhập, trạng thái duyệt/khóa và phiên bản vô hiệu hóa JWT.';
 
 CREATE TABLE IF NOT EXISTS `student_profiles` (
@@ -292,7 +301,9 @@ CREATE TABLE IF NOT EXISTS `llm_usage_logs` (
 START TRANSACTION;
 
 INSERT IGNORE INTO `schema_migrations` (`name`)
-VALUES ('20260727_document_metadata_preview.sql');
+VALUES
+  ('20260727_document_metadata_preview.sql'),
+  ('20260801_user_avatar_storage.sql');
 
 INSERT INTO `roles` (`id`, `code`, `name`, `description`) VALUES
   (1, 'STUDENT', 'Sinh viên', 'Hỏi đáp RAG và xem citation/source'),

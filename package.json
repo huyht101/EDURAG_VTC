@@ -18,6 +18,7 @@
     "test:library": "node scripts/library-contract-test.js",
     "test:document-schema": "node scripts/document-schema-check.js",
     "test:documents": "node scripts/document-preview-test.js",
+    "test:user-assets": "node scripts/user-assets-test.js",
     "test:docx-preview:docker": "node scripts/docker-docx-preview-test.js",
     "test:node-consolidation": "node scripts/node-consolidation-test.js",
     "test:part2": "node scripts/part2-smoke.js",
@@ -58,6 +59,7 @@
     "multer": "^2.2.0",
     "mysql2": "^3.9.7",
     "pdf-lib": "1.17.1",
+    "sharp": "0.35.3",
     "swagger-jsdoc": "^6.3.0",
     "swagger-ui-express": "^5.0.1"
   },

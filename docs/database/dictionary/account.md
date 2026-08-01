@@ -37,6 +37,8 @@ Review/lock actor FK uses `ON DELETE SET NULL`. Student registration creates `AC
 
 ## `student_profiles`
 
+Avatar private của user được lưu ngay trên `users` bằng cặp nullable `avatar_storage_key` (relative ASCII storage key, không phải URL) và `avatar_mime_type`. CHECK yêu cầu hai field cùng null hoặc cùng có giá trị; MIME chỉ có `image/jpeg`, `image/png`, `image/webp`. Public profile không serialize storage key.
+
 | Column | Type/null/default | Key/index | Meaning |
 |---|---|---|---|
 | `user_id` | BIGINT UNSIGNED, required | PK, FK `users.id` CASCADE | Student user |

@@ -10,5 +10,10 @@ function positiveInteger(value, fallback, name) {
 
 module.exports = {
   rootDirectory: path.resolve(process.env.UPLOAD_DIR || 'uploads'),
-  maxFileSizeBytes: positiveInteger(process.env.FILE_MAX_SIZE_BYTES, 20 * 1024 * 1024, 'FILE_MAX_SIZE_BYTES')
+  maxFileSizeBytes: positiveInteger(process.env.FILE_MAX_SIZE_BYTES, 20 * 1024 * 1024, 'FILE_MAX_SIZE_BYTES'),
+  avatarMaxFileSizeBytes: positiveInteger(
+    process.env.AVATAR_MAX_SIZE_BYTES,
+    5 * 1024 * 1024,
+    'AVATAR_MAX_SIZE_BYTES'
+  )
 };

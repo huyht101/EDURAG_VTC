@@ -55,6 +55,7 @@ services:
       AUTH_SENSITIVE_RATE_LIMIT_MAX: ${AUTH_SENSITIVE_RATE_LIMIT_MAX:-10}
       UPLOAD_DIR: /usr/src/app/uploads
       FILE_MAX_SIZE_BYTES: ${FILE_MAX_SIZE_BYTES:-20971520}
+      AVATAR_MAX_SIZE_BYTES: ${AVATAR_MAX_SIZE_BYTES:-5242880}
       # The base stack is always mock. docker-compose.remote.yml explicitly
       # opts the same app service into remote mode.
       RAG_MODE: mock

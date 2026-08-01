@@ -7,6 +7,7 @@ const roleMiddleware = require('../middlewares/role-middleware');
 const validateRequest = require('../middlewares/validate-middleware');
 const { validateChangePassword } = require('../validators/auth');
 const { validateUpdateProfile, validateStatusUpdate } = require('../validators/user');
+const avatarUpload = require('../middlewares/avatar-upload-middleware');
 
 const ROLES = require('../constants/roles');
 
@@ -28,6 +29,10 @@ router.put(
   userController.changeMyPassword
 );
 
+router.post('/profile/avatar', authMiddleware, avatarUpload, userController.uploadMyAvatar);
+router.get('/profile/avatar', authMiddleware, userController.streamMyAvatar);
+router.delete('/profile/avatar', authMiddleware, userController.deleteMyAvatar);
+
 // ─────────────────────────────────────────────
 // /api/admin/users  (ADMIN only)
 // ─────────────────────────────────────────────
@@ -38,6 +43,14 @@ router.get(
   authMiddleware,
   roleMiddleware([ROLES.ADMIN]),
   userController.listUsers
+);
+
+// Static route must precede /api/admin/users/:id.
+router.get(
+  '/admin/users/export',
+  authMiddleware,
+  roleMiddleware([ROLES.ADMIN]),
+  userController.exportUsers
 );
 
 // GET /api/admin/users/:id

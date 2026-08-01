@@ -1,10 +1,23 @@
 const bcrypt = require('bcrypt');
+const { once } = require('events');
 
 const ROLES = require('../constants/roles');
 const STATUSES = require('../constants/statuses');
 const withTransaction = require('../database/transaction');
 const userRepo = require('../repositories/user-repository');
 const appError = require('../utils/app-error');
+const { csvRow } = require('../utils/csv');
+
+function publicProfile(profile) {
+  if (!profile) return profile;
+  const { avatar_storage_key: avatarStorageKey, avatar_mime_type: avatarMimeType, ...data } = profile;
+  return {
+    ...data,
+    avatarAvailable: Boolean(avatarStorageKey && avatarMimeType),
+    avatarUrl: avatarStorageKey && avatarMimeType ? '/api/profile/avatar' : null,
+    avatarMimeType: avatarMimeType || null
+  };
+}
 
 function bcryptRounds() {
   const rounds = Number(process.env.BCRYPT_ROUNDS || 12);
@@ -17,7 +30,7 @@ function bcryptRounds() {
 async function getMyProfile(userId, role) {
   const profile = await userRepo.findProfileDetail(userId, role);
   if (!profile) throw appError(404, 'USER_NOT_FOUND', 'Không tìm thấy người dùng.');
-  return profile;
+  return publicProfile(profile);
 }
 
 async function updateMyProfile(userId, role, data) {
@@ -52,7 +65,7 @@ async function updateMyProfile(userId, role, data) {
           ? data.department || null : current.department
       }, connection);
     }
-    return userRepo.findProfileDetail(userId, role, connection);
+    return publicProfile(await userRepo.findProfileDetail(userId, role, connection));
   });
 }
 
@@ -81,6 +94,31 @@ async function listUsers({ page, limit, search, role, status }) {
   const limitNum = Math.min(100, Math.max(1, Number.parseInt(limit, 10) || 10));
   const result = await userRepo.listUsers({ page: pageNum, limit: limitNum, search, role, status });
   return { page: pageNum, limit: limitNum, ...result };
+}
+
+async function exportUsersCsv(filters, writable, dependencies = {}) {
+  const users = dependencies.userRepo || userRepo;
+  const batchSize = dependencies.batchSize || 500;
+  const columns = ['id', 'fullName', 'email', 'role', 'status', 'createdAt'];
+  const write = async (chunk) => {
+    if (writable.write(chunk) === false) await once(writable, 'drain');
+  };
+  await write(`\ufeff${csvRow(columns)}`);
+  let afterId = 0;
+  let exported = 0;
+  while (true) {
+    const batch = await users.listUsersForExportBatch(filters, afterId, batchSize);
+    if (!batch.length) break;
+    for (const user of batch) {
+      await write(csvRow([
+        user.id, user.full_name, user.email, user.role, user.status, user.created_at
+      ]));
+    }
+    exported += batch.length;
+    afterId = Number(batch[batch.length - 1].id);
+    if (batch.length < batchSize) break;
+  }
+  return exported;
 }
 
 async function getUserById(id) {
@@ -123,6 +161,8 @@ module.exports = {
   updateMyProfile,
   changeMyPassword,
   listUsers,
+  exportUsersCsv,
+  publicProfile,
   getUserById,
   updateUserStatus
 };

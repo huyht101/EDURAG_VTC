@@ -149,6 +149,12 @@ Citation snapshots được nhúng vào assistant message khi có; usage rows kh
 
 Vì server chưa có image contract, hiện không có MIME/extension/magic-byte, số lượng hoặc dung lượng ảnh được cam kết. Nếu UC 11 được ưu tiên, BA/owner cần chốt multi-image, text-only/image-only semantics, retention/authorization và model vision trước khi Node/Python cùng triển khai.
 
+## Avatar profile
+
+`POST /api/profile/avatar` nhận multipart field `avatar`; `GET /api/profile/avatar` stream ảnh của chính user; `DELETE /api/profile/avatar` xóa reference theo kiểu idempotent. Cả ba route bắt buộc Bearer token và không có URL public cho avatar người khác. Profile trả `avatarAvailable`, `avatarMimeType` và `avatarUrl` là relative endpoint `/api/profile/avatar`, không trả storage key.
+
+FE fetch `avatarUrl` với `Authorization`, nhận Blob, tạo object URL và revoke URL khi ảnh đổi hoặc component unmount. Không gắn URL trực tiếp nếu image loader không gửi Authorization; không suy ra `/uploads/...` vì Node không mount storage thành static route. Upload chỉ nên gửi JPEG/PNG/WebP một frame tối đa 5 MiB; server vẫn xác minh bằng nội dung thực, không tin filename/MIME client và từ chối ảnh động/multi-page.
+
 ## Source viewer và original file
 
 ### Library/citation navigation
@@ -203,6 +209,8 @@ Download/preview dùng filesystem stream và có `Content-Length`, nhưng chưa 
 - `pageCount` là document preview metadata do Node sở hữu, không phải citation `pageNumber`; chưa có public paragraph index, character range hoặc chunk index.
 
 Node có thể nhận/lưu/trả `sourceLocator` dạng object hoặc `null`, nhưng không định nghĩa schema tọa độ. Fixture hiện không có locator và Python snapshot không tạo `source_locator` hay `boxes[]`. Vì vậy FE chưa thể highlight chính xác bằng normalized coordinate, pixel hoặc PDF point. Fallback đáng tin cậy là `sourceText` kết hợp text search; `pageNumber` và `sectionTitle` chỉ dùng best-effort navigation.
+
+Các quyết định geometry/version và fixture bắt buộc được theo dõi tại [Source locator handoff](../architecture/source-locator-handoff.md); tài liệu đó là proposal OPTIONAL/LATER, không phải public contract hiện hành.
 
 Public citation object hiện là:
 

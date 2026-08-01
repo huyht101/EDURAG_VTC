@@ -1,5 +1,7 @@
 // User Controller - HTTP layer for profile and admin user management
 const userService = require('../services/user-service');
+const avatarService = require('../services/avatar-service');
+const { inlineContentDisposition } = require('../utils/content-disposition');
 
 // ─────────────────────────────────────────────
 // Profile endpoints
@@ -67,6 +69,54 @@ async function listUsers(req, res, next) {
   }
 }
 
+async function uploadMyAvatar(req, res, next) {
+  try {
+    const result = await avatarService.uploadMyAvatar(req.user.id, req.file);
+    return res.ok('Cập nhật avatar thành công.', result);
+  } catch (err) {
+    return next(err);
+  }
+}
+
+async function streamMyAvatar(req, res, next) {
+  try {
+    const result = await avatarService.openMyAvatar(req.user.id, req.user.role);
+    const extension = result.mimeType === 'image/jpeg' ? 'jpg' : result.mimeType.split('/')[1];
+    res.setHeader('Content-Type', result.mimeType);
+    res.setHeader('Content-Length', result.size);
+    res.setHeader('Content-Disposition', inlineContentDisposition(`avatar.${extension}`));
+    result.stream.on('error', next);
+    return result.stream.pipe(res);
+  } catch (err) {
+    return next(err);
+  }
+}
+
+async function deleteMyAvatar(req, res, next) {
+  try {
+    const result = await avatarService.deleteMyAvatar(req.user.id);
+    return res.ok('Xóa avatar thành công.', result);
+  } catch (err) {
+    return next(err);
+  }
+}
+
+/**
+ * GET /api/admin/users/export
+ */
+async function exportUsers(req, res, next) {
+  try {
+    const { search, role, status } = req.query;
+    res.status(200);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="users.csv"');
+    await userService.exportUsersCsv({ search, role, status }, res);
+    return res.end();
+  } catch (err) {
+    return next(err);
+  }
+}
+
 /**
  * GET /api/admin/users/:id
  */
@@ -98,7 +148,11 @@ module.exports = {
   getMyProfile,
   updateMyProfile,
   changeMyPassword,
+  uploadMyAvatar,
+  streamMyAvatar,
+  deleteMyAvatar,
   listUsers,
+  exportUsers,
   getUserById,
   updateUserStatus
 };

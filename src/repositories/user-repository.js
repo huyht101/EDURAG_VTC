@@ -58,6 +58,7 @@ async function findProfileDetail(id, role, executor) {
   let sql;
   if (role === 'STUDENT') {
     sql = `SELECT u.id, u.full_name, u.email, u.phone, u.status, u.created_at,
+                  u.avatar_storage_key, u.avatar_mime_type,
                   r.code AS role, sp.student_code, sp.date_of_birth
            FROM users u
            JOIN roles r ON u.role_id = r.id
@@ -65,6 +66,7 @@ async function findProfileDetail(id, role, executor) {
            WHERE u.id = ?`;
   } else if (role === 'TEACHER') {
     sql = `SELECT u.id, u.full_name, u.email, u.phone, u.status, u.created_at,
+                  u.avatar_storage_key, u.avatar_mime_type,
                   r.code AS role, tp.academic_title, tp.degree, tp.department
            FROM users u
            JOIN roles r ON u.role_id = r.id
@@ -72,6 +74,7 @@ async function findProfileDetail(id, role, executor) {
            WHERE u.id = ?`;
   } else {
     sql = `SELECT u.id, u.full_name, u.email, u.phone, u.status, u.created_at,
+                  u.avatar_storage_key, u.avatar_mime_type,
                   r.code AS role
            FROM users u
            JOIN roles r ON u.role_id = r.id
@@ -98,12 +101,9 @@ async function checkDuplicate({ email, studentCode }, executor) {
   return rows.length > 0;
 }
 
-async function listUsers({ page = 1, limit = 10, search = '', role = '', status = '' }, executor) {
-  const offset = (page - 1) * limit;
-  const normalized = sqlPageNumbers(offset, limit);
+function buildUserFilters({ search = '', role = '', status = '' } = {}) {
   const params = [];
   let where = 'WHERE 1 = 1';
-
   if (search) {
     where += ' AND (u.full_name LIKE ? OR u.email LIKE ?)';
     params.push(`%${search}%`, `%${search}%`);
@@ -116,6 +116,13 @@ async function listUsers({ page = 1, limit = 10, search = '', role = '', status 
     where += ' AND u.status = ?';
     params.push(status);
   }
+  return { where, params };
+}
+
+async function listUsers({ page = 1, limit = 10, search = '', role = '', status = '' }, executor) {
+  const offset = (page - 1) * limit;
+  const normalized = sqlPageNumbers(offset, limit);
+  const { where, params } = buildUserFilters({ search, role, status });
 
   const db = executorOrPool(executor);
   const [countRows] = await db.execute(
@@ -134,6 +141,39 @@ async function listUsers({ page = 1, limit = 10, search = '', role = '', status 
   );
 
   return { total: countRows[0].total, users: dataRows };
+}
+
+async function listUsersForExportBatch(filters, afterId = 0, limit = 500, executor) {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1000) {
+    throw new Error('Export batch limit must be an integer from 1 to 1000.');
+  }
+  const { where, params } = buildUserFilters(filters);
+  const [rows] = await executorOrPool(executor).execute(
+    `SELECT u.id, u.full_name, u.email, u.status, u.created_at, r.code AS role
+     FROM users u
+     JOIN roles r ON u.role_id = r.id
+     ${where} AND u.id > ?
+     ORDER BY u.id ASC
+     LIMIT ${limit}`,
+    [...params, afterId]
+  );
+  return rows;
+}
+
+async function findAvatarByIdForUpdate(id, executor) {
+  const [rows] = await executorOrPool(executor).execute(
+    `SELECT id, avatar_storage_key, avatar_mime_type
+     FROM users WHERE id = ? FOR UPDATE`,
+    [id]
+  );
+  return rows[0] || null;
+}
+
+async function updateAvatar(id, avatar, executor) {
+  await executorOrPool(executor).execute(
+    'UPDATE users SET avatar_storage_key = ?, avatar_mime_type = ? WHERE id = ?',
+    [avatar?.storageKey || null, avatar?.mimeType || null, id]
+  );
 }
 
 async function createUser({ roleId, fullName, email, passwordHash, phone = null, status }, executor) {
@@ -254,6 +294,9 @@ module.exports = {
   findProfileDetail,
   checkDuplicate,
   listUsers,
+  listUsersForExportBatch,
+  findAvatarByIdForUpdate,
+  updateAvatar,
   createUser,
   createStudentProfile,
   createTeacherProfile,

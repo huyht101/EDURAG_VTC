@@ -6,6 +6,19 @@ Student/Teacher registration, login, Admin OTP, password reset, profile, passwor
 
 ## Rules
 
+### Avatar và Admin CSV export
+
+Avatar là resource riêng của user đã xác thực qua `POST|GET|DELETE /api/profile/avatar`. Node decode nội dung, chỉ nhận JPEG/PNG/WebP một frame tối đa `AVATAR_MAX_SIZE_BYTES` (mặc định 5 MiB), từ chối ảnh động/multi-page, tạo storage key ngẫu nhiên và không mount upload directory thành static/public URL. Profile chỉ trả `avatarAvailable`, authenticated relative `avatarUrl` và `avatarMimeType`; không trả storage key. Replace commit database trước khi best-effort cleanup file cũ, còn DELETE clear database reference trước cleanup và gọi lặp lại an toàn.
+
+`GET /api/admin/users/export` chỉ dành cho ADMIN, dùng cùng `search`/`role`/`status` như list nhưng đọc toàn bộ kết quả theo batch. CSV chỉ chứa `id`, `fullName`, `email`, `role`, `status`, `createdAt`; có UTF-8 BOM, CSV escaping và formula-injection neutralization. Password hash, token, OTP và `auth_version` không được xuất.
+
+### Delivery handoff
+
+- FE và Mobile dùng Bearer-authenticated Blob cho `avatarUrl`; Mobile không tích hợp Admin CSV. Filename download lấy từ `Content-Disposition`/RFC 5987, không tự dựng storage URL.
+- BA/Tester kiểm tra self-only avatar, JPEG/PNG/WebP một frame, fake/SVG/animated/oversize rejection, CSV ADMIN-only/allowlist/formula neutralization và filename Unicode. Dữ liệu mojibake cũ và citation snapshot bất biến không được tự rewrite.
+- NodeJS/DevOps phải backup DB hiện hữu rồi chạy `npm run db:migrate`; migration bắt buộc cho capability này là `20260801_user_avatar_storage.sql`. Corpus private sau migration phải đi qua workflow `corpus:publish`, không upload backup thô hoặc tạo release song song.
+- Python/RAG không đổi runtime contract, embedding hoặc Qdrant payload trong capability này. `sourceLocator` vẫn là OPTIONAL/LATER — PROPOSED theo handoff kiến trúc, không phải capability CURRENT.
+
 - STUDENT đăng ký thành `ACTIVE` và có `student_profiles` trong cùng transaction.
 - TEACHER đăng ký thành `PENDING`; department/title/degree nullable.
 - `dateOfBirth` của STUDENT là ngày lịch thực theo đúng `YYYY-MM-DD`; ngày không tồn tại bị validation `400`.

@@ -56,6 +56,22 @@ const previewFileResponse = (description) => ({
   }
 });
 
+const avatarFileResponse = (description) => ({
+  description,
+  headers: {
+    'Content-Disposition': {
+      description: 'Inline server-generated filename; never derived from an internal storage key.',
+      schema: { type: 'string', example: 'inline; filename="avatar.png"' }
+    },
+    'Content-Length': { schema: { type: 'integer', minimum: 1 } }
+  },
+  content: {
+    'image/jpeg': { schema: { type: 'string', format: 'binary' } },
+    'image/png': { schema: { type: 'string', format: 'binary' } },
+    'image/webp': { schema: { type: 'string', format: 'binary' } }
+  }
+});
+
 const citationSourceExample = {
   success: true,
   message: 'OK',
@@ -179,6 +195,65 @@ const definition = {
           academicTitle: { type: 'string', nullable: true },
           degree: { type: 'string', nullable: true },
           department: { type: 'string', nullable: true }
+        }
+      },
+      AvatarState: {
+        type: 'object',
+        required: ['avatarAvailable', 'avatarUrl', 'avatarMimeType'],
+        properties: {
+          avatarAvailable: { type: 'boolean' },
+          avatarUrl: {
+            type: 'string', nullable: true, example: '/api/profile/avatar',
+            description: 'Authenticated relative endpoint; never a public storage URL.'
+          },
+          avatarMimeType: {
+            type: 'string', enum: ['image/jpeg', 'image/png', 'image/webp'], nullable: true
+          }
+        }
+      },
+      Profile: {
+        type: 'object',
+        required: [
+          'id', 'full_name', 'email', 'status', 'role', 'created_at',
+          'avatarAvailable', 'avatarUrl', 'avatarMimeType'
+        ],
+        properties: {
+          id: { type: 'integer' },
+          full_name: { type: 'string' },
+          email: { type: 'string', format: 'email' },
+          phone: { type: 'string', nullable: true },
+          status: { type: 'string', enum: ['PENDING', 'ACTIVE', 'LOCKED', 'REJECTED'] },
+          role: { type: 'string', enum: ['STUDENT', 'TEACHER', 'ADMIN'] },
+          created_at: { type: 'string', format: 'date-time' },
+          student_code: { type: 'string' },
+          date_of_birth: { type: 'string', format: 'date' },
+          academic_title: { type: 'string', nullable: true },
+          degree: { type: 'string', nullable: true },
+          department: { type: 'string', nullable: true },
+          avatarAvailable: { type: 'boolean' },
+          avatarUrl: { type: 'string', nullable: true, example: '/api/profile/avatar' },
+          avatarMimeType: {
+            type: 'string', enum: ['image/jpeg', 'image/png', 'image/webp'], nullable: true
+          }
+        },
+        description: 'Own profile. Internal avatar_storage_key is never serialized.'
+      },
+      ProfileResponse: {
+        type: 'object',
+        required: ['success', 'message', 'data'],
+        properties: {
+          success: { type: 'boolean', example: true },
+          message: { type: 'string' },
+          data: { $ref: '#/components/schemas/Profile' }
+        }
+      },
+      AvatarStateResponse: {
+        type: 'object',
+        required: ['success', 'message', 'data'],
+        properties: {
+          success: { type: 'boolean', example: true },
+          message: { type: 'string' },
+          data: { $ref: '#/components/schemas/AvatarState' }
         }
       },
       ChangePasswordBody: {
@@ -584,11 +659,48 @@ const definition = {
       }
     },
     '/api/profile': {
-      get: { tags: ['Profile'], summary: 'Xem profile', security: [{ bearerAuth: [] }], responses: { 200: response('Profile.'), 401: response('Unauthorized.', 'ErrorResponse') } },
-      put: { tags: ['Profile'], summary: 'Cập nhật profile', security: [{ bearerAuth: [] }], requestBody: jsonBody({ $ref: '#/components/schemas/UpdateProfileBody' }), responses: { 200: response('Updated.'), 400: response('Invalid input.', 'ErrorResponse') } }
+      get: { tags: ['Profile'], summary: 'Xem profile', security: [{ bearerAuth: [] }], responses: { 200: response('Profile.', 'ProfileResponse'), 401: response('Unauthorized.', 'ErrorResponse') } },
+      put: { tags: ['Profile'], summary: 'Cập nhật profile', security: [{ bearerAuth: [] }], requestBody: jsonBody({ $ref: '#/components/schemas/UpdateProfileBody' }), responses: { 200: response('Updated.', 'ProfileResponse'), 400: response('Invalid input.', 'ErrorResponse') } }
     },
     '/api/profile/password': {
       put: { tags: ['Profile'], summary: 'Đổi password và vô hiệu JWT cũ', security: [{ bearerAuth: [] }], requestBody: jsonBody({ $ref: '#/components/schemas/ChangePasswordBody' }), responses: { 200: response('Changed.'), 400: response('Current password incorrect.', 'ErrorResponse') } }
+    },
+    '/api/profile/avatar': {
+      post: {
+        tags: ['Profile'], summary: 'Upload or replace own avatar', security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'multipart/form-data': {
+              schema: {
+                type: 'object', required: ['avatar'],
+                properties: { avatar: { type: 'string', format: 'binary' } }
+              }
+            }
+          }
+        },
+        responses: {
+          200: response('Avatar state.', 'AvatarStateResponse'),
+          400: response('Invalid, unsupported, animated/multi-page or mismatched image.', 'ErrorResponse'),
+          401: response('Unauthorized.', 'ErrorResponse'),
+          413: response('Avatar exceeds AVATAR_MAX_SIZE_BYTES.', 'ErrorResponse')
+        }
+      },
+      get: {
+        tags: ['Profile'], summary: 'Read own avatar', security: [{ bearerAuth: [] }],
+        responses: {
+          200: avatarFileResponse('Authenticated JPEG/PNG/WebP stream.'),
+          401: response('Unauthorized.', 'ErrorResponse'),
+          404: response('Avatar not configured or stored file missing.', 'ErrorResponse')
+        }
+      },
+      delete: {
+        tags: ['Profile'], summary: 'Delete own avatar', security: [{ bearerAuth: [] }],
+        responses: {
+          200: response('Avatar cleared; repeated deletion is idempotent.', 'AvatarStateResponse'),
+          401: response('Unauthorized.', 'ErrorResponse')
+        }
+      }
     },
     '/api/admin/users': {
       get: {
@@ -601,6 +713,27 @@ const definition = {
           { name: 'status', in: 'query', schema: { type: 'string', enum: ['PENDING', 'ACTIVE', 'LOCKED', 'REJECTED'] } }
         ],
         responses: { 200: response('Users.'), 403: response('ADMIN required.', 'ErrorResponse') }
+      }
+    },
+    '/api/admin/users/export': {
+      get: {
+        tags: ['Admin - Users'], summary: 'Export filtered users as CSV (ADMIN)', security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'search', in: 'query', schema: { type: 'string' } },
+          { name: 'role', in: 'query', schema: { type: 'string', enum: ['STUDENT', 'TEACHER', 'ADMIN'] } },
+          { name: 'status', in: 'query', schema: { type: 'string', enum: ['PENDING', 'ACTIVE', 'LOCKED', 'REJECTED'] } }
+        ],
+        responses: {
+          200: {
+            description: 'UTF-8 CSV with BOM; exports every row matching list-compatible filters in internal batches.',
+            headers: {
+              'Content-Disposition': { schema: { type: 'string', example: 'attachment; filename="users.csv"' } }
+            },
+            content: { 'text/csv': { schema: { type: 'string' } } }
+          },
+          401: response('Unauthorized.', 'ErrorResponse'),
+          403: response('ADMIN required.', 'ErrorResponse')
+        }
       }
     },
     '/api/admin/users/{id}': {
@@ -908,6 +1041,13 @@ const operationDescriptions = {
   'GET /api/citations/{id}/file': 'Actor: owner của chat session chứa citation và current source authorization hợp lệ. DELETED luôn unavailable; HIDDEN chỉ uploader/Admin được mở trong session của chính họ. Stream original as attachment; không có Range/206. Portable corpus thiếu original có thể trả ORIGINAL_SOURCE_UNAVAILABLE trong khi snapshot vẫn đọc được.',
   'GET /api/admin/dashboard/summary': 'Actor: ADMIN. Đọc document/chat/citation và LLM usage aggregates theo time range; không gọi đây là tổng OCR/embedding/Qdrant cost.'
 };
+
+Object.assign(operationDescriptions, {
+  'POST /api/profile/avatar': 'Actor: ACTIVE authenticated user. Upload or replace only their own avatar; Node decodes the content and accepts JPEG/PNG/WebP, uses a random storage key and never exposes a storage path.',
+  'GET /api/profile/avatar': 'Actor: ACTIVE authenticated user. Stream only their own avatar through a Bearer-authenticated endpoint; there is no public/static upload URL or endpoint for another user.',
+  'DELETE /api/profile/avatar': 'Actor: ACTIVE authenticated user. Clear the database reference before best-effort old-file cleanup; repeated deletion is idempotent and no storage path is exposed.',
+  'GET /api/admin/users/export': 'Actor: ADMIN. Export every user matching list-compatible search/role/status filters in batches as UTF-8 CSV with BOM; only id/fullName/email/role/status/createdAt are emitted and formula-like cells are neutralized.'
+});
 
 for (const [path, pathItem] of Object.entries(definition.paths)) {
   for (const method of ['get', 'post', 'put', 'patch', 'delete']) {
