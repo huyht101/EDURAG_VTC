@@ -24,6 +24,8 @@ MySQL và Qdrant không có distributed transaction. Lifecycle dùng fail-closed
 - Database: [`src/database/schema.sql`](../../src/database/schema.sql).
 - Public API: runtime OpenAPI `/api-docs.json`.
 - Internal boundary: [`docs/api/internal-rag-contract.md`](../api/internal-rag-contract.md).
-- Current readiness: [`docs/status/week3-integration-readiness.md`](../status/week3-integration-readiness.md).
+- Current status: [project handoff](../../PROJECT_HANDOFF.md) và
+  [MVP gap matrix](../status/mvp-gap-matrix.md).
 - Python source of truth: repository upstream của team Python; metadata snapshot nằm tại [Python RAG snapshot](python-rag.md).
-- Current audit evidence: periodically refreshed [`python-service/`](../../python-service/) snapshot.
+- Current audit evidence: periodically refreshed [`python-service/`](../../python-service/) snapshot;
+  Python actions are canonical in the [Python handoff](python-rag-handoff.md).

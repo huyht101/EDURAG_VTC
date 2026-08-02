@@ -9,7 +9,8 @@ Team Python/Data-RAG sở hữu production source trong upstream repository riê
 | Upstream repository | <https://github.com/manh2905/RAG_service> |
 | Branch/tag | `Unknown` |
 | Upstream commit | `Unknown` |
-| Snapshot refreshed/audited | `2026-07-21` |
+| Snapshot refreshed | `2026-07-21` (metadata upstream chính xác chưa có) |
+| Snapshot audited from Node repository | `2026-08-02` (static/offline scope) |
 | Import source | Source copy; exact upstream export metadata chưa được ghi |
 | Local Python runtime patch status | Có integration overlays cần upstream, liệt kê bên dưới |
 
@@ -26,7 +27,10 @@ Snapshot-local README/docs là upstream evidence tại thời điểm import, kh
 - Qdrant point ID được trả làm citation `vector_node_id`.
 - Query nhận bounded history/correlation fields và trả answer/no-answer/citations/usage.
 
-Khả năng trên đã được contract tests và isolated remote E2E kiểm chứng cho snapshot hiện tại. Python upstream mới hơn vẫn phải được audit lại.
+Khả năng trên được quan sát trong code và offline contract tests. Một isolated remote run
+ngày 2026-07-17 là bằng chứng lịch sử cho snapshot/baseline lúc đó; nó không xác nhận các
+thay đổi canonical-DOCX, locator, OCR hoặc citation parser về sau. Python upstream mới
+hơn vẫn phải được audit và chạy acceptance lại.
 
 ## Integration overlays cần upstream
 
@@ -46,4 +50,7 @@ Khả năng trên đã được contract tests và isolated remote E2E kiểm ch
 - Qdrant client `1.17.1` và server `1.18.2` đã được kiểm chứng không còn compatibility warning. Pin này phải được upstream cùng collection race fix.
 - Node team không sở hữu retrieval quality, prompt/model tuning hoặc Python release.
 
-Sau mỗi import, cập nhật metadata/capability tại file này và làm theo [snapshot refresh guide](../setup/python-snapshot-refresh.md). Current gate nằm tại [Week 3 readiness](../status/week3-integration-readiness.md).
+Sau mỗi import, cập nhật metadata/capability tại file này và làm theo
+[snapshot refresh guide](../setup/python-snapshot-refresh.md). Action/gate hiện hành nằm
+tại [Python/Data-RAG handoff](python-rag-handoff.md) và
+[project handoff](../../PROJECT_HANDOFF.md); Week 3 readiness chỉ là historical evidence.

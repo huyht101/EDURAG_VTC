@@ -4,12 +4,13 @@
 
 MySQL là nguồn chuẩn cho identity, document metadata/page count/preview job/chunk source, chat, citation snapshot và LLM usage. NodeJS là thành phần duy nhất ghi MySQL. File storage giữ original và generated DOCX PDF preview; public API chỉ trả authenticated relative endpoints, không trả storage key. Python/LlamaIndex ghi Qdrant và callback dữ liệu có cấu trúc về NodeJS; NodeJS không truy cập Qdrant.
 
-## 12 bảng
+## 12 business tables and migration ledger
 
 - Identity: `roles`, `users`, `student_profiles`, `teacher_profiles`, `auth_tokens`.
 - Documents: `documents`, `document_processing_jobs`, `document_chunks`.
 - Chat: `chat_sessions`, `chat_messages`, `citations`.
 - Observability: `llm_usage_logs`.
+- Migration metadata: `schema_migrations` (not a business table).
 
 Một user có đúng một role qua `users.role_id`. Không có `user_roles`, refresh-token/session, subject/course/class, document versions, vector-mapping hoặc audit-event table trong MVP.
 
@@ -31,7 +32,7 @@ Callback mang `jobId + attemptCount`. ACK machine-readable chỉ cho activate cu
 
 ## Chunk và Qdrant mapping
 
-`document_chunks.vector_node_id` là UUID bằng LlamaIndex `node_id` và Qdrant point ID. Python nhận document reference dưới dạng `String(documents.id)`. `chunk_index`, page/section/locator và content hash hỗ trợ reconciliation/citation.
+`document_chunks.vector_node_id` là UUID bằng LlamaIndex `node_id` và Qdrant point ID. Python nhận document reference dưới dạng `String(documents.id)`. `chunk_index`, page/section/locator và content hash hỗ trợ reconciliation/citation. Schema và Node boundary đã hỗ trợ locator JSON, nhưng Python snapshot hiện chưa sinh geometry; column tồn tại không phải runtime proof.
 
 Retrieval phải fail closed trên `READY + VISIBLE`. Qdrant payload keys và filter implementation thuộc Python; NodeJS không hard-code chúng. MySQL lưu source text có chủ ý để citation/history không phụ thuộc vector index.
 

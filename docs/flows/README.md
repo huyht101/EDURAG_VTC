@@ -26,7 +26,9 @@ These diagrams describe the implemented NodeJS/Core MVP behavior and its remaini
 | [09 Usage/dashboard](mermaid/09_usage_dashboard.mmd) | Usage/Admin | Basic summary implemented |
 | [10 Corpus publish](mermaid/10_corpus_publish.mmd) | Host-side Corpus tooling | Immutable publish and pointer-last guards implemented; signal-time staging cleanup limitation shown |
 
-No diagram is deferred. Current limitations are recorded in the open-questions note; release evidence stays in the readiness document.
+No diagram is deferred. Current limitations are recorded in the open-questions note;
+current status is the [project handoff](../../PROJECT_HANDOFF.md). Week readiness files
+are historical evidence only.
 
 ## Notes
 

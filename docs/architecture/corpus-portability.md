@@ -35,7 +35,19 @@ Các guard luôn được giữ:
 - auth-token rows bị loại khỏi dump;
 - restore không ghi đè non-empty/ambiguous local stores.
 
-`bootstrap/corpus-release.json` hiện chỉ là selected-release transport pointer. Repository không có approved-document registry và task hiện tại không có approved source bundle, vì vậy pointer không được gọi là canonical/approved evidence. Trạng thái canonical `content-v2` release và live restore/query/citation hiện là **BLOCKED BY DATA APPROVAL**.
+`bootstrap/corpus-release.json` là selected-release transport pointer. Pointer hiện chọn
+`v1-e7a8109f714792d4312713f5` và ghi thời điểm publish 2026-08-01; metadata trong Git
+không tự chứng minh object remote còn tồn tại, checksum download đúng hoặc local stores
+đang khớp release. Data approval không còn được ghi là blocker hiện hành. Exact remote
+availability/restore/query phải được kết luận từ `corpus:verify` hoặc isolated acceptance
+đã chạy cho đúng release, không từ pointer hay tài liệu này.
+
+Historical audit evidence also mentions `v1-7463f169257976a90e65ab7c`. Repository
+metadata currently available does not establish whether it is a predecessor, a logically
+equivalent export, or a different canonical state. Do not call either ID wrong and do not
+infer MySQL–Qdrant–original equivalence until remote manifests/fingerprints are compared
+read-only. This is tracked as `CORPUS-EQ-001` in the
+[issue register](../status/issue-quality-register.md).
 
 ## Mức kiểm chứng
 
@@ -44,7 +56,7 @@ Các guard luôn được giữ:
 | `npm run test:corpus` | Unit/local simulation bằng fake object store và fixture tạm; kiểm tra validation, deterministic identity, rollback và zero external mutation. Không chứng minh live lifecycle. |
 | `npm run test:corpus:partial` | Failure/isolation test trên project `edurag_corpus_partial_*` mới, đã xác nhận không có resource cũ; chỉ test local MySQL/Qdrant và tự cleanup. |
 | `npm run test:corpus:live` | Live restore/query/citation; bị chặn trước mọi preflight/provider call nếu thiếu explicit approved-bundle confirmation, approved release ID/document/query. |
-| Canonical release | Chỉ được tạo/regenerate từ source đã được owner phê duyệt; unit fixture, local document hoặc pointer có sẵn không phải approval. |
+| Selected private release | Pointer chọn release; remote checksum/restore/query chỉ PASS khi workflow verify/acceptance thực sự chạy cho đúng ID. |
 
 ## Bootstrap modes
 

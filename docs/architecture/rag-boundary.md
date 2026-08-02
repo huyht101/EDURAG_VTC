@@ -32,6 +32,8 @@ NodeJS service/controller dùng camelCase. [`rag-contract.js`](../../src/clients
 
 Network call không nằm trong MySQL transaction. Callback dùng processing attempt để chống stale, terminal callback idempotent và complete manifest transaction để chỉ chuyển document sang `READY` sau persist.
 
-Contract chi tiết nằm duy nhất tại [internal RAG contract](../api/internal-rag-contract.md). Các deployment gate hiện tại nằm tại [Week 3 integration readiness](../status/week3-integration-readiness.md).
+Contract chi tiết nằm duy nhất tại [internal RAG contract](../api/internal-rag-contract.md).
+Trạng thái và deployment/integration gaps hiện hành nằm tại
+[project handoff](../../PROJECT_HANDOFF.md) và [MVP gap matrix](../status/mvp-gap-matrix.md).
 
 Python capability statements trong root docs là quan sát từ tracked `python-service/` snapshot. Repository upstream riêng của team Python mới là source of truth; remote compatibility chỉ được xác nhận sau khi chạy hai service thật.

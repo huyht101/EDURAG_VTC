@@ -7,7 +7,7 @@ Hướng dẫn canonical cho topology NodeJS, MySQL 8.4, Python RAG và Qdrant t
 - Node.js 20+, Docker Desktop và Docker Compose.
 - Root `.env` tạo từ `.env.example`.
 - Gemini/LlamaParse credentials cho live RAG.
-- Reader-capable `secrets/gcs.json` để fresh machine restore selected release sau khi bundle đã được phê duyệt. Writer key chỉ dành cho manager publish.
+- Reader-capable `secrets/gcs.json` để fresh machine verify/restore selected release. Writer key chỉ dành cho manager publish.
 
 ```powershell
 npm ci
@@ -73,7 +73,7 @@ Kết quả phải là `remote` và `REMOTE_PREFLIGHT_OK`. Python/Qdrant đang h
 
 Node gọi `http://rag-service:8000`; Python callback `http://app:5000`; Qdrant là `http://qdrant:6333`. Node mount uploads read/write, Python mount cùng volume read-only. GCS key không được mount/inject.
 
-Expected log trên fresh reader-enabled volumes khi selected bundle đã được phê duyệt và cấu hình:
+Expected log trên fresh reader-enabled volumes khi selected release hợp lệ và cấu hình:
 
 ```text
 CORPUS_RESTORE_OK
@@ -140,7 +140,10 @@ Demo Admin: `admin@example.com` / `123456` (local only).
 3. Gọi `POST /api/auth/admin/verify-otp`.
 4. Dùng `data.token` tại Swagger **Authorize**. Không dùng internal token cho public API.
 
-Approved corpus đã restore có thể dùng cho chat/citation mà không upload lại. Nếu bundle chưa được phê duyệt, không chạy live corpus acceptance và không gọi pointer là canonical. Upload document mới vẫn là async: response `202`, sau đó poll `GET /api/documents/jobs/{jobId}` đến terminal status. Chat request đơn giản chỉ cần `content`; `clientRequestId` optional và server tự sinh UUID.
+Corpus đã restore và verify có thể dùng cho chat/citation mà không upload lại. Pointer
+không thay thế remote verification. Upload document mới vẫn là async: response `202`,
+sau đó poll `GET /api/documents/jobs/{jobId}` đến terminal status. Chat request đơn giản
+chỉ cần `content`; `clientRequestId` optional và server tự sinh UUID.
 
 ## 5. Lifecycle
 

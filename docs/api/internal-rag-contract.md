@@ -13,7 +13,11 @@ Status terms:
 - **Not yet integration-tested:** chưa được chứng minh với hai service thật.
 - **E2E verified:** chỉ dùng sau khi NodeJS, Python và Qdrant thật đã chạy qua flow tương ứng.
 
-Trạng thái hiện tại: NodeJS adapter, contract tests, isolated remote Compose và repeatable live runner đã triển khai. Snapshot tại repository baseline `b348728c55bd42be35ec23c352dd379749adfbe2` có target boundary chính. Live provider E2E đã PASS ngày 2026-07-17 cho ingest/callback/manifest, retrieval, chat/citation/usage và hide/unhide/delete.
+Trạng thái hiện tại: NodeJS adapter, contract tests, isolated remote Compose và repeatable
+live runner đã triển khai. Live provider E2E ngày 2026-07-17 là **historical evidence**
+cho snapshot/baseline `b348728c55bd42be35ec23c352dd379749adfbe2`; nó không
+chứng minh các thay đổi canonical-DOCX, locator, OCR hoặc citation parser về sau. Current
+cross-runtime status nằm tại [project handoff](../../PROJECT_HANDOFF.md).
 
 ## Ownership và authentication
 
@@ -160,7 +164,12 @@ Current snapshot response có:
 
 Mỗi `usage_calls[]` item bắt buộc có unique contiguous `call_index` 1-based, `operation_type`, provider/model, non-negative token fields, status và nullable machine-readable `error_code`. Node không mặc định operation bị thiếu thành answer generation. `total_tokens` trong MySQL là derived field; legacy aggregate chỉ là compatibility fallback khi `usage_calls` không được gửi.
 
-Current snapshot citation có `vector_node_id=str(result.id)`, `doc_id`, relevant `snippet`, optional 1-based PDF `page_number`, `chapter`, `section`. Python fail closed với marker không có retrieval source và renumber marker liên tục theo thứ tự citation. NodeJS nhận `snippet` làm source fragment alias, resolve ID qua `document_chunks`, không suy đoán vector ID. Bounding box/source locator vẫn OPTIONAL/LATER.
+Current snapshot citation có `vector_node_id=str(result.id)`, `doc_id`, relevant
+`snippet`, optional 1-based PDF `page_number`, `chapter`, `section`. NodeJS nhận
+`snippet` làm source fragment alias, resolve ID qua `document_chunks`, không suy đoán
+vector ID. Node boundary cho nullable `source_locator` đã implement, nhưng snapshot chưa
+sinh geometry. Current Python marker parser còn lỗi với numeric brackets trong code/index
+syntax; xem [Python handoff](../architecture/python-rag-handoff.md).
 
 `no_answer=true` là success; NodeJS không tạo citation dù response có citation data.
 
@@ -186,7 +195,8 @@ NodeJS không expose raw internal token hoặc multiline upstream stack ra publi
 - Fixtures: [`tests/fixtures/rag-contract/v0.1/`](../../tests/fixtures/rag-contract/v0.1/).
 - Tests: [`scripts/rag-contract-test.js`](../../scripts/rag-contract-test.js).
 - Snapshot upstream reference: [Python RAG snapshot](../architecture/python-rag.md).
-- Integration readiness: [`docs/status/week3-integration-readiness.md`](../status/week3-integration-readiness.md).
+- Current integration status: [project handoff](../../PROJECT_HANDOFF.md) and
+  [MVP gap matrix](../status/mvp-gap-matrix.md). Week 3 status is historical evidence.
 
 Fixtures mô tả target v0.1 hiện đã quan sát được trong snapshot refresh mới. Chúng vẫn là mocked contract evidence, không phải bằng chứng remote E2E.
 
@@ -194,4 +204,7 @@ Remote topology và runner: [`docker-compose.remote.yml`](../../docker-compose.r
 
 ## Out of scope
 
-OCR, PPTX, public reprocess, durable queue/retry worker, object storage, production infrastructure và RAG quality changes không thuộc v0.1. Remote E2E là release verification của Week 3, không thay đổi contract semantics.
+OCR provider/policy, PPTX, public reprocess, durable queue/retry worker, object storage,
+production infrastructure và RAG quality tuning không thuộc v0.1. Nếu OCR hoặc geometry
+được triển khai, output vẫn phải tuân page/chunk/locator và whole-document boundary ở
+trên. Historical remote E2E không thay đổi contract semantics.

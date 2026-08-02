@@ -64,9 +64,9 @@
 | `chunk_text` | TEXT, required | — | Parent source chunk snapshot |
 | `content_hash` | CHAR(64), required | — | Chunk SHA-256 |
 | `token_count` | INT UNSIGNED, nullable | CHECK positive | Optional count |
-| `page_number` | INT UNSIGNED, nullable | CHECK `>=1` | 1-based page; TXT/DOCX may use a synthetic segment |
+| `page_number` | INT UNSIGNED, nullable | CHECK `>=1` | 1-based canonical PDF page when supplied; TXT/legacy synthetic values must not be presented as physical pages |
 | `section_title` | VARCHAR(500), nullable | — | DOCX/TXT/PDF section |
-| `source_locator` | JSON, nullable | — | Paragraph/offset/bounding metadata extension |
+| `source_locator` | JSON, nullable | — | `null` or Node-validated `{boxes:[{x,y,width,height}, ...]}` normalized top-left 0–1; Python snapshot does not currently generate it |
 | `created_at` | DATETIME(3), auto UTC | — | Persist time |
 
 `document_chunks` is the only MySQL vector mapping table in MVP. NodeJS does not store embeddings.

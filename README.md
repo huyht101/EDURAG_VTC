@@ -40,9 +40,11 @@ Command này resolve remote Compose override và force-recreate app để áp d�
 
 Demo Admin local: `admin@example.com` / `123456`. Sau login, lấy `[DEV-ONLY ADMIN OTP]` từ app log rồi gọi `POST /api/auth/admin/verify-otp`.
 
-Xem [documentation index](docs/README.md), đặc biệt [Remote Docker RAG](docs/setup/remote-rag-e2e.md) và [independent test plan](docs/testing/week3-remote-test-plan.md).
-
-Trạng thái hiện hành nằm tại [Week 3 integration readiness](docs/status/week3-integration-readiness.md). Project ở mức integration/demo, chưa production-ready.
+Xem [documentation index](docs/README.md), [project handoff](PROJECT_HANDOFF.md),
+[Remote Docker RAG](docs/setup/remote-rag-e2e.md) và
+[MVP gap matrix](docs/status/mvp-gap-matrix.md). Các file Week 3/4 là bằng chứng lịch
+sử, không phải readiness hiện hành. Project ở mức integration/demo, chưa
+production-ready.
 
 ---
 

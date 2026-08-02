@@ -2,6 +2,11 @@
 
 Tài liệu này là nguồn canonical cho Web/Mobile khi tích hợp chat, citation và source viewer. Endpoint-level schema vẫn nằm ở Swagger `/api-docs`; khi có khác biệt, runtime NodeJS/Core là nguồn ưu tiên.
 
+“Có thể triển khai ngay” trong tài liệu này chỉ nghĩa là public contract và integration
+guidance phía Node đã sẵn sàng. Repository này không chứa implementation Web/Mobile và
+audit hiện tại không chạy test UI/Mobile. Student Library cũng mới có evidence từ Node
+contract/local tests, chưa có Web/Mobile integration evidence.
+
 ## Chat
 
 ### Gửi message
@@ -171,12 +176,16 @@ Luồng FE khi người dùng mở citation:
 
 Fallback và lỗi:
 
-- Không có bounding box/locator ổn định: mở đúng page nếu có và hiển thị/search `sourceText`; precise highlight vẫn OPTIONAL/LATER.
+- Không có locator từ Python: mở đúng page nếu có và hiển thị/search `sourceText`;
+  precise highlight là **OPTIONAL/LATER / NOT VERIFIED**, không phải baseline blocker.
 - `originalAvailable=false`, `409 ORIGINAL_SOURCE_UNAVAILABLE`, hoặc original bị thiếu: vẫn hiển thị immutable citation snapshot.
 - Document `HIDDEN`/`DELETED`: Library detail/source trả `404`; không nới scope và không retry qua `/api/documents` hay management source.
 - `401`: xử lý session/login; `403`: hiển thị lỗi quyền, không đổi sang management API.
 - DOCX `previewStatus=READY` có authenticated generated-PDF preview; Student `downloadUrl` cũng tải derived PDF, còn original DOCX chỉ dành cho owner Teacher/Admin. TXT stream/download uploaded TXT hiện hành.
-- `sourceLocator` là null hoặc `{boxes:[{x,y,width,height}, ...]}`. Box theo thứ tự dòng, normalized 0–1, top-left trên canonical PDF page; FE không tự tạo box khi null.
+- `sourceLocator` là null hoặc `{boxes:[{x,y,width,height}, ...]}`. Box theo thứ tự dòng,
+  normalized 0–1, top-left trên canonical PDF page; FE không tự tạo box khi null. Node
+  bình thường reject locator invalid; nếu client gặp dữ liệu malformed/legacy thì bỏ
+  overlay và giữ fallback `pageNumber + sourceText`.
 
 Node tạo PDF preview bất đồng bộ cho DOCX bằng durable preview job. Không có generated HTML; TXT không convert. Citation source endpoint vẫn trả immutable JSON snapshot để FE fallback, độc lập với current file availability.
 
@@ -209,7 +218,7 @@ Download/preview dùng filesystem stream và có `Content-Length`, nhưng chưa 
 - LlamaParse primary đánh số theo thứ tự document fragment trả về; không có contract đảm bảo đó là physical page cho mọi format.
 - `pageCount` là document preview metadata do Node sở hữu, không phải citation `pageNumber`; chưa có public paragraph index, character range hoặc chunk index.
 
-Node hiện validate/lưu/trả `sourceLocator` là null hoặc ordered `boxes[]` normalized 0–1, top-left, nằm trọn trong trang. Node không sinh/clamp/fuzzy-search geometry. Python snapshot hiện chưa có runtime proof sinh locator đúng occurrence, nên FE chỉ highlight khi field khác null; fallback vẫn là `sourceText` và `pageNumber`. Tài liệu Python/RAG implementation chi tiết sẽ được cập nhật ở lượt bàn giao riêng sau verification Node.
+Node hiện validate/lưu/trả `sourceLocator` là null hoặc ordered `boxes[]` normalized 0–1, top-left, nằm trọn trong trang. Node không sinh/clamp/fuzzy-search geometry. Python snapshot hiện chưa có runtime path sinh locator đúng occurrence, nên FE chỉ highlight khi field khác null; fallback vẫn là `sourceText` và `pageNumber`. Precise highlight không chặn citation baseline MVP. Theo dõi acceptance phía Python tại [Python/Data-RAG handoff](../architecture/python-rag-handoff.md).
 
 Public citation object hiện là:
 
@@ -250,11 +259,13 @@ Requirement `@student.edu.vn` không có BA document canonical trong repository 
 
 ## FE action matrix
 
-| Current behavior | FE action | Limitation | Future/proposed |
+| Nhóm | Current behavior | FE action | Limitation / dependency |
 |---|---|---|---|
-| Request mới synchronous; duplicate có thể trả current `PENDING` | Loading đến khi HTTP xong; chỉ poll history cho duplicate-pending | Không streaming token/status endpoint riêng | SSE/WebSocket chỉ khi có product decision |
-| History trả `messages` theo `messageOrder` | Render `senderType`, status và embedded citations | Usage không nằm trong history | Không cần thêm call nếu chỉ hiển thị chat |
-| Image chat chưa có | Chỉ gửi JSON text | Không vision/image upload | Joint Node/Python contract |
-| Original là attachment; preview là inline PDF | Fetch blob với Bearer; use `previewUrl` only when available | Không Range; DOCX citation segment chưa map preview page | Range/precise DOCX navigation khi có contract |
-| Locator thường `null` | Highlight bằng text search | Không boxes/coordinate units | Python locator schema + public contract |
-| Email domain chỉ format chung | Normalize UI và hiển thị BA warning nếu cần | Server chưa enforce student domain | BA decision rồi Node validation |
+| **Có thể triển khai ngay** | Request mới synchronous; duplicate có thể trả current `PENDING` | Loading đến khi HTTP xong; chỉ poll history cho duplicate-pending | Không streaming token/status endpoint riêng |
+| **Có thể triển khai ngay** | History trả `messages` theo `messageOrder` | Render `senderType`, status và embedded citations | Usage không nằm trong history |
+| **Có thể triển khai ngay** | Original là attachment; canonical preview/download dùng protected routes | Fetch Blob với Bearer; use URL only when non-null; revoke object URL | Không byte Range; cross-origin JS chưa đọc được `Content-Disposition` |
+| **Có thể triển khai ngay** | New DOCX preview/download/pageNumber cùng canonical derived PDF | Viewer mở PDF và page best-effort | Legacy DOCX trước canonical flow không được mặc định page-aligned |
+| **Fallback sẵn sàng** | Locator thường `null`; shape/unit đã fixed ở Node contract | Mở `pageNumber`, hiển thị/search `sourceText`; không overlay khi null/invalid | Python geometry và visual acceptance chưa có |
+| **Phải chờ Python runtime (OPTIONAL UI)** | OCR/locator quality chưa verified | Chỉ chờ nếu sản phẩm chọn precise highlight/OCR; citation baseline vẫn dùng fallback | Cần fixture và isolated cross-runtime evidence |
+| **Decision required** | Image chat chưa có | Chỉ gửi JSON text | Vision/image upload cần joint Node/Python/product contract |
+| **Decision required** | Email domain chỉ format chung | Normalize UI và chỉ hiển thị BA warning nếu cần | Server enforcement cần BA/owner decision |

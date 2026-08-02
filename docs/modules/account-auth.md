@@ -17,7 +17,9 @@ Avatar là resource riêng của user đã xác thực qua `POST|GET|DELETE /api
 - FE và Mobile dùng Bearer-authenticated Blob cho `avatarUrl`; Mobile không tích hợp Admin CSV. Filename download lấy từ `Content-Disposition`/RFC 5987, không tự dựng storage URL.
 - BA/Tester kiểm tra self-only avatar, JPEG/PNG/WebP một frame, fake/SVG/animated/oversize rejection, CSV ADMIN-only/allowlist/formula neutralization và filename Unicode. Dữ liệu mojibake cũ và citation snapshot bất biến không được tự rewrite.
 - NodeJS/DevOps phải backup DB hiện hữu rồi chạy `npm run db:migrate`; migration bắt buộc cho capability này là `20260801_user_avatar_storage.sql`. Corpus private sau migration phải đi qua workflow `corpus:publish`, không upload backup thô hoặc tạo release song song.
-- Python/RAG không đổi runtime contract, embedding hoặc Qdrant payload trong capability này. `sourceLocator` vẫn là OPTIONAL/LATER — PROPOSED theo handoff kiến trúc, không phải capability CURRENT.
+- Python/RAG không đổi runtime contract, embedding hoặc Qdrant payload trong capability
+  này. Node `sourceLocator` boundary đã implement; Python geometry và precise FE highlight
+  vẫn **OPTIONAL/LATER / NOT VERIFIED**, độc lập với avatar/CSV.
 
 - STUDENT đăng ký thành `ACTIVE` và có `student_profiles` trong cùng transaction.
 - TEACHER đăng ký thành `PENDING`; department/title/degree nullable.

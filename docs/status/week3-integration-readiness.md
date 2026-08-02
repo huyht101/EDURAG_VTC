@@ -1,5 +1,10 @@
 # Week 3 integration readiness
 
+> **HISTORICAL / SUPERSEDED.** This file records the Week 3 gate and must not be used as
+> current readiness or data-approval status. Use the
+> [project handoff](../../PROJECT_HANDOFF.md), [MVP gap matrix](mvp-gap-matrix.md) and
+> [issue register](issue-quality-register.md).
+
 ## Current status
 
 **NODE CORPUS TOOLING HARDENED — LIVE/CANONICAL CORPUS BLOCKED BY DATA APPROVAL — PYTHON HANDOFF REQUIRED**

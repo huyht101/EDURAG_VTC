@@ -22,6 +22,8 @@ Seed role dùng upsert theo `code`; application không hard-code role ID.
 | `email` | VARCHAR(254), required | UNIQUE, case-insensitive ASCII | Normalized login email |
 | `password_hash` | VARCHAR(255), required | — | Bcrypt hash |
 | `phone` | VARCHAR(20), nullable | — | Optional phone |
+| `avatar_storage_key` | VARCHAR(512) ASCII, nullable | paired CHECK | Relative private storage key; never public |
+| `avatar_mime_type` | VARCHAR(64) ASCII, nullable | paired/MIME CHECK | `image/jpeg`, `image/png`, `image/webp` |
 | `status` | VARCHAR(20), default `PENDING` | role/status/created index | `PENDING`, `ACTIVE`, `LOCKED`, `REJECTED` |
 | `auth_version` | INT UNSIGNED, default 1 | CHECK `>=1` | JWT global invalidation version |
 | `email_verified_at` | DATETIME(3), nullable | — | Email verification time |
@@ -35,9 +37,9 @@ Seed role dùng upsert theo `code`; application không hard-code role ID.
 
 Review/lock actor FK uses `ON DELETE SET NULL`. Student registration creates `ACTIVE`; Teacher registration creates `PENDING`. Lock/password change/reset increments `auth_version`.
 
-## `student_profiles`
-
 Avatar private của user được lưu ngay trên `users` bằng cặp nullable `avatar_storage_key` (relative ASCII storage key, không phải URL) và `avatar_mime_type`. CHECK yêu cầu hai field cùng null hoặc cùng có giá trị; MIME chỉ có `image/jpeg`, `image/png`, `image/webp`. Public profile không serialize storage key.
+
+## `student_profiles`
 
 | Column | Type/null/default | Key/index | Meaning |
 |---|---|---|---|
