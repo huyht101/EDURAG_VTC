@@ -9,10 +9,12 @@ const previewConfig = require('../configs/preview');
 const JOB_TYPES = require('../constants/job-types');
 const JOB_STATUSES = require('../constants/job-statuses');
 const PREVIEW_STATUSES = require('../constants/preview-statuses');
+const DOCUMENT_STATUSES = require('../constants/document-statuses');
 const withTransaction = require('../database/transaction');
 const documentRepo = require('../repositories/document-repository');
 const jobRepo = require('../repositories/processing-job-repository');
 const fileService = require('./document-file-service');
+const ingestService = require('./document-ingest-service');
 
 function runProcess(command, args, timeoutMs) {
   return new Promise((resolve, reject) => {
@@ -112,6 +114,47 @@ async function markPreviewFailure(job, error, dependencies = {}) {
       String(error.message || 'Preview generation failed.').slice(0, 2000),
       connection
     );
+    if (document && document.processing_status === DOCUMENT_STATUSES.processing.UPLOADED
+      && Number(currentJob.attempt_count) >= Number(currentJob.max_attempts)) {
+      const ingestJob = await jobs.findLatestByType(document.id, JOB_TYPES.INGEST, connection);
+      if (ingestJob?.status === JOB_STATUSES.QUEUED) {
+        await jobs.markFailed(
+          ingestJob.id,
+          'CANONICAL_ARTIFACT_FAILED',
+          'Canonical PDF conversion failed before ingest dispatch.',
+          connection
+        );
+      }
+      await documents.updateProcessingStatus(
+        document.id,
+        DOCUMENT_STATUSES.processing.FAILED,
+        connection
+      );
+    }
+  });
+}
+
+async function dispatchDocumentIngest(documentId, dependencies = {}) {
+  const jobs = dependencies.jobRepo || jobRepo;
+  const dispatcher = dependencies.ingestService || ingestService;
+  const ingestJob = await jobs.findLatestByType(documentId, JOB_TYPES.INGEST);
+  if (!ingestJob) {
+    const error = new Error('Document has no INGEST job.');
+    error.code = 'INGEST_JOB_MISSING';
+    throw error;
+  }
+  return dispatcher.dispatchIngest(ingestJob.id, dependencies.ingestDependencies || {});
+}
+
+async function finishPreviewJob(job, dependencies = {}) {
+  const runTransaction = dependencies.withTransaction || withTransaction;
+  const jobs = dependencies.jobRepo || jobRepo;
+  return runTransaction(async (connection) => {
+    const currentJob = await jobs.findByIdForUpdate(job.id, connection);
+    if (!currentJob || currentJob.status !== JOB_STATUSES.RUNNING
+      || Number(currentJob.attempt_count) !== Number(job.attempt_count)) return false;
+    await jobs.markSucceeded(job.id, { currentStage: 'PREVIEW_READY' }, connection);
+    return true;
   });
 }
 
@@ -134,20 +177,28 @@ async function processClaimedJob(job, dependencies = {}) {
   if (document.preview_status === PREVIEW_STATUSES.READY
     && document.preview_storage_key
     && await files.exists(document.preview_storage_key)) {
-    const accepted = await runTransaction(async (connection) => {
-      const currentJob = await jobs.findByIdForUpdate(job.id, connection);
-      const currentDocument = await documents.findByIdForUpdate(document.id, connection);
-      if (!currentJob || currentJob.status !== JOB_STATUSES.RUNNING
-        || Number(currentJob.attempt_count) !== Number(job.attempt_count)
-        || !currentDocument || currentDocument.visibility_status === 'DELETED') return false;
-      await jobs.markSucceeded(job.id, { currentStage: 'PREVIEW_READY' }, connection);
-      return true;
-    });
-    return accepted ? { status: 'SUCCEEDED', reused: true } : { status: 'IGNORED' };
+    let dispatchError = null;
+    try {
+      await dispatchDocumentIngest(document.id, dependencies);
+    } catch (error) {
+      dispatchError = error;
+    }
+    const accepted = await finishPreviewJob(job, dependencies);
+    return accepted
+      ? { status: 'SUCCEEDED', reused: true, dispatchError }
+      : { status: 'IGNORED' };
+  }
+
+  if (document.processing_status !== DOCUMENT_STATUSES.processing.UPLOADED) {
+    const error = new Error('Canonical PDF cannot be generated after ingest dispatch.');
+    error.code = 'PREVIEW_ARTIFACT_LOCKED';
+    await markPreviewFailure(job, error, dependencies);
+    return { status: 'FAILED', error };
   }
 
   let temporaryDirectory = null;
   let publishedKey = null;
+  let artifactPersisted = false;
   try {
     temporaryDirectory = await makeTemp();
     const sourcePath = files.resolveStorageKey(document.storage_key);
@@ -162,15 +213,14 @@ async function processClaimedJob(job, dependencies = {}) {
       const currentDocument = await documents.findByIdForUpdate(document.id, connection);
       if (!currentJob || currentJob.status !== JOB_STATUSES.RUNNING
         || Number(currentJob.attempt_count) !== Number(job.attempt_count)
-        || !currentDocument || currentDocument.visibility_status === 'DELETED') return false;
+        || !currentDocument || currentDocument.visibility_status === 'DELETED'
+        || currentDocument.processing_status !== DOCUMENT_STATUSES.processing.UPLOADED
+        || currentDocument.preview_status === PREVIEW_STATUSES.READY) return false;
       await documents.updatePreview(document.id, {
         status: PREVIEW_STATUSES.READY,
         storageKey: publishedKey,
         mimeType: 'application/pdf',
         pageCount
-      }, connection);
-      await jobs.markSucceeded(job.id, {
-        currentStage: 'PREVIEW_READY'
       }, connection);
       return true;
     });
@@ -178,12 +228,24 @@ async function processClaimedJob(job, dependencies = {}) {
       await files.remove(publishedKey);
       return { status: 'IGNORED' };
     }
-    if (document.preview_storage_key && document.preview_storage_key !== publishedKey) {
-      await files.remove(document.preview_storage_key).catch(() => {});
+    artifactPersisted = true;
+    let dispatchError = null;
+    try {
+      await dispatchDocumentIngest(document.id, dependencies);
+    } catch (error) {
+      dispatchError = error;
     }
-    return { status: 'SUCCEEDED', pageCount, storageKey: publishedKey };
+    if (!(await finishPreviewJob(job, dependencies))) {
+      return { status: 'IGNORED' };
+    }
+    return {
+      status: 'SUCCEEDED',
+      pageCount,
+      storageKey: publishedKey,
+      dispatchError
+    };
   } catch (error) {
-    if (publishedKey) await files.remove(publishedKey).catch(() => {});
+    if (publishedKey && !artifactPersisted) await files.remove(publishedKey).catch(() => {});
     await markPreviewFailure(job, error, dependencies);
     return { status: 'FAILED', error };
   } finally {
@@ -206,6 +268,7 @@ async function ensureQueued(documentId, dependencies = {}) {
   return runTransaction(async (connection) => {
     const document = await documents.findByIdForUpdate(documentId, connection);
     if (!document || document.file_type !== 'DOCX') return null;
+    if (document.processing_status !== DOCUMENT_STATUSES.processing.UPLOADED) return null;
     if (document.preview_status === PREVIEW_STATUSES.READY
       && document.preview_storage_key) return null;
     const latest = await jobs.findLatestByType(
@@ -238,5 +301,7 @@ module.exports = {
   processClaimedJob,
   processNext,
   ensureQueued,
-  markPreviewFailure
+  markPreviewFailure,
+  dispatchDocumentIngest,
+  finishPreviewJob
 };

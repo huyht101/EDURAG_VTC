@@ -62,6 +62,7 @@ async function testRepositoryScope() {
   assert(calls.every(({ statement }) => statement.includes("d.visibility_status = 'VISIBLE'")));
   assert(calls.every(({ statement }) => statement.includes("ESCAPE '!'")));
   assert(calls.every(({ statement }) => statement.includes('d.file_type = ?')));
+  assert.match(calls[1].statement, /d\.uploaded_by/);
   assert.deepEqual(calls[0].params, calls[1].params, 'Count and data query filters must match.');
   assert.deepEqual(calls[0].params, [
     "%Tiếng Việt 100!%!_\\' OR 1=1%",
@@ -83,6 +84,7 @@ async function testRepositoryScope() {
   await libraryRepo.findEligibleById(12, detailExecutor);
   assert(detailSql[0].includes("d.processing_status = 'READY'"));
   assert(detailSql[0].includes("d.visibility_status = 'VISIBLE'"));
+  assert.match(detailSql[0], /d\.uploaded_by/);
 }
 
 async function testRuntimeSchemaGuard() {
@@ -127,6 +129,7 @@ async function testDtoAndFixedQueryScope() {
   };
   const fileService = { async exists() { return true; } };
   const page = await libraryService.listDocuments(
+    { id: 7, role: ROLES.STUDENT },
     {
       page: '2',
       limit: '10',
@@ -156,16 +159,17 @@ async function testDtoAndFixedQueryScope() {
   assert.deepEqual(
     Object.keys(page.documents[0]).sort(),
     [
-      'author', 'createdAt', 'description', 'fileSize', 'fileType', 'id',
+      'author', 'createdAt', 'description', 'downloadUrl', 'fileSize', 'fileType', 'id',
       'originalAvailable', 'originalFileUrl', 'pageCount', 'previewAvailable',
       'previewMimeType', 'previewStatus', 'previewUrl', 'title', 'updatedAt'
     ]
   );
-  assert.equal(page.documents[0].originalAvailable, true);
+  assert.equal(page.documents[0].originalAvailable, false);
   assert.equal(page.documents[0].previewAvailable, true);
   assert.equal(page.documents[0].pageCount, 5);
   assert.equal(page.documents[0].previewUrl, '/api/library/documents/12/preview');
-  assert.equal(page.documents[0].originalFileUrl, '/api/library/documents/12/source');
+  assert.equal(page.documents[0].downloadUrl, '/api/library/documents/12/download');
+  assert.equal(page.documents[0].originalFileUrl, null);
   for (const internal of [
     'uploadedBy', 'uploaded_by', 'storageKey', 'storage_key', 'originalFilename',
     'previewStorageKey', 'preview_storage_key', 'checksumSha256', 'processingStatus',
@@ -356,28 +360,35 @@ async function testDetailAndSourceStates() {
     }
   };
   const eligibleRepository = { async findEligibleById() { return readyDocument; } };
-  const detail = await libraryService.getDocument(12, {
+  const detail = await libraryService.getDocument({ id: 99, role: ROLES.ADMIN }, 12, {
     repository: eligibleRepository,
     fileService: availableFiles
   });
   assert.equal(detail.document.id, 12);
-  const source = await libraryService.openSource(12, {
+  const source = await libraryService.openSource({ id: 99, role: ROLES.ADMIN }, 12, {
     repository: eligibleRepository,
     fileService: availableFiles
   });
   assert.equal(source.filename, 'source.pdf');
   assert.equal(source.mimeType, 'application/pdf');
-  const preview = await libraryService.openPreview(12, {
+  const preview = await libraryService.openPreview({ id: 7, role: ROLES.STUDENT }, 12, {
     repository: eligibleRepository,
     fileService: availableFiles
   });
   assert.equal(preview.mimeType, 'application/pdf');
+  const download = await libraryService.openDownload({ id: 7, role: ROLES.STUDENT }, 12, {
+    repository: eligibleRepository,
+    fileService: availableFiles
+  });
+  assert.equal(download.filename, 'Public title.pdf');
+  assert.equal(download.mimeType, 'application/pdf');
 
   const missingRepository = { async findEligibleById() { return null; } };
   for (const action of [
-    () => libraryService.getDocument(12, { repository: missingRepository, fileService: availableFiles }),
-    () => libraryService.openSource(12, { repository: missingRepository, fileService: availableFiles }),
-    () => libraryService.openPreview(12, { repository: missingRepository, fileService: availableFiles })
+    () => libraryService.getDocument({ id: 7, role: ROLES.STUDENT }, 12, { repository: missingRepository, fileService: availableFiles }),
+    () => libraryService.openSource({ id: 7, role: ROLES.STUDENT }, 12, { repository: missingRepository, fileService: availableFiles }),
+    () => libraryService.openPreview({ id: 7, role: ROLES.STUDENT }, 12, { repository: missingRepository, fileService: availableFiles }),
+    () => libraryService.openDownload({ id: 7, role: ROLES.STUDENT }, 12, { repository: missingRepository, fileService: availableFiles })
   ]) {
     await assert.rejects(action, (error) => (
       error.status === 404 && error.code === 'LIBRARY_DOCUMENT_NOT_FOUND'
@@ -385,14 +396,14 @@ async function testDetailAndSourceStates() {
   }
 
   await assert.rejects(
-    () => libraryService.openSource(12, {
+    () => libraryService.openSource({ id: 99, role: ROLES.ADMIN }, 12, {
       repository: eligibleRepository,
       fileService: { async exists() { return false; } }
     }),
     (error) => error.status === 409 && error.code === 'ORIGINAL_SOURCE_UNAVAILABLE'
   );
   await assert.rejects(
-    () => libraryService.openPreview(12, {
+    () => libraryService.openPreview({ id: 7, role: ROLES.STUDENT }, 12, {
       repository: {
         async findEligibleById() {
           return {
@@ -409,21 +420,47 @@ async function testDetailAndSourceStates() {
     }),
     (error) => error.status === 409 && error.code === 'PREVIEW_UNAVAILABLE'
   );
+  await assert.rejects(
+    () => libraryService.openDownload({ id: 7, role: ROLES.STUDENT }, 12, {
+      repository: {
+        async findEligibleById() {
+          return {
+            ...readyDocument,
+            file_type: 'DOCX',
+            preview_status: 'FAILED',
+            preview_storage_key: null,
+            preview_mime_type: null
+          };
+        }
+      },
+      fileService: availableFiles
+    }),
+    (error) => error.status === 409 && error.code === 'CANONICAL_DOWNLOAD_UNAVAILABLE'
+  );
 }
 
 async function testSupportedSourceTypes() {
   const variants = [
-    { fileType: 'PDF', filename: 'source.pdf', mimeType: 'application/pdf' },
+    {
+      fileType: 'PDF', filename: 'source.pdf', mimeType: 'application/pdf',
+      canonicalKey: readyDocument.storage_key, downloadFilename: 'Public title.pdf'
+    },
     {
       fileType: 'DOCX',
       filename: 'source.docx',
-      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      canonicalKey: 'previews/12/canonical.pdf', downloadFilename: 'Public title.pdf'
     },
-    { fileType: 'TXT', filename: 'source.txt', mimeType: 'text/plain' }
+    {
+      fileType: 'TXT', filename: 'source.txt', mimeType: 'text/plain',
+      canonicalKey: readyDocument.storage_key, downloadFilename: 'Public title.txt'
+    }
   ];
+  let openedKey;
   const files = {
     async exists() { return true; },
-    async open() {
+    async open(storageKey) {
+      openedKey = storageKey;
       const stream = new PassThrough();
       stream.end('source');
       return { stream, size: 6 };
@@ -436,13 +473,67 @@ async function testSupportedSourceTypes() {
           ...readyDocument,
           file_type: variant.fileType,
           original_filename: variant.filename,
-          mime_type: variant.mimeType
+          mime_type: variant.mimeType,
+          preview_status: variant.fileType === 'TXT' ? 'NOT_APPLICABLE' : 'READY',
+          preview_storage_key: variant.fileType === 'DOCX' ? variant.canonicalKey : null,
+          preview_mime_type: variant.fileType === 'TXT' ? null : 'application/pdf'
         };
       }
     };
-    const source = await libraryService.openSource(12, { repository, fileService: files });
+    const actor = variant.fileType === 'TXT'
+      ? { id: 7, role: ROLES.STUDENT }
+      : { id: 99, role: ROLES.ADMIN };
+    const source = await libraryService.openSource(actor, 12, { repository, fileService: files });
     assert.equal(source.filename, variant.filename);
     assert.equal(source.mimeType, variant.mimeType);
+    if (variant.fileType !== 'TXT') {
+      await assert.rejects(
+        () => libraryService.openSource(
+          { id: 7, role: ROLES.STUDENT },
+          12,
+          { repository, fileService: files }
+        ),
+        (error) => error.status === 403 && error.code === 'ORIGINAL_DOWNLOAD_FORBIDDEN'
+      );
+    }
+    const download = await libraryService.openDownload(
+      { id: 7, role: ROLES.STUDENT },
+      12,
+      { repository, fileService: files }
+    );
+    assert.equal(openedKey, variant.canonicalKey);
+    assert.equal(download.filename, variant.downloadFilename);
+    assert.equal(download.mimeType, variant.fileType === 'TXT' ? 'text/plain' : 'application/pdf');
+  }
+}
+
+async function testDownloadControllerHeaders() {
+  const originalOpenDownload = libraryService.openDownload;
+  const stream = new PassThrough();
+  const response = new PassThrough();
+  const headers = new Map();
+  response.setHeader = (name, value) => headers.set(name.toLowerCase(), String(value));
+  libraryService.openDownload = async () => ({
+    stream,
+    size: 9,
+    filename: 'Kế hoạch / 2026.pdf',
+    mimeType: 'application/pdf'
+  });
+  try {
+    await libraryController.streamDownload(
+      { user: { id: 7, role: ROLES.STUDENT }, params: { id: '12' } },
+      response,
+      (error) => { throw error; }
+    );
+    const disposition = headers.get('content-disposition');
+    assert.match(disposition, /^attachment; filename="[\x20-\x7e]+"; filename\*=UTF-8''/);
+    assert(!disposition.includes('\r'));
+    assert(!disposition.includes('\n'));
+    assert.equal(headers.get('content-type'), 'application/pdf');
+    assert.equal(headers.get('content-length'), '9');
+    stream.end('%PDF-1.7');
+  } finally {
+    libraryService.openDownload = originalOpenDownload;
   }
 }
 
@@ -493,6 +584,7 @@ async function main() {
   await testManagementFiltersAndOwnership();
   await testDetailAndSourceStates();
   await testSupportedSourceTypes();
+  await testDownloadControllerHeaders();
   await testStorageBoundaryAndStreamErrors();
   console.log('LIBRARY_CONTRACT_OK scope=READY+VISIBLE dto=allowlist source=authorized-state');
 }

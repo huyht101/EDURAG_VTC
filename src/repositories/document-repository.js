@@ -143,7 +143,7 @@ async function listForPreviewBackfill({ afterId = 0, limit = 100 }, executor) {
        AND (
          (d.file_type = 'PDF' AND d.page_count IS NULL)
          OR
-         (d.file_type = 'DOCX' AND
+         (d.file_type = 'DOCX' AND d.processing_status = 'UPLOADED' AND
            (d.preview_status <> 'READY' OR d.preview_storage_key IS NULL OR d.page_count IS NULL))
        )
      ORDER BY d.id ASC

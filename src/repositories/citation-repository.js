@@ -27,12 +27,16 @@ async function listByMessageIds(messageIds, executor) {
   if (!messageIds.length) return [];
   const placeholders = messageIds.map(() => '?').join(',');
   const [rows] = await db(executor).execute(
-    `SELECT id, message_id, document_id, chunk_id, vector_node_id_snapshot,
-            citation_order, document_title_snapshot, page_number_snapshot,
-            section_title_snapshot, source_text_snapshot, source_locator_snapshot,
-            retrieval_score, rerank_score, created_at
-     FROM citations WHERE message_id IN (${placeholders})
-     ORDER BY message_id, citation_order`,
+    `SELECT c.id, c.message_id, c.document_id, c.chunk_id, c.vector_node_id_snapshot,
+            c.citation_order, c.document_title_snapshot, c.page_number_snapshot,
+            c.section_title_snapshot, c.source_text_snapshot, c.source_locator_snapshot,
+            c.retrieval_score, c.rerank_score, c.created_at,
+            d.uploaded_by, d.storage_key, d.file_type, d.processing_status, d.visibility_status,
+            d.preview_status, d.preview_storage_key
+     FROM citations c
+     LEFT JOIN documents d ON d.id = c.document_id
+     WHERE c.message_id IN (${placeholders})
+     ORDER BY c.message_id, c.citation_order`,
     messageIds
   );
   return rows;
@@ -41,8 +45,8 @@ async function listByMessageIds(messageIds, executor) {
 async function findContextById(id, executor) {
   const [rows] = await db(executor).execute(
     `SELECT c.*, m.session_id, s.user_id AS session_user_id, s.deleted_at AS session_deleted_at,
-            d.uploaded_by, d.original_filename, d.storage_key, d.mime_type,
-            d.processing_status, d.visibility_status
+            d.uploaded_by, d.original_filename, d.storage_key, d.mime_type, d.file_type,
+            d.processing_status, d.visibility_status, d.preview_status, d.preview_storage_key
      FROM citations c
      JOIN chat_messages m ON m.id = c.message_id
      JOIN chat_sessions s ON s.id = m.session_id

@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 
 const JOB_STATUSES = require('../constants/job-statuses');
+const { validateSourceLocator } = require('../utils/source-locator');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA256 = /^[0-9a-f]{64}$/i;
@@ -27,9 +28,10 @@ function validateChunk(chunk, index) {
     && (!Number.isInteger(chunk.pageNumber) || chunk.pageNumber < 1)) {
     return `chunks[${index}].pageNumber không hợp lệ.`;
   }
-  if (chunk.sourceLocator !== undefined && chunk.sourceLocator !== null
-    && (typeof chunk.sourceLocator !== 'object' || Array.isArray(chunk.sourceLocator))) {
-    return `chunks[${index}].sourceLocator phải là object.`;
+  try {
+    validateSourceLocator(chunk.sourceLocator ?? null);
+  } catch (error) {
+    return `chunks[${index}].sourceLocator không hợp lệ: ${error.message}`;
   }
   if (chunk.sectionTitle !== undefined && chunk.sectionTitle !== null
     && (typeof chunk.sectionTitle !== 'string' || chunk.sectionTitle.length > 500)) {

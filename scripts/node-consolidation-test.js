@@ -11,6 +11,7 @@ process.env.RAG_INTERNAL_TOKEN = process.env.RAG_INTERNAL_TOKEN || 'test-only-in
 
 const authService = require('../src/services/auth-service');
 const citationService = require('../src/services/citation-service');
+const chatService = require('../src/services/chat-service');
 const citationRepo = require('../src/repositories/citation-repository');
 const { normalizeQueryResult } = require('../src/clients/rag-contract');
 const { createCorsMiddleware } = require('../src/middlewares/cors-middleware');
@@ -163,6 +164,9 @@ async function testCitationOwnership() {
     message_id: 8,
     session_user_id: 41,
     storage_key: 'documents/7/demo.pdf',
+    file_type: 'PDF',
+    preview_status: 'READY',
+    preview_storage_key: null,
     uploaded_by: 12,
     processing_status: 'READY',
     visibility_status: 'HIDDEN',
@@ -173,11 +177,17 @@ async function testCitationOwnership() {
     const own = await citationService.getCitation({ id: 41, role: 'STUDENT' }, 7);
     assert.equal(own.id, 7);
     assert.equal(own.originalAvailable, false, 'Hidden/deleted source keeps snapshot but not general original access.');
+    assert.equal(own.previewUrl, null);
+    assert.equal(own.originalFileUrl, null);
     citationRepo.findContextById = async () => ({
       id: 7,
       message_id: 8,
+      document_id: 7,
       session_user_id: 41,
       storage_key: 'documents/7/demo.pdf',
+      file_type: 'PDF',
+      preview_status: 'READY',
+      preview_storage_key: null,
       uploaded_by: 41,
       processing_status: 'READY',
       visibility_status: 'HIDDEN',
@@ -186,6 +196,37 @@ async function testCitationOwnership() {
     });
     const hiddenOwner = await citationService.getCitation({ id: 41, role: 'TEACHER' }, 7);
     assert.equal(hiddenOwner.originalAvailable, true, 'Uploader keeps access to a hidden current source.');
+    assert.equal(hiddenOwner.previewUrl, '/api/documents/7/preview');
+
+    citationRepo.findContextById = async () => ({
+      id: 7,
+      message_id: 8,
+      document_id: 22,
+      session_user_id: 41,
+      storage_key: 'documents/22/source.docx',
+      file_type: 'DOCX',
+      preview_status: 'READY',
+      preview_storage_key: 'previews/22/canonical.pdf',
+      uploaded_by: 99,
+      processing_status: 'READY',
+      visibility_status: 'VISIBLE',
+      source_locator_snapshot: JSON.stringify({
+        boxes: [
+          { x: 0.1, y: 0.2, width: 0.3, height: 0.04 },
+          { x: 0.1, y: 0.25, width: 0.2, height: 0.04 }
+        ]
+      }),
+      document_title_snapshot: 'Visible DOCX',
+      source_text_snapshot: 'Immutable snapshot'
+    });
+    const visibleStudent = await citationService.getCitation({ id: 41, role: 'STUDENT' }, 7);
+    assert.equal(visibleStudent.previewUrl, '/api/library/documents/22/preview');
+    assert.equal(visibleStudent.originalFileUrl, null);
+    assert.deepEqual(visibleStudent.sourceLocator.boxes.map((box) => box.y), [0.2, 0.25]);
+    await assert.rejects(
+      () => citationService.openOriginal({ id: 41, role: 'STUDENT' }, 7),
+      (error) => error.status === 403 && error.code === 'ORIGINAL_DOWNLOAD_FORBIDDEN'
+    );
     await assert.rejects(
       () => citationService.getCitation({ id: 99, role: 'ADMIN' }, 7),
       (error) => error.status === 404 && error.code === 'CITATION_NOT_FOUND'
@@ -200,6 +241,7 @@ async function testCitationOwnership() {
       message_id: 8,
       session_user_id: 41,
       storage_key: 'documents/7/deleted.pdf',
+      file_type: 'PDF',
       uploaded_by: 41,
       processing_status: 'READY',
       visibility_status: 'DELETED',
@@ -219,6 +261,7 @@ async function testCitationOwnership() {
       message_id: 8,
       session_user_id: 41,
       storage_key: 'documents/7/missing.pdf',
+      file_type: 'PDF',
       uploaded_by: 12,
       processing_status: 'READY',
       visibility_status: 'VISIBLE',
@@ -229,7 +272,7 @@ async function testCitationOwnership() {
       throw appError(404, 'FILE_NOT_FOUND', 'File missing.');
     };
     await assert.rejects(
-      () => citationService.openOriginal({ id: 41, role: 'STUDENT' }, 7),
+      () => citationService.openOriginal({ id: 41, role: 'ADMIN' }, 7),
       (error) => error.status === 409 && error.code === 'ORIGINAL_SOURCE_UNAVAILABLE'
     );
   } finally {
@@ -552,6 +595,13 @@ async function testMarkdownPersistenceAndIngestTimeout() {
 
   const sourceText = 'Nguồn snapshot giữ độc lập với bảng Markdown.';
   let persistedSource = null;
+  let persistedLocator = null;
+  const locator = {
+    boxes: [
+      { x: 0.1, y: 0.2, width: 0.3, height: 0.04 },
+      { x: 0.1, y: 0.25, width: 0.2, height: 0.04 }
+    ]
+  };
   await citationRepo.insertCitation({
     messageId: 42,
     documentId: 7,
@@ -560,14 +610,23 @@ async function testMarkdownPersistenceAndIngestTimeout() {
     citationOrder: 1,
     documentTitle: 'Tài liệu',
     pageNumber: 1,
-    sourceText
+    sourceText,
+    sourceLocator: locator
   }, {
     async execute(_sql, values) {
       persistedSource = values[8];
+      persistedLocator = values[9];
       return [{ insertId: 99 }];
     }
   });
   assert.equal(persistedSource, sourceText);
+  assert.deepEqual(JSON.parse(persistedLocator), locator);
+  assert.deepEqual(chatService.publicCitation({
+    id: 99,
+    message_id: 42,
+    document_id: 7,
+    source_locator_snapshot: persistedLocator
+  }, { id: 41, role: 'STUDENT' }).sourceLocator, locator);
 
   assert.equal(
     documentService.isIngestDispatchOutcomeUnknown({ code: 'RAG_REQUEST_TIMEOUT' }),
@@ -600,6 +659,7 @@ async function testMarkdownPersistenceAndIngestTimeout() {
     {
       async withTransaction(work) { return work({ transaction: true }); },
       jobRepo: {
+        async findByIdForUpdate() { return { id: 8, status: 'RUNNING' }; },
         async markDispatchFailed(jobId, code) {
           definitiveMutations.push(['job', jobId, code]);
         }

@@ -1,7 +1,8 @@
-const ROLES = require('../constants/roles');
 const citationRepo = require('../repositories/citation-repository');
 const fileService = require('./document-file-service');
 const appError = require('../utils/app-error');
+const { readSourceLocator } = require('../utils/source-locator');
+const { canReadOriginal, citationUrls } = require('./citation-url-service');
 
 function parseId(value) {
   const id = Number(value);
@@ -16,11 +17,7 @@ function authorize(user, context) {
 }
 
 async function canOpenOriginal(user, context) {
-  if (!context.storage_key || context.visibility_status === 'DELETED') return false;
-  const authorized = user.role === ROLES.ADMIN
-    || Number(context.uploaded_by) === Number(user.id)
-    || (context.processing_status === 'READY' && context.visibility_status === 'VISIBLE');
-  return authorized && fileService.exists(context.storage_key);
+  return canReadOriginal(user, context) && fileService.exists(context.storage_key);
 }
 
 function snapshot(context) {
@@ -34,7 +31,7 @@ function snapshot(context) {
     pageNumber: context.page_number_snapshot,
     sectionTitle: context.section_title_snapshot,
     sourceText: context.source_text_snapshot,
-    sourceLocator: context.source_locator_snapshot,
+    sourceLocator: readSourceLocator(context.source_locator_snapshot),
     retrievalScore: context.retrieval_score,
     rerankScore: context.rerank_score
   };
@@ -44,14 +41,24 @@ async function getCitation(user, idValue) {
   const context = await citationRepo.findContextById(parseId(idValue));
   if (!context) throw appError(404, 'CITATION_NOT_FOUND', 'Không tìm thấy citation.');
   authorize(user, context);
-  return { ...snapshot(context), originalAvailable: await canOpenOriginal(user, context) };
+  return {
+    ...snapshot(context),
+    ...citationUrls(user, context),
+    originalAvailable: await canOpenOriginal(user, context)
+  };
 }
 
 async function openOriginal(user, idValue) {
   const context = await citationRepo.findContextById(parseId(idValue));
   if (!context) throw appError(404, 'CITATION_NOT_FOUND', 'Không tìm thấy citation.');
   authorize(user, context);
-  if (!(await canOpenOriginal(user, context))) {
+  if (!context.storage_key || context.visibility_status === 'DELETED') {
+    throw appError(409, 'ORIGINAL_SOURCE_UNAVAILABLE', 'File gốc hiện không khả dụng; citation snapshot vẫn được giữ.');
+  }
+  if (!canReadOriginal(user, context)) {
+    throw appError(403, 'ORIGINAL_DOWNLOAD_FORBIDDEN', 'Bạn không được tải original file này.');
+  }
+  if (!(await fileService.exists(context.storage_key))) {
     throw appError(409, 'ORIGINAL_SOURCE_UNAVAILABLE', 'File gốc hiện không khả dụng; citation snapshot vẫn được giữ.');
   }
   try {

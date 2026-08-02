@@ -87,6 +87,14 @@ assert.match(spec.components.schemas.RegisterBody.properties.email.description, 
 assert.match(spec.components.schemas.CitationSnapshot.description, /not serialized/i);
 assert(!Object.hasOwn(spec.components.schemas.CitationSnapshot.properties, 'fileUrl'));
 assert(spec.components.schemas.CitationSnapshot.required.includes('documentId'));
+assert(spec.components.schemas.CitationSnapshot.required.includes('previewUrl'));
+assert(spec.components.schemas.CitationSnapshot.required.includes('originalFileUrl'));
+assert.equal(spec.components.schemas.CitationSnapshot.properties.previewUrl.nullable, true);
+assert.equal(spec.components.schemas.CitationSnapshot.properties.originalFileUrl.nullable, true);
+const locator = spec.components.schemas.SourceLocator;
+assert.deepEqual(locator.required, ['boxes']);
+assert.equal(locator.properties.boxes.minItems, 1);
+assert.deepEqual(locator.properties.boxes.items.required, ['x', 'y', 'width', 'height']);
 for (const internal of ['vectorNodeId', 'storageKey', 'jobId']) {
   assert(!Object.hasOwn(spec.components.schemas.CitationSnapshot.properties, internal));
 }
@@ -134,20 +142,33 @@ const libraryProperties = Object.keys(spec.components.schemas.LibraryDocument.pr
 assert.deepEqual(
   libraryProperties,
   [
-    'author', 'createdAt', 'description', 'fileSize', 'fileType', 'id',
+    'author', 'createdAt', 'description', 'downloadUrl', 'fileSize', 'fileType', 'id',
     'originalAvailable', 'originalFileUrl', 'pageCount', 'previewAvailable',
     'previewMimeType', 'previewStatus', 'previewUrl', 'title', 'updatedAt'
   ]
 );
 assert(spec.paths['/api/library/documents/{id}'].get.responses[404]);
 assert(spec.paths['/api/library/documents/{id}/source'].get.responses[404]);
+assert(spec.paths['/api/library/documents/{id}/source'].get.responses[403]);
 assert(spec.paths['/api/library/documents/{id}/source'].get.responses[409]);
+assert.equal(spec.components.schemas.LibraryDocument.properties.originalFileUrl.nullable, true);
 assert(spec.paths['/api/library/documents/{id}/preview'].get.responses[409]);
+assert.equal(spec.components.schemas.LibraryDocument.properties.downloadUrl.nullable, true);
+assert(spec.paths['/api/library/documents/{id}/download'].get.responses[409]);
+assert.match(
+  spec.paths['/api/library/documents/{id}/download'].get.description,
+  /uploaded PDF.*DOCX-derived PDF.*uploaded TXT/i
+);
+assert(spec.paths['/api/library/documents/{id}/download'].get.responses[200]
+  .content['application/pdf']);
+assert(spec.paths['/api/library/documents/{id}/download'].get.responses[200]
+  .content['text/plain']);
 for (const path of [
   '/api/library/documents',
   '/api/library/documents/{id}',
   '/api/library/documents/{id}/source',
-  '/api/library/documents/{id}/preview'
+  '/api/library/documents/{id}/preview',
+  '/api/library/documents/{id}/download'
 ]) {
   assert(spec.paths[path].get.responses[401], `${path} must document unauthenticated access.`);
 }
@@ -225,14 +246,17 @@ assert(callbackAck.required.includes('attemptCount'));
 assert(callbackAck.properties.outcome.enum.includes('IDEMPOTENT_REPLAY'));
 
 const upload = spec.paths['/api/documents'].post;
-assert.match(upload.description, /DOCX tạo durable preview job/);
+assert.match(upload.description, /DOCX giữ INGEST QUEUED/);
+assert.match(upload.description, /canonical PDF/);
+assert.match(upload.description, /Python chỉ nhận PDF đó/);
 assert.match(upload.responses[202].description, /not complete/i);
 const uploadProperties = upload.requestBody.content['multipart/form-data'].schema.properties;
 assert.deepEqual(Object.keys(uploadProperties), ['file', 'title', 'description', 'author']);
 assert.equal(spec.components.schemas.DocumentUpdateBody.additionalProperties, false);
 assert.equal(spec.paths['/api/documents/jobs/{jobId}'].get.tags[0], 'Document Processing');
-assert.match(spec.paths['/api/citations/{id}/file'].get.description, /portable corpus/i);
-assert.match(spec.paths['/api/citations/{id}/file'].get.description, /DELETED.*unavailable/i);
+assert.match(spec.paths['/api/citations/{id}/file'].get.description, /PDF\/DOCX original chỉ uploader TEACHER\/Admin/i);
+assert.match(spec.paths['/api/citations/{id}/file'].get.description, /Student dùng previewUrl/i);
+assert(spec.paths['/api/citations/{id}/file'].get.responses[403]);
 assert(spec.paths['/api/citations/{id}/file'].get.responses[404]);
 
 JSON.stringify(spec);

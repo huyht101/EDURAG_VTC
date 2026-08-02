@@ -221,6 +221,40 @@ async function testChatContract() {
   assert.equal(result.usageCalls[1].callIndex, 2);
   assert.equal(result.usageCalls[1].operationType, 'ANSWER_GENERATION');
 
+  const locator = {
+    boxes: [
+      { x: 0.12, y: 0.24, width: 0.31, height: 0.02 },
+      { x: 0.12, y: 0.27, width: 0.18, height: 0.02 }
+    ]
+  };
+  const located = normalizeQueryResult({
+    ...answer,
+    citations: [{ ...answer.citations[0], source_locator: locator }]
+  });
+  assert.deepEqual(located.sources[0].sourceLocator, locator);
+  const oneBox = { boxes: [{ x: 0, y: 0, width: 1, height: 1 }] };
+  assert.deepEqual(normalizeQueryResult({
+    ...answer,
+    citations: [{ ...answer.citations[0], source_locator: oneBox }]
+  }).sources[0].sourceLocator, oneBox);
+  for (const sourceLocator of [
+    {},
+    { boxes: [] },
+    { boxes: [{ x: -0.1, y: 0, width: 0.1, height: 0.1 }] },
+    { boxes: [{ x: 0.9, y: 0, width: 0.2, height: 0.1 }] },
+    { boxes: [{ x: 0, y: 0, width: 0, height: 0.1 }] },
+    { boxes: [{ x: Number.NaN, y: 0, width: 0.1, height: 0.1 }] },
+    { boxes: [{ x: 0, y: 0, width: Number.POSITIVE_INFINITY, height: 0.1 }] }
+  ]) {
+    assert.throws(
+      () => normalizeQueryResult({
+        ...answer,
+        citations: [{ ...answer.citations[0], source_locator: sourceLocator }]
+      }),
+      (error) => error.code === 'RAG_CITATION_INVALID'
+    );
+  }
+
   const markdownAnswer = [
     '## Kết quả',
     '',
@@ -424,6 +458,24 @@ async function testCallbackContract() {
   assert.equal(normalized.chunks[0].chunkText, 'Chunk one full text.');
   assert.equal(normalized.chunks[1].pageNumber, null);
   assert.equal(validateProcessingCallback(normalized), null);
+
+  const locatedCallback = normalizeProcessingCallback(JSON.parse(JSON.stringify(raw)));
+  locatedCallback.chunks[0].sourceLocator = {
+    boxes: [
+      { x: 0.1, y: 0.2, width: 0.3, height: 0.04 },
+      { x: 0.1, y: 0.25, width: 0.2, height: 0.04 }
+    ]
+  };
+  assert.equal(validateProcessingCallback(locatedCallback), null);
+  for (const sourceLocator of [
+    { boxes: [] },
+    { boxes: [{ x: 0, y: 0, width: 1.01, height: 0.1 }] },
+    { boxes: [{ x: 0, y: 0, width: 0.1, height: Number.NaN }] }
+  ]) {
+    const invalid = { ...locatedCallback, chunks: locatedCallback.chunks.map((chunk) => ({ ...chunk })) };
+    invalid.chunks[0].sourceLocator = sourceLocator;
+    assert.match(validateProcessingCallback(invalid).error, /sourceLocator/);
+  }
 
   const incompleteAlias = JSON.parse(JSON.stringify(raw));
   incompleteAlias.chunk_manifest[0] = {

@@ -1,10 +1,35 @@
 const fileService = require('./document-file-service');
 const PREVIEW_STATUSES = require('../constants/preview-statuses');
+const ROLES = require('../constants/roles');
 
 function previewStorageKey(document) {
   if (document.preview_status !== PREVIEW_STATUSES.READY) return null;
   if (document.file_type === 'PDF') return document.storage_key;
   return document.preview_storage_key || null;
+}
+
+function canonicalDownloadArtifact(document) {
+  if (document.file_type === 'TXT') {
+    return {
+      storageKey: document.storage_key,
+      mimeType: document.mime_type || 'text/plain',
+      extension: '.txt'
+    };
+  }
+  const storageKey = previewStorageKey(document);
+  if (!storageKey) return null;
+  return {
+    storageKey,
+    mimeType: document.preview_mime_type || 'application/pdf',
+    extension: '.pdf'
+  };
+}
+
+function canonicalDownloadFilename(document, artifact = canonicalDownloadArtifact(document)) {
+  if (!artifact) return null;
+  const title = String(document.title || 'document').trim() || 'document';
+  return title.toLowerCase().endsWith(artifact.extension)
+    ? title : `${title}${artifact.extension}`;
 }
 
 async function availability(document, files = fileService) {
@@ -13,10 +38,19 @@ async function availability(document, files = fileService) {
   const previewAvailable = previewKey
     ? (previewKey === document.storage_key ? originalAvailable : await files.exists(previewKey))
     : false;
-  return { originalAvailable, previewAvailable };
+  const downloadArtifact = canonicalDownloadArtifact(document);
+  const downloadAvailable = downloadArtifact
+    ? (downloadArtifact.storageKey === document.storage_key
+      ? originalAvailable
+      : (downloadArtifact.storageKey === previewKey
+        ? previewAvailable
+        : await files.exists(downloadArtifact.storageKey)))
+    : false;
+  return { originalAvailable, previewAvailable, downloadAvailable };
 }
 
 function commonFields(document, routes, state) {
+  const originalFileUrl = routes.original(document.id);
   return {
     id: document.id,
     title: document.title,
@@ -29,18 +63,30 @@ function commonFields(document, routes, state) {
     previewAvailable: state.previewAvailable,
     previewMimeType: document.preview_mime_type,
     previewUrl: state.previewAvailable ? routes.preview(document.id) : null,
-    originalAvailable: state.originalAvailable,
-    originalFileUrl: routes.original(document.id),
+    originalAvailable: Boolean(originalFileUrl) && state.originalAvailable,
+    originalFileUrl,
     createdAt: document.created_at,
     updatedAt: document.updated_at
   };
 }
 
-async function libraryDocument(document, files = fileService) {
-  return commonFields(document, {
-    original: (id) => `/api/library/documents/${id}/source`,
+function canUseLibraryOriginal(user, document) {
+  return user?.role === ROLES.ADMIN
+    || (user?.role === ROLES.TEACHER && Number(document.uploaded_by) === Number(user.id))
+    || document.file_type === 'TXT';
+}
+
+async function libraryDocument(document, user, files = fileService) {
+  const state = await availability(document, files);
+  return {
+    ...commonFields(document, {
+    original: (id) => (canUseLibraryOriginal(user, document)
+      ? `/api/library/documents/${id}/source` : null),
     preview: (id) => `/api/library/documents/${id}/preview`
-  }, await availability(document, files));
+    }, state),
+    downloadUrl: state.downloadAvailable
+      ? `/api/library/documents/${document.id}/download` : null
+  };
 }
 
 async function managementDocument(document, files = fileService) {
@@ -63,7 +109,10 @@ async function managementDocument(document, files = fileService) {
 
 module.exports = {
   previewStorageKey,
+  canonicalDownloadArtifact,
+  canonicalDownloadFilename,
   availability,
+  canUseLibraryOriginal,
   libraryDocument,
   managementDocument
 };

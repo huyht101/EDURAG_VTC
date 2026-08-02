@@ -72,6 +72,27 @@ const avatarFileResponse = (description) => ({
   }
 });
 
+const canonicalDownloadResponse = (description) => ({
+  description,
+  headers: {
+    'Content-Disposition': {
+      description: 'Attachment filename with an ASCII fallback and RFC 5987 UTF-8 filename*. The bytes come from the same persistent canonical artifact used by preview/ingest.',
+      schema: {
+        type: 'string',
+        example: "attachment; filename=\"Ke hoach.pdf\"; filename*=UTF-8''K%E1%BA%BF%20ho%E1%BA%A1ch.pdf"
+      }
+    },
+    'Content-Length': {
+      description: 'Full canonical artifact size. Byte Range/206 is not implemented.',
+      schema: { type: 'integer', minimum: 1 }
+    }
+  },
+  content: {
+    'application/pdf': { schema: { type: 'string', format: 'binary' } },
+    'text/plain': { schema: { type: 'string', format: 'binary' } }
+  }
+});
+
 const citationSourceExample = {
   success: true,
   message: 'OK',
@@ -86,9 +107,11 @@ const citationSourceExample = {
     sectionTitle: null,
     sourceText: 'Structured source fragment.',
     sourceLocator: null,
+    previewUrl: '/api/library/documents/12/preview',
+    originalFileUrl: null,
     retrievalScore: 0.91,
     rerankScore: null,
-    originalAvailable: true
+    originalAvailable: false
   }
 };
 
@@ -316,12 +339,18 @@ const definition = {
             nullable: true,
             description: 'Authenticated relative URL; null unless a readable preview exists.'
           },
+          downloadUrl: {
+            type: 'string',
+            nullable: true,
+            description: 'Authenticated Library canonical-download URL when the artifact exists. PDF uses uploaded PDF, DOCX uses the persistent generated PDF, TXT uses the uploaded TXT.'
+          },
           createdAt: { type: 'string', format: 'date-time' },
           updatedAt: { type: 'string', format: 'date-time' },
           originalAvailable: { type: 'boolean' },
           originalFileUrl: {
             type: 'string',
-            description: 'Authenticated relative URL. Check originalAvailable before fetching.'
+            nullable: true,
+            description: 'Authenticated relative URL when current actor may download the original. Student receives null for PDF/DOCX; TXT retains its authenticated Library source behavior.'
           }
         }
       },
@@ -470,7 +499,10 @@ const definition = {
       },
       CitationSnapshot: {
         type: 'object',
-        required: ['id', 'messageId', 'documentId', 'citationOrder', 'documentTitle', 'sourceText'],
+        required: [
+          'id', 'messageId', 'documentId', 'citationOrder', 'documentTitle', 'sourceText',
+          'sourceLocator', 'previewUrl', 'originalFileUrl'
+        ],
         properties: {
           id: { type: 'integer' },
           messageId: { type: 'integer' },
@@ -486,13 +518,45 @@ const definition = {
           sectionTitle: { type: 'string', nullable: true },
           sourceText: { type: 'string' },
           sourceLocator: {
-            type: 'object', nullable: true,
-            description: 'Opaque optional object. Current Python runtime does not emit locator/boxes and no coordinate schema is defined.'
+            allOf: [{ $ref: '#/components/schemas/SourceLocator' }],
+            nullable: true,
+            description: 'Immutable normalized top-left geometry for the exact cited occurrence, or null when Python cannot provide trustworthy geometry.'
+          },
+          previewUrl: {
+            type: 'string', nullable: true,
+            description: 'Dynamic authenticated canonical-PDF URL derived from current document state and actor authorization; never persisted in the citation snapshot.'
+          },
+          originalFileUrl: {
+            type: 'string', nullable: true,
+            description: 'Dynamic authenticated original-download URL only when current authorization permits it; never persisted in the citation snapshot.'
           },
           retrievalScore: { type: 'number', nullable: true },
           rerankScore: { type: 'number', nullable: true }
         },
-        description: 'Immutable public snapshot. vectorNodeId remains an internal mapping key and is not serialized.'
+        description: 'Immutable source snapshot plus dynamic authorized file URLs. vectorNodeId remains an internal mapping key and is not serialized.'
+      },
+      SourceLocator: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['boxes'],
+        properties: {
+          boxes: {
+            type: 'array', minItems: 1,
+            description: 'Ordered line boxes, normalized 0–1 against the canonical PDF page with top-left origin.',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['x', 'y', 'width', 'height'],
+              properties: {
+                x: { type: 'number', minimum: 0, maximum: 1 },
+                y: { type: 'number', minimum: 0, maximum: 1 },
+                width: { type: 'number', minimum: 0, exclusiveMinimum: true, maximum: 1 },
+                height: { type: 'number', minimum: 0, exclusiveMinimum: true, maximum: 1 }
+              },
+              description: 'Node also validates x + width <= 1 and y + height <= 1.'
+            }
+          }
+        }
       },
       ProcessingChunkManifestItem: {
         type: 'object',
@@ -518,7 +582,10 @@ const definition = {
             description: 'Values <= 0 are normalized to null at the Node boundary.'
           },
           section_title: { type: 'string', maxLength: 500, nullable: true },
-          source_locator: { type: 'object', nullable: true }
+          source_locator: {
+            allOf: [{ $ref: '#/components/schemas/SourceLocator' }],
+            nullable: true
+          }
         }
       },
       ProcessingCallbackBody: {
@@ -804,10 +871,10 @@ const definition = {
                 previewAvailable: false,
                 previewUrl: null,
                 originalFileUrl: '/api/documents/12/file',
-                processingStatus: 'PROCESSING',
+                processingStatus: 'UPLOADED',
                 visibilityStatus: 'VISIBLE'
               },
-              job: { id: 34, jobType: 'INGEST', status: 'RUNNING', attemptCount: 1 },
+              job: { id: 34, jobType: 'INGEST', status: 'QUEUED', attemptCount: 0 },
               previewJob: {
                 id: 35,
                 jobType: 'GENERATE_PDF_PREVIEW',
@@ -860,10 +927,11 @@ const definition = {
                 previewAvailable: true,
                 previewMimeType: 'application/pdf',
                 previewUrl: '/api/library/documents/12/preview',
+                downloadUrl: '/api/library/documents/12/download',
                 createdAt: '2026-07-22T08:00:00.000Z',
                 updatedAt: '2026-07-22T08:00:00.000Z',
-                originalAvailable: true,
-                originalFileUrl: '/api/library/documents/12/source'
+                originalAvailable: false,
+                originalFileUrl: null
               }]
             }
           }),
@@ -896,10 +964,11 @@ const definition = {
                 previewAvailable: true,
                 previewMimeType: 'application/pdf',
                 previewUrl: '/api/library/documents/12/preview',
+                downloadUrl: '/api/library/documents/12/download',
                 createdAt: '2026-07-22T08:00:00.000Z',
                 updatedAt: '2026-07-22T08:00:00.000Z',
-                originalAvailable: true,
-                originalFileUrl: '/api/library/documents/12/source'
+                originalAvailable: false,
+                originalFileUrl: null
               }
             }
           }),
@@ -912,13 +981,13 @@ const definition = {
     '/api/library/documents/{id}/source': {
       get: {
         tags: ['Document Library'],
-        summary: 'Download one READY and VISIBLE library original',
+        summary: 'Download an authorized READY and VISIBLE original',
         security: [{ bearerAuth: [] }],
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
         responses: {
-          200: originalFileResponse('Original PDF/DOCX/TXT attachment; no Range/206.'),
+          200: originalFileResponse('Owner/Admin original PDF/DOCX/TXT, or authenticated Library TXT fallback; no Range/206.'),
           401: response('User Bearer token is missing or invalid.', 'ErrorResponse'),
-          403: response('Authenticated role is not permitted.', 'ErrorResponse'),
+          403: response('PDF/DOCX original requires owner TEACHER or ADMIN.', 'ErrorResponse'),
           404: response('Document is absent or no longer READY + VISIBLE.', 'ErrorResponse'),
           409: response('Eligible document exists but its original file is unavailable.', 'ErrorResponse')
         }
@@ -936,6 +1005,21 @@ const definition = {
           403: response('Authenticated role is not permitted.', 'ErrorResponse'),
           404: response('Document is absent or no longer READY + VISIBLE.', 'ErrorResponse'),
           409: response('Preview is pending, failed, not applicable or missing.', 'ErrorResponse')
+        }
+      }
+    },
+    '/api/library/documents/{id}/download': {
+      get: {
+        tags: ['Document Library'],
+        summary: 'Download the canonical artifact for an eligible library document',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
+        responses: {
+          200: canonicalDownloadResponse('PDF upload or persistent DOCX-derived PDF, or uploaded TXT, streamed as an attachment without regeneration.'),
+          401: response('User Bearer token is missing or invalid.', 'ErrorResponse'),
+          403: response('Authenticated role is not permitted.', 'ErrorResponse'),
+          404: response('Document is absent or no longer READY + VISIBLE.', 'ErrorResponse'),
+          409: response('Eligible document exists but its canonical artifact is unavailable.', 'ErrorResponse')
         }
       }
     },
@@ -992,7 +1076,7 @@ const definition = {
       get: { tags: ['Citations'], summary: 'Citation snapshot and original availability', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 200: response('Source snapshot.', 'SuccessResponse', citationSourceExample), 404: response('Not found.', 'ErrorResponse') } }
     },
     '/api/citations/{id}/file': {
-      get: { tags: ['Citations'], summary: 'Download authorized original source', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 200: originalFileResponse('Original PDF/DOCX/TXT attachment stream; no derived preview and no Range/206.'), 404: response('Citation not found or not owned.', 'ErrorResponse'), 409: response('Original unavailable; snapshot remains.', 'ErrorResponse') } }
+      get: { tags: ['Citations'], summary: 'Download authorized original source', security: [{ bearerAuth: [] }], parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }], responses: { 200: originalFileResponse('Owner/Admin original attachment, or authenticated Library TXT fallback; no derived preview and no Range/206.'), 403: response('Current actor may read the snapshot/preview but may not download this original.', 'ErrorResponse'), 404: response('Citation not found or not owned.', 'ErrorResponse'), 409: response('Original unavailable; snapshot remains.', 'ErrorResponse') } }
     },
     '/api/admin/dashboard/summary': {
       get: { tags: ['Admin Dashboard'], summary: 'Basic LLM-calls-only summary', security: [{ bearerAuth: [] }], parameters: [{ name: 'from', in: 'query', schema: { type: 'string', format: 'date-time' } }, { name: 'to', in: 'query', schema: { type: 'string', format: 'date-time' } }], responses: { 200: response('Dashboard summary.'), 403: response('ADMIN required.', 'ErrorResponse') } }
@@ -1016,11 +1100,12 @@ const operationDescriptions = {
   'GET /api/admin/users/{id}': 'Actor: ADMIN. Đọc account/profile detail của user theo id; không trả password/token hash.',
   'PUT /api/admin/users/{id}/status': 'Actor: ADMIN. Thực hiện approve/reject/reopen/lock/unlock theo transition hợp lệ; lock tăng auth_version.',
   'GET /api/documents': 'Actor: TEACHER hoặc ADMIN. STUDENT bị từ chối. TEACHER luôn bị server giới hạn vào document mình upload và không được gửi ownerId; ADMIN thấy toàn bộ hoặc lọc ownerId. q tìm OR trong title/description/author/original filename; fileType, processingStatus, visibilityStatus, previewStatus và ownerId kết hợp AND. page/limit và sort newest|oldest|title_asc|title_desc có id tie-breaker; %, _ và \\ trong q là ký tự literal. search là alias legacy: q+search được chấp nhận khi giống nhau sau trim. offset là exact legacy offset: page+offset được chấp nhận khi offset=(page-1)*limit; cặp mâu thuẫn trả 400.',
-  'POST /api/documents': 'Actor: TEACHER hoặc ADMIN. Nhận multipart file + optional title/description/author; blank title dùng filename. Node đếm PDF pages, DOCX tạo durable preview job, TXT không preview; INGEST vẫn độc lập và HTTP 202 chỉ là accepted.',
+  'POST /api/documents': 'Actor: TEACHER hoặc ADMIN. Nhận multipart file + optional title/description/author; blank title dùng filename. PDF/TXT dispatch INGEST sau commit. DOCX giữ INGEST QUEUED cho đến khi durable preview job atomic-publish canonical PDF; Python chỉ nhận PDF đó. HTTP 202 chỉ là accepted.',
   'GET /api/library/documents': 'Actor: STUDENT, TEACHER hoặc ADMIN. Ba role nhận cùng public DTO; server luôn khóa scope vào READY + VISIBLE, chưa deleted. q tìm OR trong title/description/author; fileType và author kết hợp AND. page/limit và sort newest|oldest|title_asc|title_desc có id tie-breaker; %, _ và \\ trong q/author là ký tự literal. Client không thể filter owner, processing, visibility, preview hoặc job state. search là alias legacy: q+search được chấp nhận khi giống nhau sau trim. offset là exact legacy offset: page+offset được chấp nhận khi offset=(page-1)*limit; cặp mâu thuẫn trả 400.',
   'GET /api/library/documents/{id}': 'Actor: STUDENT, TEACHER hoặc ADMIN. Trả cùng DTO allowlist của document READY + VISIBLE; trạng thái khác hoặc id không tồn tại cùng trả 404 để không lộ lifecycle nội bộ.',
-  'GET /api/library/documents/{id}/source': 'Actor: STUDENT, TEACHER hoặc ADMIN. Stream original của document vẫn READY + VISIBLE dưới dạng attachment. Record không đủ điều kiện trả 404; record hợp lệ nhưng original bị thiếu trả 409 ORIGINAL_SOURCE_UNAVAILABLE.',
+  'GET /api/library/documents/{id}/source': 'Actor: document owner TEACHER hoặc ADMIN đối với original PDF/DOCX; TXT giữ authenticated Library fallback cho STUDENT/TEACHER/ADMIN. Document luôn phải READY + VISIBLE. Unauthorized original trả 403; file thiếu trả 409.',
   'GET /api/library/documents/{id}/preview': 'Actor: STUDENT, TEACHER hoặc ADMIN. Chỉ document READY + VISIBLE; PDF stream original inline, DOCX stream generated PDF khi preview READY. Preview thiếu/pending/failed trả 409 và không nới Library scope.',
+  'GET /api/library/documents/{id}/download': 'Actor: STUDENT, TEACHER hoặc ADMIN. Chỉ document READY + VISIBLE. Attachment dùng đúng canonical artifact: uploaded PDF, persistent DOCX-derived PDF hoặc uploaded TXT; không regenerate/copy và không cấp quyền original DOCX.',
   'GET /api/documents/{id}': 'Actor: document owner TEACHER hoặc ADMIN. Đọc metadata và latest job; storage_key không được public.',
   'PATCH /api/documents/{id}': 'Actor: document owner TEACHER hoặc ADMIN. Chỉ đổi title/description/author; không tạo RAG job, không re-ingest, không sửa pageCount/preview/system metadata hoặc citation snapshot.',
   'DELETE /api/documents/{id}': 'Actor: document owner TEACHER hoặc ADMIN. Tạo async DELETE_VECTORS job rồi soft-delete business document; poll job status. Chat/citation snapshot không bị xóa.',
@@ -1037,8 +1122,8 @@ const operationDescriptions = {
   'GET /api/chat/sessions/{id}/messages': 'Actor: session owner. Đọc messages theo message_order với offset/limit; PENDING/COMPLETED/FAILED đều xuất hiện và assistant message gồm citation snapshots, không bao gồm usage rows.',
   'POST /api/chat/sessions/{id}/messages': 'Actor: session owner. Supported contract là JSON text, không có multipart/image. Request mới persist USER + ASSISTANT PENDING, chờ Python/LLM và success trả assistant COMPLETED. Duplicate clientRequestId trả pair hiện hữu nên có thể PENDING/COMPLETED/FAILED; PENDING được theo dõi qua history. Không có SSE/WebSocket. no_answer=true là success hợp lệ; normal answer bắt buộc có verified structured citation. Assistant content vẫn là string và có thể chứa Markdown subset/GFM-compatible (paragraphs, light headings, emphasis, lists, tables, inline/fenced code); Node lưu/trả nguyên văn và không parse thành HTML/JSON. Raw HTML, edurag-chart và visualizations không thuộc CURRENT contract.',
   'GET /api/citations/{id}': 'Actor: owner của chat session chứa citation. Đọc immutable citation snapshot; không phụ thuộc document hiện còn visible hoặc original file còn tồn tại.',
-  'GET /api/citations/{id}/source': 'Actor: owner của chat session chứa citation. Đọc source-text snapshot và cờ originalAvailable; sourceLocator là opaque optional object và current Python không tạo locator/boxes. Đây không phải stream file.',
-  'GET /api/citations/{id}/file': 'Actor: owner của chat session chứa citation và current source authorization hợp lệ. DELETED luôn unavailable; HIDDEN chỉ uploader/Admin được mở trong session của chính họ. Stream original as attachment; không có Range/206. Portable corpus thiếu original có thể trả ORIGINAL_SOURCE_UNAVAILABLE trong khi snapshot vẫn đọc được.',
+  'GET /api/citations/{id}/source': 'Actor: owner của chat session chứa citation. Đọc immutable page/source/locator snapshot. sourceLocator là null hoặc ordered normalized boxes (top-left, 0–1). previewUrl/originalFileUrl được sinh động từ current state và role, không nằm trong snapshot.',
+  'GET /api/citations/{id}/file': 'Actor: owner của chat session chứa citation và current original-file authorization hợp lệ. PDF/DOCX original chỉ uploader TEACHER/Admin; TXT giữ Library fallback. Student dùng previewUrl cho canonical PDF. DELETED/file thiếu vẫn giữ snapshot nhưng file unavailable.',
   'GET /api/admin/dashboard/summary': 'Actor: ADMIN. Đọc document/chat/citation và LLM usage aggregates theo time range; không gọi đây là tổng OCR/embedding/Qdrant cost.'
 };
 

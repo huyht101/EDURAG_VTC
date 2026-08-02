@@ -11,6 +11,7 @@ router.use(authMiddleware, roleMiddleware([ROLES.STUDENT, ROLES.TEACHER, ROLES.A
 router.get('/', validateRequest(validateLibraryQuery, 'query'), controller.list);
 router.get('/:id/source', controller.streamSource);
 router.get('/:id/preview', controller.streamPreview);
+router.get('/:id/download', controller.streamDownload);
 router.get('/:id', controller.detail);
 
 module.exports = router;

@@ -46,6 +46,8 @@ process.env.AUTH_DEV_DELIVERY_LOG_SECRETS = 'true';
 process.env.RAG_MODE = 'mock';
 process.env.AUTH_RATE_LIMIT_MAX = '1000';
 process.env.AUTH_SENSITIVE_RATE_LIMIT_MAX = '1000';
+process.env.DOCUMENT_PREVIEW_POLL_INTERVAL_MS = '250';
+process.env.DOCUMENT_PREVIEW_RETRY_DELAY_SECONDS = '1';
 
 const required = [
   'DB_HOST', 'DB_NAME', 'DB_USER', 'DB_PASSWORD', 'JWT_SECRET',
@@ -436,6 +438,7 @@ async function main() {
     await request('/api/library/documents/1', {}, 401);
     await request('/api/library/documents/1/source', {}, 401);
     await request('/api/library/documents/1/preview', {}, 401);
+    await request('/api/library/documents/1/download', {}, 401);
     await request('/api/library/documents', { headers: auth(studentToken) });
     await request('/api/library/documents', { headers: auth(teacher1Token) });
     await request('/api/library/documents', { headers: auth(adminToken) });
@@ -504,6 +507,7 @@ async function main() {
     assert(!processingLibrary.some((document) => Number(document.id) === Number(documentId)));
     await request(`/api/library/documents/${documentId}`, { headers: auth(studentToken) }, 404);
     await request(`/api/library/documents/${documentId}/source`, { headers: auth(studentToken) }, 404);
+    await request(`/api/library/documents/${documentId}/download`, { headers: auth(studentToken) }, 404);
     await request(`/api/documents/jobs/${jobId}`, { headers: auth(teacher1Token) });
 
     await request(`/api/documents/${documentId}`, { headers: auth(teacher2Token) }, 404);
@@ -556,7 +560,12 @@ async function main() {
         contentHash: crypto.createHash('sha256').update('verified source text').digest('hex'),
         tokenCount: 3,
         pageNumber: 1,
-        sourceLocator: { line: 1 }
+        sourceLocator: {
+          boxes: [
+            { x: 0.1, y: 0.2, width: 0.3, height: 0.04 },
+            { x: 0.1, y: 0.25, width: 0.2, height: 0.04 }
+          ]
+        }
       }],
       result: { parserName: 'smoke', pipelineVersion: 'smoke-v1' }
     };
@@ -597,7 +606,7 @@ async function main() {
     assert.deepEqual(
       Object.keys(libraryDocument).sort(),
       [
-        'author', 'createdAt', 'description', 'fileSize', 'fileType', 'id',
+        'author', 'createdAt', 'description', 'downloadUrl', 'fileSize', 'fileType', 'id',
         'originalAvailable', 'originalFileUrl', 'pageCount', 'previewAvailable',
         'previewMimeType', 'previewStatus', 'previewUrl', 'title', 'updatedAt'
       ]
@@ -641,6 +650,21 @@ async function main() {
         body: form
       }, 202)).payload.data;
       if (complete) {
+        let attemptCount = result.job.attemptCount;
+        if (result.document.fileType === 'DOCX') {
+          for (let attempt = 0; attempt < 120; attempt += 1) {
+            const currentJob = (await request(
+              `/api/documents/jobs/${result.job.id}`,
+              { headers: auth(token) }
+            )).payload.data;
+            if (currentJob.status === 'RUNNING') {
+              attemptCount = currentJob.attemptCount;
+              break;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 500));
+          }
+          assert.equal(attemptCount, 1, 'DOCX search fixture must wait for canonical PDF dispatch.');
+        }
         const text = `search fixture ${result.document.id}`;
         await request('/api/internal/rag/processing-callback', {
           method: 'POST',
@@ -649,7 +673,7 @@ async function main() {
             eventType: 'SUCCEEDED',
             jobId: result.job.id,
             documentId: result.document.id,
-            attemptCount: 1,
+            attemptCount,
             chunks: [{
               chunkIndex: 0,
               vectorNodeId: crypto.randomUUID(),
@@ -801,7 +825,29 @@ async function main() {
         { headers: auth(token) }
       )).payload.data);
     }
-    for (const rolePage of rolePages.slice(1)) assert.deepEqual(rolePage, rolePages[0]);
+    const withoutOriginalAccess = (page) => ({
+      ...page,
+      documents: page.documents.map((document) => ({
+        ...document,
+        originalAvailable: false,
+        originalFileUrl: null
+      }))
+    });
+    for (const rolePage of rolePages.slice(1)) {
+      assert.deepEqual(withoutOriginalAccess(rolePage), withoutOriginalAccess(rolePages[0]));
+    }
+    for (const rolePage of rolePages) {
+      for (const document of rolePage.documents.filter((item) => item.fileType === 'TXT')) {
+        assert.equal(document.originalAvailable, true);
+      }
+    }
+    for (const document of rolePages[0].documents.filter((item) => item.fileType !== 'TXT')) {
+      assert.equal(document.originalAvailable, false);
+      assert.equal(document.originalFileUrl, null);
+    }
+    for (const document of rolePages[3].documents.filter((item) => item.fileType !== 'TXT')) {
+      assert.equal(document.originalAvailable, true);
+    }
 
     const legacySearch = (await request(listPath('/api/library/documents', {
       search: listMarker,
@@ -1024,6 +1070,22 @@ async function main() {
       )).payload.data.document;
       assert.equal(managementDetail.originalFilename, fixture.filename);
       const fixtureText = `verified ${fixture.fileType} source`;
+      let ingestAttemptCount = fixtureUpload.job.attemptCount;
+      if (fixture.fileType === 'DOCX') {
+        assert.equal(fixtureUpload.job.status, 'QUEUED');
+        for (let attempt = 0; attempt < 120; attempt += 1) {
+          const currentJob = (await request(
+            `/api/documents/jobs/${fixtureUpload.job.id}`,
+            { headers: auth(teacher1Token) }
+          )).payload.data;
+          if (currentJob.status === 'RUNNING') {
+            ingestAttemptCount = currentJob.attemptCount;
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+        assert.equal(ingestAttemptCount, 1, 'DOCX INGEST must start only after canonical PDF is ready.');
+      }
       await request('/api/internal/rag/processing-callback', {
         method: 'POST',
         headers: internalHeaders,
@@ -1031,7 +1093,7 @@ async function main() {
           eventType: 'SUCCEEDED',
           jobId: fixtureUpload.job.id,
           documentId: fixtureUpload.document.id,
-          attemptCount: 1,
+          attemptCount: ingestAttemptCount,
           chunks: [{
             chunkIndex: 0,
             vectorNodeId: crypto.randomUUID(),
@@ -1046,7 +1108,18 @@ async function main() {
         { headers: auth(studentToken) }
       )).payload.data.document;
       assert.equal(fixtureDetail.fileType, fixture.fileType);
-      assert.equal(fixtureDetail.originalAvailable, true);
+      assert.equal(fixtureDetail.originalAvailable, fixture.fileType === 'TXT');
+      assert.equal(
+        fixtureDetail.originalFileUrl,
+        fixture.fileType === 'TXT'
+          ? `/api/library/documents/${fixtureUpload.document.id}/source`
+          : null
+      );
+      assert.equal(
+        fixtureDetail.downloadUrl,
+        `/api/library/documents/${fixtureUpload.document.id}/download`
+      );
+      let expectedCanonicalBytes = fixture.bytes;
       if (fixture.fileType === 'PDF') {
         assert.equal(fixtureDetail.title, fixture.title);
         assert.equal(fixtureDetail.pageCount, 3);
@@ -1115,10 +1188,33 @@ async function main() {
         const previewBytes = Buffer.from(await previewResponse.arrayBuffer());
         assert.equal(previewBytes.subarray(0, 5).toString('ascii'), '%PDF-');
         assert.equal(await documentFileService.countPdfPages(previewBytes), docxDetail.pageCount);
+        expectedCanonicalBytes = previewBytes;
       }
-      const fixtureSource = await fetch(
+      const canonicalDownload = await fetch(`${base}${fixtureDetail.downloadUrl}`, {
+        headers: auth(studentToken),
+        signal: AbortSignal.timeout(15_000)
+      });
+      assert.equal(canonicalDownload.status, 200);
+      const expectedDownloadMime = fixture.fileType === 'TXT' ? 'text/plain' : 'application/pdf';
+      assert.match(canonicalDownload.headers.get('content-type') || '', new RegExp(`^${expectedDownloadMime}`));
+      const expectedDownloadName = `${fixtureUpload.document.title}.${fixture.fileType === 'TXT' ? 'txt' : 'pdf'}`;
+      assertAttachmentUtf8Filename(
+        canonicalDownload.headers.get('content-disposition') || '',
+        expectedDownloadName
+      );
+      const canonicalDownloadBytes = Buffer.from(await canonicalDownload.arrayBuffer());
+      assert.deepEqual(canonicalDownloadBytes, expectedCanonicalBytes);
+      if (fixture.fileType === 'DOCX') {
+        assert.notDeepEqual(canonicalDownloadBytes, fixture.bytes, 'Student DOCX download must not expose original DOCX bytes.');
+      }
+      const studentSource = await fetch(
         `${base}/api/library/documents/${fixtureUpload.document.id}/source`,
         { headers: auth(studentToken), signal: AbortSignal.timeout(15_000) }
+      );
+      assert.equal(studentSource.status, fixture.fileType === 'TXT' ? 200 : 403);
+      const fixtureSource = await fetch(
+        `${base}/api/library/documents/${fixtureUpload.document.id}/source`,
+        { headers: auth(teacher1Token), signal: AbortSignal.timeout(15_000) }
       );
       assert.equal(fixtureSource.status, 200);
       assert.equal(Number(fixtureSource.headers.get('content-length')), fixture.bytes.length);
@@ -1183,38 +1279,26 @@ async function main() {
       headers: auth(teacher1Token),
       body: failedPreviewForm
     }, 202)).payload.data;
-    const failedPreviewText = 'DOCX original remains available after preview conversion failure.';
-    await request('/api/internal/rag/processing-callback', {
-      method: 'POST',
-      headers: internalHeaders,
-      body: JSON.stringify({
-        eventType: 'SUCCEEDED',
-        jobId: failedPreviewUpload.job.id,
-        documentId: failedPreviewUpload.document.id,
-        attemptCount: 1,
-        chunks: [{
-          chunkIndex: 0,
-          vectorNodeId: crypto.randomUUID(),
-          chunkText: failedPreviewText,
-          contentHash: crypto.createHash('sha256').update(failedPreviewText).digest('hex'),
-          pageNumber: null
-        }]
-      })
-    });
     let failedPreviewDetail = null;
-    for (let attempt = 0; attempt < 40; attempt += 1) {
+    for (let attempt = 0; attempt < 80; attempt += 1) {
       failedPreviewDetail = (await request(
         `/api/documents/${failedPreviewUpload.document.id}`,
         { headers: auth(teacher1Token) }
       )).payload.data.document;
-      if (failedPreviewDetail.previewStatus !== 'PENDING') break;
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      if (failedPreviewDetail.processingStatus === 'FAILED') break;
+      await new Promise((resolve) => setTimeout(resolve, 250));
     }
     assert.equal(failedPreviewDetail.previewStatus, 'FAILED');
     assert.equal(failedPreviewDetail.pageCount, null);
-    assert.equal(failedPreviewDetail.processingStatus, 'READY');
+    assert.equal(failedPreviewDetail.processingStatus, 'FAILED');
     assert.equal(failedPreviewDetail.originalAvailable, true);
     assert.equal(failedPreviewDetail.previewAvailable, false);
+    const failedIngestJob = (await request(
+      `/api/documents/jobs/${failedPreviewUpload.job.id}`,
+      { headers: auth(teacher1Token) }
+    )).payload.data;
+    assert.equal(failedIngestJob.status, 'FAILED');
+    assert.equal(failedIngestJob.attemptCount, 0, 'Conversion failure must not dispatch Python.');
     const failedPreviewSource = await fetch(
       `${base}/api/documents/${failedPreviewUpload.document.id}/file`,
       { headers: auth(teacher1Token), signal: AbortSignal.timeout(15_000) }
@@ -1278,6 +1362,7 @@ async function main() {
     await request(`/api/library/documents/${documentId}`, { headers: auth(studentToken) }, 404);
     await request(`/api/library/documents/${documentId}/source`, { headers: auth(studentToken) }, 404);
     await request(`/api/library/documents/${documentId}/preview`, { headers: auth(studentToken) }, 404);
+    await request(`/api/library/documents/${documentId}/download`, { headers: auth(studentToken) }, 404);
     await request(`/api/documents/${documentId}/unhide`, { method: 'POST', headers: auth(teacher1Token) }, 202);
 
     process.env.RAG_MOCK_SOURCE_VECTOR_NODE_ID = vectorNodeId;
@@ -1429,6 +1514,10 @@ async function main() {
       }, 409);
       assert.equal(missingSource.payload.errorCode, 'ORIGINAL_SOURCE_UNAVAILABLE');
       assert(!JSON.stringify(missingSource.payload).includes(process.env.UPLOAD_DIR));
+      const missingDownload = await request(`/api/library/documents/${documentId}/download`, {
+        headers: auth(token)
+      }, 409);
+      assert.equal(missingDownload.payload.errorCode, 'CANONICAL_DOWNLOAD_UNAVAILABLE');
     }
     const missingOriginalCitation = (await request(`/api/citations/${citationId}/source`, {
       headers: auth(studentToken)
@@ -1443,6 +1532,7 @@ async function main() {
     await request(`/api/library/documents/${documentId}`, { headers: auth(studentToken) }, 404);
     await request(`/api/library/documents/${documentId}/preview`, { headers: auth(studentToken) }, 404);
     await request(`/api/library/documents/${documentId}/source`, { headers: auth(studentToken) }, 404);
+    await request(`/api/library/documents/${documentId}/download`, { headers: auth(studentToken) }, 404);
     const hiddenCitation = (await request(`/api/citations/${citationId}/source`, {
       headers: auth(studentToken)
     })).payload.data;
@@ -1450,7 +1540,7 @@ async function main() {
     assert.equal(Number(hiddenCitation.documentId), Number(documentId));
     assert.equal(hiddenCitation.pageNumber, 1);
     assert.equal(hiddenCitation.sourceText, 'Mock source fragment.');
-    await request(`/api/citations/${citationId}/file`, { headers: auth(studentToken) }, 409);
+    await request(`/api/citations/${citationId}/file`, { headers: auth(studentToken) }, 403);
     await request(`/api/documents/${documentId}`, { method: 'DELETE', headers: auth(teacher1Token) }, 202);
     await request(`/api/library/documents/${documentId}`, { headers: auth(studentToken) }, 404);
     const deletedCitation = (await request(`/api/citations/${citationId}`, {

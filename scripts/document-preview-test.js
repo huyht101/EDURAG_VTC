@@ -16,6 +16,7 @@ const documentService = require('../src/services/document-service');
 const libraryService = require('../src/services/library-service');
 const documentDto = require('../src/services/document-dto-service');
 const previewService = require('../src/services/document-preview-service');
+const ingestService = require('../src/services/document-ingest-service');
 const {
   inlineContentDisposition,
   sanitizeFilename
@@ -62,6 +63,73 @@ async function testPdfCountAndMetadata() {
   assert.equal(documentService.initialPreview({ fileType: 'TXT' }).previewStatus, 'NOT_APPLICABLE');
   assert(validateDocumentUpdate({ pageCount: 99 })?.error);
   assert.equal(validateDocumentUpdate({ description: null, author: 'A&B' }), null);
+}
+
+async function testUploadDispatchOrdering() {
+  async function run(fileType) {
+    const state = { dispatches: [], removed: [], jobs: new Map(), createdDocument: null };
+    let nextJobId = 20;
+    const stored = {
+      storageType: 'LOCAL',
+      storageKey: `documents/original.${fileType.toLowerCase()}`,
+      originalFilename: `original.${fileType.toLowerCase()}`,
+      fileType,
+      mimeType: fileType === 'PDF' ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      fileSizeBytes: 10,
+      checksumSha256: 'a'.repeat(64),
+      pageCount: fileType === 'PDF' ? 1 : null
+    };
+    const dependencies = {
+      fileService: {
+        async persist() { return stored; },
+        async remove(key) { state.removed.push(key); }
+      },
+      documentRepo: {
+        async createDocument(document) {
+          state.createdDocument = { id: 11, ...document };
+          return 11;
+        },
+        async findById() { return state.createdDocument; }
+      },
+      jobRepo: {
+        async createJob(job) {
+          nextJobId += 1;
+          state.jobs.set(nextJobId, {
+            id: nextJobId,
+            document_id: job.documentId,
+            job_type: job.jobType,
+            status: 'QUEUED',
+            attempt_count: 0,
+            max_attempts: 3
+          });
+          return nextJobId;
+        },
+        async findById(id) { return state.jobs.get(id); }
+      },
+      ingestService: {
+        async dispatchIngest(jobId) { state.dispatches.push(jobId); }
+      },
+      publicDocument: async (document) => ({ id: document.id }),
+      withTransaction: async (work) => work({})
+    };
+    const result = await documentService.uploadDocument(
+      { id: 4, role: 'TEACHER' },
+      { originalname: stored.originalFilename },
+      {},
+      dependencies
+    );
+    return { state, result };
+  }
+
+  const docx = await run('DOCX');
+  assert.equal(docx.state.dispatches.length, 0, 'DOCX must not call Python before conversion.');
+  assert.equal(docx.result.job.status, 'QUEUED');
+  assert.equal(docx.result.previewJob.status, 'QUEUED');
+  assert.equal(docx.state.removed.length, 0, 'Original DOCX must be retained.');
+
+  const pdf = await run('PDF');
+  assert.equal(pdf.state.dispatches.length, 1, 'PDF keeps immediate post-commit ingest dispatch.');
+  assert.equal(pdf.result.previewJob, null);
 }
 
 function decodedExtendedFilename(header) {
@@ -199,9 +267,18 @@ function fakePreviewDependencies(document) {
       attempt_count: 1,
       max_attempts: 3
     },
+    ingestJob: {
+      id: 10,
+      document_id: document.id,
+      job_type: 'INGEST',
+      status: 'QUEUED',
+      attempt_count: 0,
+      max_attempts: 3
+    },
     files: new Map([['documents/source.docx', Buffer.from('original')]]),
     jobSucceeded: false,
-    jobFailed: false
+    jobFailed: false,
+    ingestPayloads: []
   };
   const documentRepo = {
     async findById() { return { ...state.document }; },
@@ -213,17 +290,42 @@ function fakePreviewDependencies(document) {
         preview_mime_type: update.mimeType,
         page_count: update.pageCount
       });
+    },
+    async updateProcessingStatus(_id, status) {
+      state.document.processing_status = status;
     }
   };
   const jobRepo = {
-    async findByIdForUpdate() { return { ...state.job }; },
-    async markSucceeded() {
-      state.job.status = 'SUCCEEDED';
-      state.jobSucceeded = true;
+    async findById(id) {
+      return { ...(Number(id) === state.ingestJob.id ? state.ingestJob : state.job) };
     },
-    async markFailed() {
-      state.job.status = 'FAILED';
-      state.jobFailed = true;
+    async findByIdForUpdate(id) {
+      return { ...(Number(id) === state.ingestJob.id ? state.ingestJob : state.job) };
+    },
+    async findLatestByType(_documentId, jobType) {
+      return jobType === 'INGEST' ? { ...state.ingestJob } : { ...state.job };
+    },
+    async markRunning(id) {
+      if (Number(id) !== state.ingestJob.id || state.ingestJob.status !== 'QUEUED') return false;
+      state.ingestJob.status = 'RUNNING';
+      state.ingestJob.attempt_count += 1;
+      return true;
+    },
+    async markSucceeded(id) {
+      if (Number(id) === state.job.id) {
+        state.job.status = 'SUCCEEDED';
+        state.jobSucceeded = true;
+      }
+    },
+    async markFailed(id) {
+      if (Number(id) === state.ingestJob.id) state.ingestJob.status = 'FAILED';
+      else {
+        state.job.status = 'FAILED';
+        state.jobFailed = true;
+      }
+    },
+    async markDispatchFailed() {
+      state.ingestJob.status = 'FAILED';
     }
   };
   const fileService = {
@@ -237,13 +339,25 @@ function fakePreviewDependencies(document) {
     },
     async remove(key) { state.files.delete(key); }
   };
-  return {
+  const dependencies = {
     state,
     documentRepo,
     jobRepo,
     fileService,
-    withTransaction: async (callback) => callback({})
+    withTransaction: async (callback) => callback({}),
+    ingestDependencies: {
+      withTransaction: async (callback) => callback({}),
+      documentRepo,
+      jobRepo,
+      ragClient: {
+        async startIngest(payload) {
+          state.ingestPayloads.push(payload);
+          return { accepted: true };
+        }
+      }
+    }
   };
+  return dependencies;
 }
 
 async function testPreviewSuccessFailureAndRetry() {
@@ -256,7 +370,7 @@ async function testPreviewSuccessFailureAndRetry() {
     preview_mime_type: null,
     page_count: null,
     visibility_status: 'VISIBLE',
-    processing_status: 'READY'
+    processing_status: 'UPLOADED'
   };
   const success = fakePreviewDependencies(base);
   const result = await previewService.processClaimedJob(success.state.job, {
@@ -270,7 +384,18 @@ async function testPreviewSuccessFailureAndRetry() {
   assert.equal(result.status, 'SUCCEEDED');
   assert.equal(success.state.document.preview_status, 'READY');
   assert.equal(success.state.document.page_count, 2);
-  assert.equal(success.state.document.processing_status, 'READY');
+  assert.equal(success.state.document.processing_status, 'PROCESSING');
+  assert.equal(success.state.ingestPayloads.length, 1);
+  assert.equal(success.state.ingestPayloads[0].file.storageKey, success.state.document.preview_storage_key);
+  assert.equal(success.state.ingestPayloads[0].file.fileType, 'PDF');
+  assert(!success.state.ingestPayloads[0].file.storageKey.endsWith('.docx'));
+  const duplicateDispatch = await ingestService.dispatchIngest(
+    success.state.ingestJob.id,
+    success.ingestDependencies
+  );
+  assert.equal(duplicateDispatch.reason, 'ALREADY_RUNNING');
+  assert.equal(success.state.ingestPayloads.length, 1, 'Retry must not duplicate an effective dispatch.');
+  assert.equal(success.state.ingestJob.attempt_count, 1);
   assert(success.state.files.has(success.state.document.preview_storage_key));
   assert(success.state.jobSucceeded);
 
@@ -286,7 +411,8 @@ async function testPreviewSuccessFailureAndRetry() {
   assert.equal(failure.status, 'FAILED');
   assert.equal(failed.state.document.preview_status, 'FAILED');
   assert.equal(failed.state.document.page_count, null);
-  assert.equal(failed.state.document.processing_status, 'READY');
+  assert.equal(failed.state.document.processing_status, 'UPLOADED');
+  assert.equal(failed.state.ingestPayloads.length, 0, 'Conversion failure must not dispatch ingest.');
   assert(failed.state.files.has(base.storage_key), 'Original DOCX must remain after preview failure.');
   assert(failed.state.jobFailed);
 
@@ -303,8 +429,63 @@ async function testPreviewSuccessFailureAndRetry() {
     ...retry,
     convert: async () => { converted = true; }
   });
-  assert.deepEqual(replay, { status: 'SUCCEEDED', reused: true });
+  assert.deepEqual(replay, { status: 'SUCCEEDED', reused: true, dispatchError: null });
   assert.equal(converted, false);
+  assert.equal(retry.state.ingestPayloads.length, 1);
+
+  const terminal = fakePreviewDependencies(base);
+  terminal.state.job.attempt_count = 3;
+  const terminalFailure = await previewService.processClaimedJob(terminal.state.job, {
+    ...terminal,
+    convert: async () => {
+      const error = new Error('conversion failed permanently');
+      error.code = 'PREVIEW_CONVERSION_FAILED';
+      throw error;
+    }
+  });
+  assert.equal(terminalFailure.status, 'FAILED');
+  assert.equal(terminal.state.ingestJob.status, 'FAILED');
+  assert.equal(terminal.state.document.processing_status, 'FAILED');
+  assert.equal(terminal.state.ingestPayloads.length, 0);
+}
+
+async function testUnknownDispatchKeepsAttemptIdentity() {
+  const dependencies = fakePreviewDependencies({
+    id: 55,
+    file_type: 'DOCX',
+    storage_type: 'LOCAL',
+    storage_key: 'documents/source.docx',
+    mime_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    checksum_sha256: 'a'.repeat(64),
+    preview_status: 'READY',
+    preview_storage_key: 'previews/55/canonical.pdf',
+    preview_mime_type: 'application/pdf',
+    page_count: 2,
+    visibility_status: 'VISIBLE',
+    processing_status: 'UPLOADED'
+  });
+  let requests = 0;
+  dependencies.ingestDependencies.ragClient = {
+    async startIngest() {
+      requests += 1;
+      const error = new Error('ambiguous timeout');
+      error.code = 'RAG_REQUEST_TIMEOUT';
+      throw error;
+    }
+  };
+  await assert.rejects(
+    () => ingestService.dispatchIngest(dependencies.state.ingestJob.id, dependencies.ingestDependencies),
+    (error) => error.code === 'RAG_REQUEST_TIMEOUT'
+  );
+  assert.equal(dependencies.state.ingestJob.status, 'RUNNING');
+  assert.equal(dependencies.state.ingestJob.attempt_count, 1);
+  const retry = await ingestService.dispatchIngest(
+    dependencies.state.ingestJob.id,
+    dependencies.ingestDependencies
+  );
+  assert.equal(retry.reason, 'ALREADY_RUNNING');
+  assert.equal(requests, 1);
+  assert.equal(dependencies.state.ingestJob.attempt_count, 1);
 }
 
 async function testLibreOfficeArgumentsAreIsolated() {
@@ -348,7 +529,7 @@ async function testDtoSafetyAndMigrationParser() {
     created_at: new Date(),
     updated_at: new Date()
   };
-  const dto = await documentDto.libraryDocument(record, {
+  const dto = await documentDto.libraryDocument(record, { id: 2, role: 'STUDENT' }, {
     async exists() { return true; }
   });
   assert.equal(dto.previewAvailable, true);
@@ -436,9 +617,11 @@ async function testBackfillBehavior() {
 
 async function main() {
   await testPdfCountAndMetadata();
+  await testUploadDispatchOrdering();
   await testUnicodePreviewHeadersAndBytes();
   await testUnicodeSourceHeadersRemainAttachments();
   await testPreviewSuccessFailureAndRetry();
+  await testUnknownDispatchKeepsAttemptIdentity();
   await testLibreOfficeArgumentsAreIsolated();
   await testDtoSafetyAndMigrationParser();
   await testBackfillBehavior();

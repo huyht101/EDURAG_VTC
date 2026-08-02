@@ -46,12 +46,21 @@ function encodeRfc5987(value) {
     ));
 }
 
-function inlineContentDisposition(filename) {
+function contentDisposition(disposition, filename) {
   const safe = sanitizeFilename(filename);
-  return `inline; filename="${asciiFallback(safe)}"; filename*=UTF-8''${encodeRfc5987(safe)}`;
+  return `${disposition}; filename="${asciiFallback(safe)}"; filename*=UTF-8''${encodeRfc5987(safe)}`;
+}
+
+function inlineContentDisposition(filename) {
+  return contentDisposition('inline', filename);
+}
+
+function attachmentContentDisposition(filename) {
+  return contentDisposition('attachment', filename);
 }
 
 module.exports = {
+  attachmentContentDisposition,
   inlineContentDisposition,
   sanitizeFilename
 };

@@ -5,7 +5,7 @@
 - TEACHER ownership and ADMIN global access are enforced in both route and service layers.
 - Upload writes the generated local file before the document/job transaction and compensates by deleting that file if the transaction fails.
 - DOCX upload validates bounded OOXML central-directory members, encryption/traversal/symlink indicators and expansion limits before persistence; arbitrary ZIP is rejected.
-- Ingest dispatch happens after commit. Remote failure marks job/document `FAILED`, retains the original file and returns 503; no durable retry is promised.
+- PDF/TXT INGEST dispatch happens after commit. DOCX INGEST remains `QUEUED` until the durable preview worker validates and atomic-publishes a persistent canonical PDF; it then dispatches that `.pdf` with the same ingest request contract. Terminal conversion failure fails preview/INGEST/document without calling Python and retains original DOCX. Ambiguous dispatch timeout preserves the exact RUNNING attempt for callback; definitive rejection/failure marks INGEST/document `FAILED`.
 - Mock ingest is accepted but still requires the internal callback to make the document `READY`.
 - Callback normalizes Python `chunk_manifest` or compatibility alias `chunks`, locks job/document rows, checks `jobId + attemptCount`, acknowledges duplicate/stale callbacks, and persists one complete manifest transactionally. Preview-only manifests remain invalid.
 - Hide/unhide/delete use existing operation job types. Mock operations complete immediately; remote operations stay `RUNNING` until callback.

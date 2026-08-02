@@ -12,11 +12,11 @@ function parseId(value) {
   return id;
 }
 
-async function publicDocument(document, files = fileService) {
-  return documentDto.libraryDocument(document, files);
+async function publicDocument(document, user, files = fileService) {
+  return documentDto.libraryDocument(document, user, files);
 }
 
-async function listDocuments(query = {}, dependencies = {}) {
+async function listDocuments(user, query = {}, dependencies = {}) {
   const repository = dependencies.repository || libraryRepo;
   const files = dependencies.fileService || fileService;
   const filters = normalizeListQuery(query);
@@ -27,23 +27,26 @@ async function listDocuments(query = {}, dependencies = {}) {
     limit: filters.limit,
     total: result.total,
     totalPages: Math.ceil(result.total / filters.limit),
-    documents: await Promise.all(result.documents.map((document) => publicDocument(document, files)))
+    documents: await Promise.all(result.documents.map((document) => publicDocument(document, user, files)))
   };
 }
 
-async function getDocument(idValue, dependencies = {}) {
+async function getDocument(user, idValue, dependencies = {}) {
   const repository = dependencies.repository || libraryRepo;
   const files = dependencies.fileService || fileService;
   const document = await repository.findEligibleById(parseId(idValue));
   if (!document) throw appError(404, 'LIBRARY_DOCUMENT_NOT_FOUND', 'Không tìm thấy tài liệu.');
-  return { document: await publicDocument(document, files) };
+  return { document: await publicDocument(document, user, files) };
 }
 
-async function openSource(idValue, dependencies = {}) {
+async function openSource(user, idValue, dependencies = {}) {
   const repository = dependencies.repository || libraryRepo;
   const files = dependencies.fileService || fileService;
   const document = await repository.findEligibleById(parseId(idValue));
   if (!document) throw appError(404, 'LIBRARY_DOCUMENT_NOT_FOUND', 'Không tìm thấy tài liệu.');
+  if (!documentDto.canUseLibraryOriginal(user, document)) {
+    throw appError(403, 'ORIGINAL_DOWNLOAD_FORBIDDEN', 'Bạn không được tải original file này.');
+  }
   if (!(await files.exists(document.storage_key))) {
     throw appError(409, 'ORIGINAL_SOURCE_UNAVAILABLE', 'File gốc hiện không khả dụng.');
   }
@@ -61,7 +64,7 @@ async function openSource(idValue, dependencies = {}) {
   }
 }
 
-async function openPreview(idValue, dependencies = {}) {
+async function openPreview(_user, idValue, dependencies = {}) {
   const repository = dependencies.repository || libraryRepo;
   const files = dependencies.fileService || fileService;
   const document = await repository.findEligibleById(parseId(idValue));
@@ -84,4 +87,35 @@ async function openPreview(idValue, dependencies = {}) {
   }
 }
 
-module.exports = { listDocuments, getDocument, openSource, openPreview, publicDocument, parseId };
+async function openDownload(_user, idValue, dependencies = {}) {
+  const repository = dependencies.repository || libraryRepo;
+  const files = dependencies.fileService || fileService;
+  const document = await repository.findEligibleById(parseId(idValue));
+  if (!document) throw appError(404, 'LIBRARY_DOCUMENT_NOT_FOUND', 'Không tìm thấy tài liệu.');
+  const artifact = documentDto.canonicalDownloadArtifact(document);
+  if (!artifact || !(await files.exists(artifact.storageKey))) {
+    throw appError(409, 'CANONICAL_DOWNLOAD_UNAVAILABLE', 'File tải canonical hiện không khả dụng.');
+  }
+  try {
+    return {
+      ...(await files.open(artifact.storageKey)),
+      filename: documentDto.canonicalDownloadFilename(document, artifact),
+      mimeType: artifact.mimeType
+    };
+  } catch (error) {
+    if (error.code === 'FILE_NOT_FOUND') {
+      throw appError(409, 'CANONICAL_DOWNLOAD_UNAVAILABLE', 'File tải canonical hiện không khả dụng.');
+    }
+    throw error;
+  }
+}
+
+module.exports = {
+  listDocuments,
+  getDocument,
+  openSource,
+  openPreview,
+  openDownload,
+  publicDocument,
+  parseId
+};

@@ -113,7 +113,7 @@ Mỗi chunk bắt buộc:
 - full `chunk_text`;
 - SHA-256 `content_hash` khớp chính xác `chunk_text`.
 
-Optional: `token_count`, `page_number`, `section_title`, `chapter`, `section`, `source_locator`. `page_number` là 1-based khi có; TXT/DOCX có thể dùng synthetic segment thay vì trang vật lý. `page_number <= 0` được normalize thành `null`.
+Optional: `token_count`, `page_number`, `section_title`, `chapter`, `section`, `source_locator`. `page_number` là 1-based khi có. `source_locator` là `null` hoặc `{boxes:[{x,y,width,height}, ...]}` với finite normalized 0–1 coordinates, top-left origin, positive size và box nằm trọn trong trang; Node reject locator sai thay vì sửa. Với DOCX upload mới, Python nhận canonical PDF do Node publish nên page/locator phải theo PDF đó. TXT có thể giữ synthetic segment nội bộ; `page_number <= 0` được normalize thành `null`.
 
 NodeJS không nhận `text_preview` thay full text, không tự hash preview và không sinh fake vector ID.
 
@@ -130,7 +130,7 @@ MVP không dùng full two-phase callback. Nếu activation Qdrant thất bại s
 
 Current snapshot dùng deterministic RFC-4122 UUID5 từ document/job/attempt/chunk index cho cả Qdrant point ID và `chunk_id`, gửi full `chunk_text`, SHA-256 lowercase `content_hash`, optional page/heading và giữ nguyên processing `attempt_count` khi callback HTTP retry. Cùng attempt retry overwrite cùng point; attempt khác có point identity khác. `source_locator` chưa được Python tạo nhưng vẫn optional.
 
-`page_count`/`pageCount` không đi qua RAG callback: Node tự đếm original PDF hoặc generated DOCX PDF preview. Python `page_number` chỉ là locator của chunk/citation; DOCX/TXT synthetic segment không được diễn giải thành preview page.
+`page_count`/`pageCount` không đi qua RAG callback: Node tự đếm original PDF hoặc canonical DOCX-derived PDF. Ingest body không đổi: Node gửi `doc_id`, `job_id`, `attempt_count`, `file_path`, `callback_url`; DOCX `file_path` trỏ tới persistent derived `.pdf`, không phải original `.docx`. Complete-manifest/ACK/activate lifecycle không đổi.
 
 `gemini-embedding-001` trả 3072 chiều theo SDK mặc định. Snapshot integration overlay cấu hình `embedding_config.output_dimensionality=EMBEDDING_DIMENSION` để giữ agreed dimension `768`; Qdrant đã từ chối upsert trước patch và live ingest đã PASS sau patch. Thay đổi này cần upstream về Python repository.
 

@@ -1,4 +1,5 @@
 const appError = require('../utils/app-error');
+const { validateSourceLocator } = require('../utils/source-locator');
 const { resolveSharedUploadPath } = require('../storage/shared-upload-path');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -110,13 +111,19 @@ function normalizeCitation(citation) {
       'Python citation must include vector_node_id and source_text.'
     );
   }
+  let sourceLocator;
+  try {
+    sourceLocator = validateSourceLocator(citation.source_locator ?? null);
+  } catch (_error) {
+    throw appError(502, 'RAG_CITATION_INVALID', 'Python citation source_locator không hợp lệ.');
+  }
   return {
     vectorNodeId,
     sourceText,
     documentId: citation.doc_id ?? null,
     pageNumber: pageNumber(citation.page_number),
     sectionTitle: citation.section_title ?? citation.chapter ?? citation.section ?? null,
-    sourceLocator: citation.source_locator ?? null,
+    sourceLocator,
     retrievalScore: citation.retrieval_score ?? null,
     rerankScore: citation.rerank_score ?? null
   };

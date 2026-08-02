@@ -7,7 +7,7 @@ function db(executor) {
 }
 
 const SELECT_FIELDS = `
-  d.id, d.title, d.description, d.author, d.file_type, d.file_size_bytes,
+  d.id, d.uploaded_by, d.title, d.description, d.author, d.file_type, d.file_size_bytes,
   d.storage_key, d.original_filename, d.mime_type, d.page_count,
   d.preview_status, d.preview_storage_key, d.preview_mime_type,
   d.created_at, d.updated_at,

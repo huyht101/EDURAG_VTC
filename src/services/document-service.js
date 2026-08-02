@@ -10,6 +10,7 @@ const jobRepo = require('../repositories/processing-job-repository');
 const fileService = require('./document-file-service');
 const documentDto = require('./document-dto-service');
 const { getRagClient } = require('../clients/rag-client');
+const ingestService = require('./document-ingest-service');
 const appError = require('../utils/app-error');
 const { normalizeListQuery } = require('../utils/document-list-query');
 
@@ -105,41 +106,22 @@ function initialPreview(stored) {
   };
 }
 
-function isIngestDispatchOutcomeUnknown(error) {
-  return error?.code === 'RAG_REQUEST_TIMEOUT';
-}
-
-async function recordIngestDispatchFailure(documentId, jobId, error, dependencies = {}) {
-  if (isIngestDispatchOutcomeUnknown(error)) return false;
-  const runTransaction = dependencies.withTransaction || withTransaction;
-  const jobs = dependencies.jobRepo || jobRepo;
+async function uploadDocument(user, file, metadataInput = {}, dependencies = {}) {
+  const files = dependencies.fileService || fileService;
   const documents = dependencies.documentRepo || documentRepo;
-  await runTransaction(async (connection) => {
-    await jobs.markDispatchFailed(
-      jobId,
-      error.code || 'RAG_DISPATCH_FAILED',
-      error.message,
-      connection
-    );
-    await documents.updateProcessingStatus(
-      documentId,
-      DOCUMENT_STATUSES.processing.FAILED,
-      connection
-    );
-  });
-  return true;
-}
-
-async function uploadDocument(user, file, metadataInput = {}) {
+  const jobs = dependencies.jobRepo || jobRepo;
+  const runTransaction = dependencies.withTransaction || withTransaction;
+  const dispatcher = dependencies.ingestService || ingestService;
+  const serialize = dependencies.publicDocument || publicDocument;
   const metadata = normalizeUploadMetadata(file, metadataInput);
-  const stored = await fileService.persist(file);
+  const stored = await files.persist(file);
 
   let documentId;
   let jobId;
   let previewJobId = null;
   try {
-    ({ documentId, jobId, previewJobId } = await withTransaction(async (connection) => {
-      const createdDocumentId = await documentRepo.createDocument({
+    ({ documentId, jobId, previewJobId } = await runTransaction(async (connection) => {
+      const createdDocumentId = await documents.createDocument({
         uploadedBy: user.id,
         ...metadata,
         ...stored,
@@ -147,12 +129,12 @@ async function uploadDocument(user, file, metadataInput = {}) {
         processingStatus: DOCUMENT_STATUSES.processing.UPLOADED,
         visibilityStatus: DOCUMENT_STATUSES.visibility.VISIBLE
       }, connection);
-      const createdJobId = await jobRepo.createJob({
+      const createdJobId = await jobs.createJob({
         documentId: createdDocumentId,
         jobType: JOB_TYPES.INGEST
       }, connection);
       const createdPreviewJobId = stored.fileType === 'DOCX'
-        ? await jobRepo.createJob({
+        ? await jobs.createJob({
           documentId: createdDocumentId,
           jobType: JOB_TYPES.GENERATE_PDF_PREVIEW,
           jobConfig: { sourceFileType: stored.fileType }
@@ -165,51 +147,26 @@ async function uploadDocument(user, file, metadataInput = {}) {
       };
     }));
   } catch (error) {
-    await fileService.remove(stored.storageKey);
+    await files.remove(stored.storageKey);
     throw error;
   }
 
-  const job = await withTransaction(async (connection) => {
-    const started = await jobRepo.markRunning(jobId, connection);
-    if (!started) throw appError(409, 'JOB_NOT_DISPATCHABLE', 'Processing job không thể dispatch.');
-    await documentRepo.updateProcessingStatus(
-      documentId,
-      DOCUMENT_STATUSES.processing.PROCESSING,
-      connection
-    );
-    return jobRepo.findById(jobId, connection);
-  });
-
-  try {
-    const dispatch = await getRagClient().startIngest({
-      jobId: String(jobId),
-      attemptCount: job.attempt_count,
-      documentId: String(documentId),
-      file: {
-        storageType: stored.storageType,
-        storageKey: stored.storageKey,
-        fileType: stored.fileType,
-        mimeType: stored.mimeType,
-        checksumSha256: stored.checksumSha256
-      }
-    });
-    if (!dispatch.accepted) throw appError(503, 'RAG_DISPATCH_REJECTED', 'Python RAG service từ chối ingest job.');
-  } catch (error) {
-    // A timed-out dispatch request is ambiguous: Python may still finish and callback.
-    // Keep the exact RUNNING attempt eligible for its complete-manifest instead of
-    // turning a transport timeout into a definitive whole-document failure.
-    await recordIngestDispatchFailure(documentId, jobId, error);
-    throw appError(503, error.code || 'RAG_DISPATCH_FAILED', 'Không thể dispatch document sang RAG service.', {
-      documentId,
-      jobId
-    });
+  if (stored.fileType !== 'DOCX') {
+    try {
+      await dispatcher.dispatchIngest(jobId);
+    } catch (error) {
+      throw appError(503, error.code || 'RAG_DISPATCH_FAILED', 'Không thể dispatch document sang RAG service.', {
+        documentId,
+        jobId
+      });
+    }
   }
 
-  const document = await documentRepo.findById(documentId);
+  const document = await documents.findById(documentId);
   return {
-    document: await publicDocument(document),
-    job: publicJob(await jobRepo.findById(jobId)),
-    previewJob: previewJobId ? publicJob(await jobRepo.findById(previewJobId)) : null
+    document: await serialize(document),
+    job: publicJob(await jobs.findById(jobId)),
+    previewJob: previewJobId ? publicJob(await jobs.findById(previewJobId)) : null
   };
 }
 
@@ -417,6 +374,6 @@ module.exports = {
   normalizeUploadMetadata,
   normalizeUpdateMetadata,
   initialPreview,
-  isIngestDispatchOutcomeUnknown,
-  recordIngestDispatchFailure
+  isIngestDispatchOutcomeUnknown: ingestService.isIngestDispatchOutcomeUnknown,
+  recordIngestDispatchFailure: ingestService.recordIngestDispatchFailure
 };

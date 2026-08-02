@@ -9,6 +9,8 @@ const citationRepo = require('../repositories/citation-repository');
 const usageRepo = require('../repositories/usage-repository');
 const { getRagClient } = require('../clients/rag-client');
 const appError = require('../utils/app-error');
+const { readSourceLocator, validateSourceLocator } = require('../utils/source-locator');
+const { citationUrls } = require('./citation-url-service');
 
 const USAGE_OPERATIONS = ['QUERY_REWRITE', 'ANSWER_GENERATION', 'REFINE', 'OTHER'];
 const USAGE_STATUSES = ['SUCCEEDED', 'FAILED'];
@@ -30,7 +32,7 @@ function publicSession(session) {
   };
 }
 
-function publicCitation(row) {
+function publicCitation(row, user) {
   return {
     id: row.id,
     messageId: row.message_id,
@@ -41,9 +43,10 @@ function publicCitation(row) {
     pageNumber: row.page_number_snapshot,
     sectionTitle: row.section_title_snapshot,
     sourceText: row.source_text_snapshot,
-    sourceLocator: row.source_locator_snapshot,
+    sourceLocator: readSourceLocator(row.source_locator_snapshot),
     retrievalScore: row.retrieval_score,
-    rerankScore: row.rerank_score
+    rerankScore: row.rerank_score,
+    ...citationUrls(user, row)
   };
 }
 
@@ -92,7 +95,7 @@ async function getHistory(user, idValue, query = {}) {
   const byMessage = new Map();
   for (const citation of citations) {
     const list = byMessage.get(citation.message_id) || [];
-    list.push(publicCitation(citation));
+    list.push(publicCitation(citation, user));
     byMessage.set(citation.message_id, list);
   }
   return {
@@ -113,7 +116,7 @@ async function deleteSession(user, idValue) {
   });
 }
 
-async function duplicateResult(pair) {
+async function duplicateResult(pair, user) {
   const citations = pair.assistant_message_id
     ? await citationRepo.listByMessageIds([pair.assistant_message_id]) : [];
   return {
@@ -126,7 +129,7 @@ async function duplicateResult(pair) {
       content: pair.answer,
       noAnswer: Boolean(pair.no_answer),
       errorCode: pair.error_code,
-      citations: citations.map(publicCitation)
+      citations: citations.map((citation) => publicCitation(citation, user))
     } : null
   };
 }
@@ -138,12 +141,6 @@ function resolveClientRequestId(value) {
   }
   const normalized = value.trim();
   return normalized || crypto.randomUUID();
-}
-
-function normalizeSourceLocator(value) {
-  if (!value) return null;
-  if (typeof value === 'object') return value;
-  try { return JSON.parse(value); } catch (_error) { return null; }
 }
 
 async function mapCitations(sources) {
@@ -161,7 +158,14 @@ async function mapCitations(sources) {
     const row = byVector.get(source.vectorNodeId);
     const pageNumber = source.pageNumber ?? row?.page_number ?? null;
     const sectionTitle = source.sectionTitle ?? row?.section_title ?? null;
-    const sourceLocator = source.sourceLocator ?? normalizeSourceLocator(row?.source_locator);
+    let sourceLocator;
+    try {
+      sourceLocator = source.sourceLocator === undefined || source.sourceLocator === null
+        ? (source.sourceText === row?.chunk_text ? readSourceLocator(row?.source_locator) : null)
+        : validateSourceLocator(source.sourceLocator);
+    } catch (_error) {
+      throw appError(502, 'RAG_SOURCE_UNVERIFIABLE', 'RAG source locator không hợp lệ.');
+    }
     const scores = [source.retrievalScore, source.rerankScore]
       .filter((value) => value !== undefined && value !== null);
     if (!row || row.processing_status !== 'READY' || row.visibility_status !== 'VISIBLE'
@@ -169,7 +173,6 @@ async function mapCitations(sources) {
       || Buffer.byteLength(source.sourceText, 'utf8') > 65535
       || (pageNumber !== null && (!Number.isInteger(pageNumber) || pageNumber < 1))
       || (sectionTitle !== null && (typeof sectionTitle !== 'string' || sectionTitle.length > 500))
-      || (sourceLocator !== null && (typeof sourceLocator !== 'object' || Array.isArray(sourceLocator)))
       || scores.some((value) => !Number.isFinite(Number(value)))) {
       throw appError(502, 'RAG_SOURCE_UNVERIFIABLE', 'Không thể xác minh structured source từ RAG service.');
     }
@@ -302,7 +305,7 @@ async function sendMessage(user, idValue, body) {
       if (error.code === 'ER_DUP_ENTRY' || error.code === 'ER_LOCK_DEADLOCK') {
         const duplicate = await messageRepo.findRequestPair(requestId);
         if (duplicate) {
-          if (Number(duplicate.session_id) === sessionId) return duplicateResult(duplicate);
+          if (Number(duplicate.session_id) === sessionId) return duplicateResult(duplicate, user);
           throw appError(409, 'CLIENT_REQUEST_ID_CONFLICT', 'clientRequestId đã được dùng cho session khác.');
         }
         if (error.code === 'ER_LOCK_DEADLOCK' && attempt < 3) {
@@ -314,7 +317,7 @@ async function sendMessage(user, idValue, body) {
     }
   }
 
-  if (prepared.duplicate) return duplicateResult(prepared.duplicate);
+  if (prepared.duplicate) return duplicateResult(prepared.duplicate, user);
 
   const history = await messageRepo.loadHistoryWindow(
     sessionId,
@@ -376,7 +379,7 @@ async function sendMessage(user, idValue, body) {
         status: 'COMPLETED',
         content: result.answer,
         noAnswer: result.noAnswer,
-        citations: persistedCitations.map(publicCitation)
+        citations: persistedCitations.map((citation) => publicCitation(citation, user))
       }
     };
   } catch (error) {
