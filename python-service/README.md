@@ -42,8 +42,7 @@ pip install -r requirements.txt
 
 ```bash
 cp .env.example .env
-# Điền GOOGLE_API_KEY, INTERNAL_SECRET, LLAMA_CLOUD_API_KEY
-# Chỉnh OCR_MODE=AUTO nếu muốn dùng nhận dạng ảnh/scan.
+# Điền GOOGLE_API_KEY, INTERNAL_SECRET (phải trùng Node.js), LLAMA_CLOUD_API_KEY
 ```
 
 ### Chạy standalone (dev)
@@ -85,9 +84,9 @@ Node.js gửi POST /api/ingest
       1. Parse file (LlamaParse → fallback pypdf/docx/txt)
       2. Chunk (SentenceSplitter)
       3. Embed (Gemini Embedding)
-      4. Upsert Qdrant với is_active=False (fail-closed — CHƯA retrieval)
+      4. Upsert Qdrant với is_hidden=True (fail-closed — CHƯA retrieval)
       5. Callback SUCCEEDED → chờ Node.js ACK
-      6a. ACK OK  → set is_active=True (kích hoạt retrieval)
+      6a. ACK OK  → set is_hidden=False (kích hoạt retrieval)
       6b. ACK FAIL → xóa toàn bộ points attempt này
 ```
 
@@ -106,7 +105,7 @@ Node.js gửi POST /api/query
   → CHIT_CHAT: LLM trả lời giao tiếp, no_answer=True  [usage_calls[1]]
   → RAG_REQUIRED:
       1. Embed câu hỏi
-      2. Search Qdrant (filter is_active=True và is_hidden=False — chỉ READY+VISIBLE)
+      2. Search Qdrant (filter is_hidden=False — chỉ READY+VISIBLE)
       3. Không chunk nào vượt threshold → no_answer=True
       4. LLM sinh answer với citations [N]              [usage_calls[1]]
       5. Extract citations từ [1],[2],...
@@ -145,7 +144,7 @@ pytest tests/test_rag_contract_safety.py -v  # Contract safety
 
 | ID | Vấn đề | Mức độ |
 |----|---------|--------|
-| RAG-001 | ✅ Fixed: Activation protocol (is_active=False trước ACK) | DONE |
+| RAG-001 | ✅ Fixed: Activation protocol (is_hidden=True trước ACK) | DONE |
 | RAG-002 | ✅ Fixed: Deterministic point ID + orphan cleanup | DONE |
 | RAG-004 | ✅ Fixed: usage_calls[] multi-call tracking | DONE |
 | Durable queue | FastAPI BackgroundTasks không survive restart | LATER |

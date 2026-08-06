@@ -145,15 +145,15 @@ def mock_ingest_request():
 
 
 @pytest.mark.asyncio
-async def test_ingest_upserts_with_is_active_false(mock_qdrant_client, mock_ingest_request):
+async def test_ingest_upserts_with_is_hidden_true(mock_qdrant_client, mock_ingest_request):
     """
-    RAG-001: Points phải được upsert với is_active=False trước callback.
+    RAG-001: Points phải được upsert với is_hidden=True trước callback.
     """
     upserted_payloads = []
 
     def capture_upsert(collection_name, points):
         for p in points:
-            upserted_payloads.append(p.payload.get("is_active"))
+            upserted_payloads.append(p.payload.get("is_hidden"))
 
     mock_qdrant_client.upsert.side_effect = capture_upsert
     mock_qdrant_client.set_payload = MagicMock()
@@ -192,10 +192,10 @@ async def test_ingest_upserts_with_is_active_false(mock_qdrant_client, mock_inge
         from services.ingestion import ingest_document_background
         await ingest_document_background(mock_ingest_request)
 
-    # Tất cả points upsert phải có is_active=False
+    # Tất cả points upsert phải có is_hidden=True
     assert len(upserted_payloads) > 0, "Phải có ít nhất 1 point được upsert"
-    for is_active in upserted_payloads:
-        assert is_active is False, f"is_active phải là False khi upsert, nhận: {is_active}"
+    for is_hidden in upserted_payloads:
+        assert is_hidden is True, f"is_hidden phải là True khi upsert, nhận: {is_hidden}"
 
 
 @pytest.mark.asyncio

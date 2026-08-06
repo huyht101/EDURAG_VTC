@@ -281,7 +281,7 @@ class TestFinalizeRagAnswer:
     def test_usage_calls_propagated(self):
         """usage_calls[] phải được giữ trong response."""
         usage_info = UsageInfo(prompt_tokens=10, completion_tokens=5, total_tokens=15, model="m")
-        uc = _make_usage_call(1, "QUERY_REWRITE", "m", usage_info)
+        uc = _make_usage_call(0, "QUERY_REWRITE", "m", usage_info)
         response = _finalize_rag_answer("text", [], "low", [uc], self._empty_usage())
         assert len(response.usage_calls) == 1
         assert response.usage_calls[0].call_index == 1

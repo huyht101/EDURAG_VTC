@@ -65,8 +65,8 @@ async def parse_document(file_path: str) -> list[dict]:
 
     settings = get_settings()
 
-    # Thử LlamaParse trước nếu OCR_MODE="AUTO" và có API key
-    if settings.OCR_MODE.upper() == "AUTO" and settings.LLAMA_CLOUD_API_KEY:
+    # Thử LlamaParse trước nếu có API key
+    if settings.LLAMA_CLOUD_API_KEY:
         try:
             pages = await _parse_with_llamaparse(file_path, settings.LLAMA_CLOUD_API_KEY)
             if pages:
@@ -168,14 +168,19 @@ def _parse_docx_fallback(file_path: str) -> list[dict]:
             if para.text.strip():
                 full_text.append(para.text)
 
-        # DOCX không có page concept rõ ràng → trả về None cho page_number
+        # DOCX không có page concept rõ ràng → gộp thành 1 "page"
+        # Chia giả lập: mỗi ~3000 ký tự = 1 page
         combined = "\n".join(full_text)
         pages = []
-        if combined.strip():
-            pages.append({
-                "page_number": None,
-                "text": combined.strip(),
-            })
+        page_size = 3000
+
+        for i in range(0, len(combined), page_size):
+            chunk = combined[i:i + page_size].strip()
+            if chunk:
+                pages.append({
+                    "page_number": i // page_size + 1,
+                    "text": chunk,
+                })
 
         return pages
 
@@ -193,13 +198,17 @@ def _parse_txt(file_path: str) -> list[dict]:
         if not content.strip():
             return []
 
-        # TXT không có physical page → trả về None cho page_number
+        # Chia thành pages giả lập (~3000 ký tự)
         pages = []
-        if content.strip():
-            pages.append({
-                "page_number": None,
-                "text": content.strip(),
-            })
+        page_size = 3000
+
+        for i in range(0, len(content), page_size):
+            chunk = content[i:i + page_size].strip()
+            if chunk:
+                pages.append({
+                    "page_number": i // page_size + 1,
+                    "text": chunk,
+                })
 
         return pages
 
