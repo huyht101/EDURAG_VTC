@@ -32,6 +32,11 @@ function canonicalDownloadFilename(document, artifact = canonicalDownloadArtifac
     ? title : `${title}${artifact.extension}`;
 }
 
+function libraryFileType(document) {
+  if (document.file_type === 'DOCX' && previewStorageKey(document)) return 'PDF';
+  return document.file_type;
+}
+
 async function availability(document, files = fileService) {
   const originalAvailable = await files.exists(document.storage_key);
   const previewKey = previewStorageKey(document);
@@ -84,6 +89,7 @@ async function libraryDocument(document, user, files = fileService) {
       ? `/api/library/documents/${id}/source` : null),
     preview: (id) => `/api/library/documents/${id}/preview`
     }, state),
+    fileType: libraryFileType(document),
     downloadUrl: state.downloadAvailable
       ? `/api/library/documents/${document.id}/download` : null
   };
@@ -111,6 +117,7 @@ module.exports = {
   previewStorageKey,
   canonicalDownloadArtifact,
   canonicalDownloadFilename,
+  libraryFileType,
   availability,
   canUseLibraryOriginal,
   libraryDocument,

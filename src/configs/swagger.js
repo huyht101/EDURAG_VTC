@@ -319,7 +319,11 @@ const definition = {
           title: { type: 'string' },
           description: { type: 'string', nullable: true },
           author: { type: 'string', nullable: true },
-          fileType: { type: 'string', enum: ['PDF', 'DOCX', 'TXT'] },
+          fileType: {
+            type: 'string',
+            enum: ['PDF', 'DOCX', 'TXT'],
+            description: 'Library artifact type delivered to the user. A DOCX with a published canonical preview is represented as PDF; legacy DOCX without that artifact remains DOCX.'
+          },
           fileSize: { type: 'integer', minimum: 0 },
           pageCount: {
             type: 'integer', minimum: 1, nullable: true,
@@ -364,6 +368,11 @@ const definition = {
               'checksumSha256', 'processingStatus', 'visibilityStatus'
             ],
             properties: {
+              fileType: {
+                type: 'string',
+                enum: ['PDF', 'DOCX', 'TXT'],
+                description: 'Original upload format in the Document Management view.'
+              },
               uploadedBy: { type: 'integer' },
               originalFilename: { type: 'string' },
               mimeType: { type: 'string' },
@@ -899,7 +908,7 @@ const definition = {
           { name: 'page', in: 'query', description: 'Canonical 1-based page. With offset, offset must equal (page - 1) * limit.', schema: { type: 'integer', minimum: 1, default: 1 } },
           { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } },
           { name: 'q', in: 'query', description: 'Canonical literal partial search across title, description and author. With search, normalized values must match. Maximum 255 characters.', schema: { type: 'string', maxLength: 255 } },
-          { name: 'fileType', in: 'query', schema: { type: 'string', enum: ['PDF', 'DOCX', 'TXT'] } },
+          { name: 'fileType', in: 'query', description: 'Filters by the Library artifact type. PDF includes uploaded PDFs and DOCX documents with a published canonical PDF.', schema: { type: 'string', enum: ['PDF', 'DOCX', 'TXT'] } },
           { name: 'author', in: 'query', description: 'Literal partial author filter. Maximum 255 characters.', schema: { type: 'string', maxLength: 255 } },
           { name: 'sort', in: 'query', schema: { type: 'string', enum: ['newest', 'oldest', 'title_asc', 'title_desc'], default: 'newest' } },
           { name: 'offset', in: 'query', deprecated: true, description: 'Legacy exact record offset. With page, it must equal (page - 1) * limit.', schema: { type: 'integer', minimum: 0 } },

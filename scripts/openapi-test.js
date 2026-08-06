@@ -154,6 +154,15 @@ assert(spec.paths['/api/library/documents/{id}/source'].get.responses[409]);
 assert.equal(spec.components.schemas.LibraryDocument.properties.originalFileUrl.nullable, true);
 assert(spec.paths['/api/library/documents/{id}/preview'].get.responses[409]);
 assert.equal(spec.components.schemas.LibraryDocument.properties.downloadUrl.nullable, true);
+assert.match(spec.components.schemas.LibraryDocument.properties.fileType.description, /artifact type/i);
+assert.match(
+  spec.paths['/api/library/documents'].get.parameters.find((parameter) => parameter.name === 'fileType').description,
+  /DOCX documents with a published canonical PDF/i
+);
+assert.match(
+  spec.components.schemas.ManagementDocument.allOf[1].properties.fileType.description,
+  /Original upload format/i
+);
 assert(spec.paths['/api/library/documents/{id}/download'].get.responses[409]);
 assert.match(
   spec.paths['/api/library/documents/{id}/download'].get.description,

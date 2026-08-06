@@ -13,6 +13,14 @@ const SELECT_FIELDS = `
   d.created_at, d.updated_at,
   d.processing_status, d.visibility_status`;
 
+const LIBRARY_FILE_TYPE = `(CASE
+  WHEN d.file_type = 'DOCX'
+    AND d.preview_status = 'READY'
+    AND NULLIF(TRIM(d.preview_storage_key), '') IS NOT NULL
+  THEN 'PDF'
+  ELSE d.file_type
+END)`;
+
 async function listEligibleDocuments(filters, executor) {
   const page = sqlPageNumbers(filters.offset, filters.limit);
   const conditions = [
@@ -30,7 +38,7 @@ async function listEligibleDocuments(filters, executor) {
     params.push(pattern, pattern, pattern);
   }
   if (filters.fileType) {
-    conditions.push('d.file_type = ?');
+    conditions.push(`${LIBRARY_FILE_TYPE} = ?`);
     params.push(filters.fileType);
   }
   if (filters.author) {

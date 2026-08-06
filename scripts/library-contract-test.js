@@ -61,7 +61,8 @@ async function testRepositoryScope() {
   assert(calls.every(({ statement }) => statement.includes("d.processing_status = 'READY'")));
   assert(calls.every(({ statement }) => statement.includes("d.visibility_status = 'VISIBLE'")));
   assert(calls.every(({ statement }) => statement.includes("ESCAPE '!'")));
-  assert(calls.every(({ statement }) => statement.includes('d.file_type = ?')));
+  assert(calls.every(({ statement }) => statement.includes("WHEN d.file_type = 'DOCX'")));
+  assert(calls.every(({ statement }) => statement.includes("THEN 'PDF'")));
   assert.match(calls[1].statement, /d\.uploaded_by/);
   assert.deepEqual(calls[0].params, calls[1].params, 'Count and data query filters must match.');
   assert.deepEqual(calls[0].params, [
@@ -170,6 +171,29 @@ async function testDtoAndFixedQueryScope() {
   assert.equal(page.documents[0].previewUrl, '/api/library/documents/12/preview');
   assert.equal(page.documents[0].downloadUrl, '/api/library/documents/12/download');
   assert.equal(page.documents[0].originalFileUrl, null);
+  const convertedDocx = {
+    ...readyDocument,
+    file_type: 'DOCX',
+    storage_key: 'documents/2026/07/source.docx',
+    original_filename: 'source.docx',
+    mime_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    preview_storage_key: 'previews/12/canonical.pdf'
+  };
+  const convertedDocxDto = await libraryService.publicDocument(
+    convertedDocx,
+    { id: 7, role: ROLES.STUDENT },
+    fileService
+  );
+  assert.equal(convertedDocxDto.fileType, 'PDF');
+  assert.equal(convertedDocxDto.previewMimeType, 'application/pdf');
+  assert.equal(convertedDocxDto.previewUrl, '/api/library/documents/12/preview');
+  assert.equal(convertedDocxDto.downloadUrl, '/api/library/documents/12/download');
+  const pendingDocxDto = await libraryService.publicDocument(
+    { ...convertedDocx, preview_status: 'PENDING', preview_storage_key: null, preview_mime_type: null },
+    { id: 7, role: ROLES.STUDENT },
+    fileService
+  );
+  assert.equal(pendingDocxDto.fileType, 'DOCX', 'Do not relabel a DOCX without a published canonical PDF.');
   for (const internal of [
     'uploadedBy', 'uploaded_by', 'storageKey', 'storage_key', 'originalFilename',
     'previewStorageKey', 'preview_storage_key', 'checksumSha256', 'processingStatus',
@@ -504,6 +528,10 @@ async function testSupportedSourceTypes() {
     assert.equal(openedKey, variant.canonicalKey);
     assert.equal(download.filename, variant.downloadFilename);
     assert.equal(download.mimeType, variant.fileType === 'TXT' ? 'text/plain' : 'application/pdf');
+    const detail = await libraryService.getDocument(
+      { id: 7, role: ROLES.STUDENT }, 12, { repository, fileService: files }
+    );
+    assert.equal(detail.document.fileType, variant.fileType === 'DOCX' ? 'PDF' : variant.fileType);
   }
 }
 

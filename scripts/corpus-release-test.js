@@ -415,6 +415,7 @@ async function main() {
     (error) => error.code === 'GCS_CONFIG_INVALID'
   );
   const credentialRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'edurag-release-credential-test-'));
+  temporaryDirectories.add(credentialRoot);
   await fsp.mkdir(path.join(credentialRoot, 'secrets'));
   const malformedCredential = path.join(credentialRoot, 'secrets', 'gcs.json');
   await fsp.writeFile(malformedCredential, '{invalid-json', 'utf8');
@@ -430,8 +431,6 @@ async function main() {
     }),
     (error) => error.code === 'GCS_CONFIG_INVALID'
   );
-  await fsp.rm(credentialRoot, { recursive: true, force: true });
-
   const fixture = manifestInput();
   const identityInput = {
     documents: new Map([['1', {
@@ -1059,14 +1058,26 @@ async function main() {
   const readDenied = await bootstrapCorpus({
     mode: 'auto',
     inspectBootstrap: async () => ({ state: 'EMPTY', activeJobs: 0 }),
-    restore: async () => {
-      throw markCorpusFailure(releaseError('GCS_READ_PERMISSION_REQUIRED', 'permission detail'), {
-        phase: 'REMOTE_READ', localMutationStarted: false, rollbackConfirmed: false
-      });
+    environment: {
+      GCS_PROJECT_ID: 'test-project', GCS_BUCKET: 'test-bucket',
+      GCS_OBJECT_PREFIX: 'portable-corpus/v1', GCS_CREDENTIALS_FILE: 'secrets/not-read.json'
+    },
+    downloadRelease: async () => {
+      throw Object.assign(new Error('permission detail'), { statusCode: 403 });
     }
   });
   assert.equal(readDenied.status, 'DEGRADED');
   assert.equal(readDenied.reason, 'GCS_READ_PERMISSION_REQUIRED');
+  await assert.rejects(
+    () => bootstrapCorpus({
+      mode: 'required',
+      downloadRelease: async () => {
+        throw Object.assign(new Error('permission detail'), { statusCode: 403 });
+      }
+    }),
+    (error) => error.code === 'GCS_READ_PERMISSION_REQUIRED'
+      && error.corpusPhase === 'REMOTE_READ'
+  );
   await assert.rejects(
     () => bootstrapCorpus({ mode: 'required', restore: async () => { throw missing; } }),
     (error) => error.code === 'GCS_CREDENTIAL_MISSING'
@@ -1090,6 +1101,45 @@ async function main() {
     GCS_PROJECT_ID: 'test-project', GCS_BUCKET: 'test-bucket',
     GCS_OBJECT_PREFIX: 'portable-corpus/v1', GCS_CREDENTIALS_FILE: 'secrets/not-read.json'
   };
+  const invalidCredentialEnvironment = {
+    GCS_PROJECT_ID: 'test-project', GCS_BUCKET: 'test-bucket',
+    GCS_OBJECT_PREFIX: 'portable-corpus/v1', GCS_CREDENTIALS_FILE: 'secrets/gcs.json'
+  };
+  const invalidCredentialAuto = await bootstrapCorpus({
+    mode: 'auto', environment: invalidCredentialEnvironment, rootDirectory: credentialRoot,
+    inspectBootstrap: async () => ({ state: 'EMPTY', activeJobs: 0 })
+  });
+  assert.equal(invalidCredentialAuto.status, 'DEGRADED');
+  assert.equal(invalidCredentialAuto.reason, 'GCS_CREDENTIAL_INVALID');
+  await assert.rejects(
+    () => bootstrapCorpus({
+      mode: 'required', environment: invalidCredentialEnvironment, rootDirectory: credentialRoot
+    }),
+    (error) => error.code === 'GCS_CREDENTIAL_INVALID'
+      && error.corpusPhase === 'REMOTE_READ'
+  );
+
+  const missingPointerFile = path.join(credentialRoot, 'missing-corpus-release.json');
+  let missingPointerInspections = 0;
+  const missingPointerAuto = await bootstrapCorpus({
+    mode: 'auto', environment: cloudEnvironment, pointerFile: missingPointerFile, objectStore: {},
+    inspectBootstrap: async () => {
+      missingPointerInspections += 1;
+      return { state: 'EMPTY', activeJobs: 0 };
+    }
+  });
+  assert.equal(missingPointerAuto.status, 'DEGRADED');
+  assert.equal(missingPointerAuto.reason, 'CORPUS_RELEASE_POINTER_MISSING');
+  assert.equal(missingPointerInspections, 2);
+  await assert.rejects(
+    () => bootstrapCorpus({
+      mode: 'required', environment: cloudEnvironment,
+      pointerFile: missingPointerFile, objectStore: {}
+    }),
+    (error) => error.code === 'CORPUS_RELEASE_POINTER_MISSING'
+      && error.corpusPhase === 'REMOTE_READ'
+  );
+
   let emptyInspections = 0;
   const rawFetch = await bootstrapCorpus({
     mode: 'auto', environment: cloudEnvironment,
@@ -1153,19 +1203,27 @@ async function main() {
   assert.equal(normalizeRemoteReadError(programmingFailure), programmingFailure,
     'Unknown programming failures must not be classified as degradable remote availability errors.');
 
+  const incompatibleManifest = structuredClone(valid);
+  incompatibleManifest.compatibility.embeddingDimension += 1;
+  assert.throws(
+    () => validateReleaseManifest(incompatibleManifest, config),
+    (error) => error.code === 'CORPUS_RELEASE_INCOMPATIBLE'
+  );
   for (const fatalCode of [
     'CORPUS_RELEASE_CHECKSUM_MISMATCH',
     'CORPUS_RELEASE_MANIFEST_INVALID',
-    'CORPUS_RELEASE_SCHEMA_INCOMPATIBLE'
+    'CORPUS_RELEASE_INCOMPATIBLE'
   ]) {
-    await assert.rejects(
-      () => bootstrapCorpus({
-        mode: 'auto', environment: cloudEnvironment,
-        inspectBootstrap: async () => ({ state: 'EMPTY', activeJobs: 0 }),
-        downloadRelease: async () => { throw releaseError(fatalCode, 'forced integrity failure'); }
-      }),
-      (error) => error.code === fatalCode
-    );
+    for (const mode of ['auto', 'required']) {
+      await assert.rejects(
+        () => bootstrapCorpus({
+          mode, environment: cloudEnvironment,
+          inspectBootstrap: async () => ({ state: 'EMPTY', activeJobs: 0 }),
+          downloadRelease: async () => { throw releaseError(fatalCode, 'forced integrity failure'); }
+        }),
+        (error) => error.code === fatalCode
+      );
+    }
   }
 
   let postApplyRollback = 0;

@@ -910,7 +910,7 @@ async function main() {
     }), { headers: auth(studentToken) })).payload.data;
     assert.equal(combinedLibrary.total, 1);
     assert.equal(Number(combinedLibrary.documents[0].id), Number(readySearchFixtures[4].document.id));
-    for (const [fileType, expectedTotal] of [['PDF', 1], ['DOCX', 1], ['TXT', 3]]) {
+    for (const [fileType, expectedTotal] of [['PDF', 2], ['DOCX', 0], ['TXT', 3]]) {
       const result = (await request(listPath('/api/library/documents', {
         q: listMarker,
         fileType,
@@ -1107,7 +1107,7 @@ async function main() {
         `/api/library/documents/${fixtureUpload.document.id}`,
         { headers: auth(studentToken) }
       )).payload.data.document;
-      assert.equal(fixtureDetail.fileType, fixture.fileType);
+      assert.equal(fixtureDetail.fileType, fixture.fileType === 'DOCX' ? 'PDF' : fixture.fileType);
       assert.equal(fixtureDetail.originalAvailable, fixture.fileType === 'TXT');
       assert.equal(
         fixtureDetail.originalFileUrl,
