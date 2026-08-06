@@ -31,7 +31,7 @@ Remote MySQL dành loopback `REMOTE_MYSQL_HOST_PORT` (mặc định `13306`) cho
 host-side E2E tooling; containers luôn dùng `db:3306`, nên dịch vụ khác đang
 giữ host port `3306` không chặn remote startup.
 
-Command này resolve remote Compose override và force-recreate app để áp dụng `RAG_MODE=remote`; không dùng `docker compose restart` khi chuyển mode vì restart giữ nguyên environment của container cũ. `Ctrl+C` dừng containers nhưng giữ named volumes. Fresh volumes cần reader-capable GCS credential để restore release được pointer chọn; pointer không phải bằng chứng source data đã được phê duyệt. `CORPUS_BOOTSTRAP=auto` vẫn cho stack khởi động rỗng khi thiếu key. Live corpus acceptance chỉ chạy sau explicit data approval.
+Command này resolve remote Compose override và force-recreate app để áp dụng `RAG_MODE=remote`; không dùng `docker compose restart` khi chuyển mode vì restart giữ nguyên environment của container cũ. `Ctrl+C` dừng containers nhưng giữ named volumes. Fresh volumes cần reader-capable GCS credential để restore release được pointer chọn; pointer không phải bằng chứng source data đã được phê duyệt. `CORPUS_BOOTSTRAP=auto` chỉ tiếp tục ở trạng thái `DEGRADED` khi local đã được xác nhận `EMPTY` và remote read/configuration thất bại trước mọi local mutation; local `UNKNOWN`, integrity/manifest/apply/rollback failure vẫn fail closed. Live corpus acceptance chỉ chạy sau explicit data approval.
 
 - Swagger: <http://localhost:5001/api-docs>
 - OpenAPI: <http://localhost:5001/api-docs.json>

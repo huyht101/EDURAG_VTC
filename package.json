@@ -35,7 +35,7 @@
     "docker:remote:files:node": "node scripts/remote-test-utils.js exec -T app find /usr/src/app/uploads/documents -type f",
     "docker:remote:files:rag": "node scripts/remote-test-utils.js exec -T rag-service find /shared/uploads/documents -type f",
     "docker:remote:mysql": "node scripts/remote-test-utils.js exec db mysql -uroot -p edurag",
-    "docker:remote:down": "node scripts/remote-test-utils.js down",
+    "docker:remote:down": "node scripts/remote-test-utils.js down --remove-orphans",
     "docker:remote:stop": "node scripts/remote-test-utils.js stop",
     "docker:remote:dev": "node scripts/remote-dev.js",
     "docker:remote:reset": "node scripts/remote-test-utils.js down -v --remove-orphans",

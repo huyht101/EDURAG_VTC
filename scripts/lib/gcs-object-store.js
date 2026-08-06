@@ -1,6 +1,7 @@
 'use strict';
 
 const { Storage } = require('@google-cloud/storage');
+const { normalizeRemoteReadError } = require('./corpus-bootstrap-errors');
 
 function gcsError(code, message) {
   const error = new Error(message);
@@ -8,17 +9,12 @@ function gcsError(code, message) {
   return error;
 }
 
-function upstreamStatus(error) {
-  return Number(error?.code || error?.statusCode || error?.response?.status || 0);
+function mapReadError(error, missingCode = 'GCS_OBJECT_MISSING') {
+  return normalizeRemoteReadError(error, missingCode);
 }
 
-function mapReadError(error, missingCode = 'GCS_OBJECT_MISSING') {
-  const status = upstreamStatus(error);
-  if (status === 404) return gcsError(missingCode, 'The requested GCS release object does not exist.');
-  if (status === 401 || status === 403) {
-    return gcsError('GCS_READ_PERMISSION_REQUIRED', 'GCS reader permission or valid credentials are required.');
-  }
-  return gcsError('GCS_REMOTE_READ_FAILED', 'GCS object verification/download failed.');
+function upstreamStatus(error) {
+  return Number(error?.code || error?.statusCode || error?.response?.status || 0);
 }
 
 class GcsObjectStore {

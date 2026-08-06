@@ -80,7 +80,9 @@ CORPUS_RESTORE_OK
 REMOTE_PREFLIGHT_OK
 ```
 
-Trên retained volumes, expected `CORPUS_RESTORE_SKIPPED_LOCAL_PRESENT ... exactRelease=NOT_CHECKED`; `auto` không chạy deep exact-release comparison. Partial/in-progress local state cũng được coi là `PRESENT`, giữ nguyên và cảnh báo. Nếu probe trả `UNKNOWN/ERROR`, tool không restore và báo `CORPUS_RESTORE_SKIPPED_LOCAL_UNKNOWN`. `auto` + local empty nhưng thiếu key báo `CORPUS_BOOTSTRAP_SKIPPED` rồi tiếp tục empty; không fallback sang dump/snapshot trong Git.
+Trên retained volumes, expected `CORPUS_RESTORE_SKIPPED_LOCAL_PRESENT ... exactRelease=NOT_CHECKED`; `auto` không chạy deep exact-release comparison. Partial/in-progress local state cũng được coi là `PRESENT`, giữ nguyên và cảnh báo. Nếu probe trả `UNKNOWN/ERROR`, tool fail closed với `CORPUS_LOCAL_STATE_UNKNOWN`: không restore và không gọi đó là degraded-empty startup. `auto` chỉ báo `CORPUS_BOOTSTRAP_SKIPPED`/`DEGRADED` rồi tiếp tục empty khi local đã được xác nhận `EMPTY` và lỗi config/credential/permission/missing-object/transport xảy ra ở remote read trước local mutation. Raw fetch/timeout/network error được chuẩn hóa thành stable reason; không fallback sang dump/snapshot trong Git.
+
+Checksum/integrity, manifest không tương thích, lỗi local filesystem/MySQL/Qdrant, lỗi sau khi apply bắt đầu, hoặc rollback không được xác nhận đều fatal trong cả `auto` và `required`. `required` cũng fail closed với mọi remote-read failure thay vì tiếp tục bằng corpus rỗng.
 
 Chọn mode theo mục đích:
 
@@ -155,9 +157,19 @@ chỉ cần `content`; `clientRequestId` optional và server tự sinh UUID.
 | `npm run preflight:remote` | Health/auth/network/shared-volume checks. |
 | `npm run docker:remote:stop` | Stop containers, giữ volumes. |
 | `npm run docker:remote:down` | Xóa containers/network, giữ named volumes. |
-| `npm run docker:remote:reset` | **Destructive:** xóa volumes của configured remote project. |
+| `npm run docker:remote:reset` | **Destructive:** xóa volumes của configured remote project; cần xác nhận exact project bằng `REMOTE_RESET_CONFIRM_PROJECT`. |
 
 `Ctrl+C` best-effort stop containers và giữ volumes. Abrupt kill, Docker crash hoặc mất điện không bảo đảm signal cleanup; lần chạy sau reuse volumes và verify state. Đặt `REMOTE_DEV_ALL_LOGS=true` trong `.env` nếu cần attach cả MySQL/Qdrant logs, hoặc dùng `REMOTE_DEV_SERVICES=app,rag-service` để chọn rõ các service cần theo dõi.
+
+Giải nén source/clone mới không đồng nghĩa Docker state mới: named volumes của cùng Compose project vẫn được reuse. Fresh reset chỉ dùng sau khi kiểm tra đúng project và chấp nhận mất dữ liệu của project đó:
+
+```powershell
+$env:REMOTE_RESET_CONFIRM_PROJECT='edurag_remote_e2e'
+npm run docker:remote:reset
+Remove-Item Env:REMOTE_RESET_CONFIRM_PROJECT
+```
+
+`stop` chỉ dừng services và giữ container/network/volumes. `down` gỡ container/network/orphan theo Compose nhưng giữ named volumes. Test lifecycle dùng project `edurag_remote_test_*` riêng và cleanup volumes chỉ sau isolated-project guard; không dùng reset cho project development không disposable.
 
 ## 6. Lỗi thường gặp
 
@@ -166,7 +178,8 @@ chỉ cần `content`; `clientRequestId` optional và server tự sinh UUID.
 | Port in use | Đổi host port trong root `.env`. |
 | `GCS_CREDENTIAL_MISSING` | Với `auto`, stack chạy degraded; fresh canonical restore cần reader key. |
 | `CORPUS_RESTORE_SKIPPED_LOCAL_PRESENT` | `auto` phát hiện local data/partial/in-progress và giữ nguyên; dùng inspect/diagnostic thay vì restore đè. |
-| `CORPUS_RESTORE_SKIPPED_LOCAL_UNKNOWN` | Không xác định an toàn emptiness; `auto` không restore. Kiểm tra MySQL/Qdrant/upload probe. `required` sẽ fail. |
+| `CORPUS_LOCAL_STATE_UNKNOWN` | Không xác định an toàn emptiness; cả `auto` và `required` fail closed. Kiểm tra MySQL/Qdrant/upload probe rồi chạy lại. |
+| `GCS_REMOTE_UNAVAILABLE` | Fetch/timeout/network/remote availability đã được chuẩn hóa. Chỉ `auto` + confirmed `EMPTY` + pre-mutation remote read được tiếp tục `DEGRADED`; `required` fail closed. |
 | `CORPUS_RESTORE_ROLLBACK_FAILED` | Apply thất bại và không thể phục hồi exact empty pre-state; dừng, không chạy replace/merge tự động. |
 | `CORPUS_EXISTING_STATE_MISMATCH` | Chỉ strict `required`/restore/verify: local không khớp selected release. Development `auto` không ép exact match. |
 | `CORPUS_REVIEW_CONFIRMATION_REQUIRED` | Chạy dry-run, review plan rồi dùng đúng `--confirm-reviewed`. |
@@ -176,6 +189,8 @@ chỉ cần `content`; `clientRequestId` optional và server tự sinh UUID.
 | Python/Qdrant healthy nhưng preflight báo app không phải remote | App có thể được tạo bởi base/mock Compose rồi chỉ restart. Chạy command canonical `npm run docker:remote:dev` để recreate app với resolved remote environment; không xóa volume để “sửa” lỗi configuration. |
 
 Quy trình kiểm thử đầy đủ: [Independent test plan](../testing/week3-remote-test-plan.md).
+
+Không đóng gói `.env`, `secrets/gcs.json` hoặc credential thật vào ZIP/source handoff. Nếu credential thật từng bị phân phối trong ZIP, loại khỏi gói tiếp theo và rotate/revoke qua quy trình của owner; tooling không tự thực hiện thao tác đó.
 
 ---
 

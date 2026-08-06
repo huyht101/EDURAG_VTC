@@ -36,6 +36,12 @@ const {
 const corpusRuntime = require('./lib/corpus-runtime');
 const { approvedCorpusConfig } = require('./restored-corpus-live-smoke');
 const { auditDownloadedRelease } = require('./corpus-prepublish-audit');
+const { assertRemoteResetAllowed } = require('./remote-test-utils');
+const { DockerUploadVolume } = require('./lib/docker-upload-volume');
+const {
+  markCorpusFailure,
+  normalizeRemoteReadError
+} = require('./lib/corpus-bootstrap-errors');
 
 const config = Object.freeze({
   projectId: 'test-project',
@@ -1017,11 +1023,19 @@ async function main() {
   });
   assert.equal(inProgressRetained.status, 'CORPUS_RESTORE_SKIPPED_LOCAL_PRESENT');
 
-  const localUnknown = await bootstrapCorpus({
-    mode: 'auto',
-    inspectBootstrap: async () => { throw releaseError('CORPUS_MYSQL_INSPECT_FAILED', 'offline'); }
-  });
-  assert.equal(localUnknown.status, 'CORPUS_RESTORE_SKIPPED_LOCAL_UNKNOWN');
+  await assert.rejects(
+    () => bootstrapCorpus({
+      mode: 'auto', localInspectAttempts: 1,
+      inspectBootstrap: async () => { throw releaseError('CORPUS_MYSQL_INSPECT_FAILED', 'offline'); }
+    }),
+    (error) => error.code === 'CORPUS_LOCAL_STATE_UNKNOWN'
+  );
+  await assert.rejects(
+    () => bootstrapCorpus({
+      mode: 'auto', inspectBootstrap: async () => ({ state: 'UNKNOWN', reason: 'forced' })
+    }),
+    (error) => error.code === 'CORPUS_LOCAL_STATE_UNKNOWN'
+  );
 
   const missing = releaseError('GCS_CREDENTIAL_MISSING', 'secret-value-must-not-appear');
   const warnings = [];
@@ -1030,7 +1044,11 @@ async function main() {
   let auto;
   try {
     auto = await bootstrapCorpus({
-      mode: 'auto', restore: async () => { throw missing; },
+      mode: 'auto', restore: async () => {
+        throw markCorpusFailure(missing, {
+          phase: 'REMOTE_READ', localMutationStarted: false, rollbackConfirmed: false
+        });
+      },
       inspectBootstrap: async () => ({ state: 'EMPTY', activeJobs: 0 })
     });
   } finally {
@@ -1041,7 +1059,11 @@ async function main() {
   const readDenied = await bootstrapCorpus({
     mode: 'auto',
     inspectBootstrap: async () => ({ state: 'EMPTY', activeJobs: 0 }),
-    restore: async () => { throw releaseError('GCS_READ_PERMISSION_REQUIRED', 'permission detail'); }
+    restore: async () => {
+      throw markCorpusFailure(releaseError('GCS_READ_PERMISSION_REQUIRED', 'permission detail'), {
+        phase: 'REMOTE_READ', localMutationStarted: false, rollbackConfirmed: false
+      });
+    }
   });
   assert.equal(readDenied.status, 'DEGRADED');
   assert.equal(readDenied.reason, 'GCS_READ_PERMISSION_REQUIRED');
@@ -1064,12 +1086,184 @@ async function main() {
   assert.equal(invalidAutoConfig.status, 'DEGRADED');
   assert.equal(invalidAutoConfig.reason, 'GCS_CONFIG_INVALID');
 
+  const cloudEnvironment = {
+    GCS_PROJECT_ID: 'test-project', GCS_BUCKET: 'test-bucket',
+    GCS_OBJECT_PREFIX: 'portable-corpus/v1', GCS_CREDENTIALS_FILE: 'secrets/not-read.json'
+  };
+  let emptyInspections = 0;
+  const rawFetch = await bootstrapCorpus({
+    mode: 'auto', environment: cloudEnvironment,
+    inspectBootstrap: async () => { emptyInspections += 1; return { state: 'EMPTY', activeJobs: 0 }; },
+    downloadRelease: async () => { throw new TypeError('fetch failed'); }
+  });
+  assert.equal(rawFetch.status, 'DEGRADED');
+  assert.equal(rawFetch.code, 'GCS_REMOTE_UNAVAILABLE');
+  assert.equal(rawFetch.phase, 'REMOTE_READ');
+  assert.equal(emptyInspections, 2, 'Auto fallback must re-confirm EMPTY after a remote-read failure.');
+  let changedInspections = 0;
+  await assert.rejects(
+    () => bootstrapCorpus({
+      mode: 'auto', environment: cloudEnvironment,
+      inspectBootstrap: async () => {
+        changedInspections += 1;
+        return changedInspections === 1
+          ? { state: 'EMPTY', activeJobs: 0 }
+          : { state: 'PRESENT', activeJobs: 0 };
+      },
+      downloadRelease: async () => { throw new TypeError('fetch failed'); }
+    }),
+    (error) => error.code === 'CORPUS_LOCAL_STATE_CHANGED'
+  );
+  let unknownAfterFailureInspections = 0;
+  await assert.rejects(
+    () => bootstrapCorpus({
+      mode: 'auto', environment: cloudEnvironment, localInspectAttempts: 1,
+      inspectBootstrap: async () => {
+        unknownAfterFailureInspections += 1;
+        if (unknownAfterFailureInspections === 1) return { state: 'EMPTY', activeJobs: 0 };
+        throw releaseError('CORPUS_QDRANT_REQUEST_FAILED', 'forced local probe failure');
+      },
+      downloadRelease: async () => { throw new TypeError('fetch failed'); }
+    }),
+    (error) => error.code === 'CORPUS_LOCAL_STATE_UNKNOWN'
+  );
+  await assert.rejects(
+    () => bootstrapCorpus({
+      mode: 'required', environment: cloudEnvironment,
+      downloadRelease: async () => { throw new TypeError('fetch failed'); }
+    }),
+    (error) => error.code === 'GCS_REMOTE_UNAVAILABLE'
+      && error.corpusPhase === 'REMOTE_READ' && error.localMutationStarted === false
+  );
+
+  for (const transport of [
+    Object.assign(new Error('aborted'), { name: 'AbortError' }),
+    Object.assign(new Error('timeout'), { code: 'ETIMEDOUT' }),
+    new TypeError('fetch failed', { cause: Object.assign(new Error('socket'), { code: 'ECONNRESET' }) })
+  ]) {
+    assert.equal(normalizeRemoteReadError(transport).code, 'GCS_REMOTE_UNAVAILABLE');
+  }
+  assert.equal(normalizeRemoteReadError(Object.assign(new Error('denied'), { statusCode: 403 })).code,
+    'GCS_READ_PERMISSION_REQUIRED');
+  assert.equal(normalizeRemoteReadError(Object.assign(new Error('missing'), { statusCode: 404 })).code,
+    'GCS_OBJECT_MISSING');
+  assert.equal(normalizeRemoteReadError(Object.assign(new Error('unavailable'), { statusCode: 503 })).code,
+    'GCS_REMOTE_UNAVAILABLE');
+  const programmingFailure = new TypeError('unexpected adapter invariant');
+  assert.equal(normalizeRemoteReadError(programmingFailure), programmingFailure,
+    'Unknown programming failures must not be classified as degradable remote availability errors.');
+
+  for (const fatalCode of [
+    'CORPUS_RELEASE_CHECKSUM_MISMATCH',
+    'CORPUS_RELEASE_MANIFEST_INVALID',
+    'CORPUS_RELEASE_SCHEMA_INCOMPATIBLE'
+  ]) {
+    await assert.rejects(
+      () => bootstrapCorpus({
+        mode: 'auto', environment: cloudEnvironment,
+        inspectBootstrap: async () => ({ state: 'EMPTY', activeJobs: 0 }),
+        downloadRelease: async () => { throw releaseError(fatalCode, 'forced integrity failure'); }
+      }),
+      (error) => error.code === fatalCode
+    );
+  }
+
+  let postApplyRollback = 0;
+  await assert.rejects(
+    () => bootstrapCorpus({
+      mode: 'auto', environment: cloudEnvironment,
+      inspectBootstrap: async () => ({ state: 'EMPTY', activeJobs: 0 }),
+      downloadRelease: async () => ({ manifest: valid, files: new Map(), ownsTemporary: false }),
+      ensureDataServices: async () => {},
+      inspectLocal: async () => ({ state: 'EMPTY' }),
+      restoreStructured: async () => ({ rollbackRestore: async () => { postApplyRollback += 1; } }),
+      reconcileRuntime: async () => { throw releaseError('GCS_REMOTE_UNAVAILABLE', 'forced after apply'); },
+      restoreOriginals: async () => ({ restored: 0, skipped: 0, targetVolume: 'test' })
+    }),
+    (error) => error.code === 'GCS_REMOTE_UNAVAILABLE'
+      && error.localMutationStarted === true && error.rollbackConfirmed === true
+  );
+  assert.equal(postApplyRollback, 1);
+
+  await assert.rejects(
+    () => bootstrapCorpus({
+      mode: 'auto', environment: cloudEnvironment,
+      inspectBootstrap: async () => ({ state: 'EMPTY', activeJobs: 0 }),
+      downloadRelease: async () => ({ manifest: valid, files: new Map(), ownsTemporary: false }),
+      ensureDataServices: async () => {},
+      inspectLocal: async () => ({ state: 'EMPTY' }),
+      restoreStructured: async () => ({
+        rollbackRestore: async () => { throw new Error('forced rollback failure'); }
+      }),
+      reconcileRuntime: async () => { throw releaseError('CORPUS_RESTORE_VERIFY_FAILED', 'forced'); }
+    }),
+    (error) => error.code === 'CORPUS_RESTORE_ROLLBACK_FAILED'
+  );
+
+  const ownedDownloadTemporary = await fsp.mkdtemp(path.join(os.tmpdir(), 'edurag-release-test-download-cleanup-'));
+  await assert.rejects(
+    () => downloadAndVerifyRelease({
+      config, pointer,
+      createTemporaryDirectory: async () => ownedDownloadTemporary,
+      objectStore: { download: async () => { throw new TypeError('fetch failed'); } }
+    }),
+    (error) => error.code === 'GCS_REMOTE_UNAVAILABLE'
+      && error.corpusPhase === 'REMOTE_READ' && error.localMutationStarted === false
+  );
+  await assert.rejects(() => fsp.access(ownedDownloadTemporary), (error) => error.code === 'ENOENT');
+
+  await assert.rejects(
+    () => downloadAndVerifyRelease({
+      config, pointer,
+      createTemporaryDirectory: async () => 'test-owned-temporary',
+      removeTemporaryDirectory: async () => { throw new Error('forced cleanup failure'); },
+      objectStore: { download: async () => { throw new TypeError('fetch failed'); } }
+    }),
+    (error) => error.code === 'CORPUS_TEMP_CLEANUP_FAILED'
+      && error.corpusPhase === 'FINALIZE' && error.localMutationStarted === false
+  );
+
+  const helperCleanupFailure = new DockerUploadVolume({
+    composeProject: 'edurag_remote_test_helper',
+    compose: (args) => {
+      if (args[0] === 'ps') return 'app-container';
+      if (args[0] === 'images') return 'app-image';
+      throw new Error(`Unexpected compose call: ${args.join(' ')}`);
+    },
+    docker: (args) => {
+      if (args[0] === 'inspect') {
+        return JSON.stringify([{ Type: 'volume', Destination: '/usr/src/app/uploads', Name: 'test_uploads' }]);
+      }
+      if (args[0] === 'run') return 'helper-id';
+      if (args[0] === 'rm') return { status: 1 };
+      throw new Error(`Unexpected docker call: ${args.join(' ')}`);
+    }
+  });
+  await assert.rejects(
+    () => helperCleanupFailure.withHelper(async () => ({ ok: true })),
+    (error) => error.code === 'CORPUS_HELPER_CLEANUP_FAILED'
+  );
+
+  assert.doesNotThrow(() => assertRemoteResetAllowed(
+    ['down', '-v', '--remove-orphans'],
+    { REMOTE_E2E_CONFIRM_ISOLATED: 'true' },
+    'edurag_remote_test_policy'
+  ));
+  assert.throws(
+    () => assertRemoteResetAllowed(['down', '-v'], {}, 'edurag_remote_e2e'),
+    (error) => error.code === 'REMOTE_RESET_CONFIRMATION_REQUIRED'
+  );
+  assert.doesNotThrow(() => assertRemoteResetAllowed(
+    ['down', '-v'], { REMOTE_RESET_CONFIRM_PROJECT: 'edurag_remote_e2e' }, 'edurag_remote_e2e'
+  ));
+  assert.doesNotThrow(() => assertRemoteResetAllowed(['down'], {}, 'edurag_remote_e2e'));
+
   const pointerKey = manifestObjectKey(config, pointer.releaseId);
   assert(objectStore.objects.has(pointerKey), 'complete release must contain a manifest object');
   await cleanupTemporaryDirectories();
   console.log(
     'CORPUS_RELEASE_TEST_OK manifest=validated publish=create-only+manifest-last+idempotent '
-    + 'restore=staged+empty+compatible+rollback bootstrap=empty+local-retained+partial-safe+required-strict '
+    + 'restore=staged+empty+compatible+rollback bootstrap=phase-aware+empty-degraded+local-safe+required-strict '
     + 'publish=dry-run-zero-mutation+review-confirmation+pointer-last+writer-resume '
     + 'prepublish-audit=read-only+mechanical-validation'
   );

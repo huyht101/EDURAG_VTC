@@ -11,6 +11,11 @@ const runtime = require('./lib/corpus-runtime');
 const { DockerUploadVolume } = require('./lib/docker-upload-volume');
 const { GcsObjectStore } = require('./lib/gcs-object-store');
 const {
+  isDegradableRemoteReadFailure,
+  markCorpusFailure,
+  normalizeRemoteReadError
+} = require('./lib/corpus-bootstrap-errors');
+const {
   POINTER_SCHEMA_VERSION,
   RELEASE_SCHEMA_VERSION,
   assertPublishableDocuments,
@@ -319,10 +324,12 @@ function defaultObjectStore(config) {
   return new GcsObjectStore(config);
 }
 
-async function downloadRemoteManifest({ config, objectStore, pointer, directory }) {
+async function downloadRemoteManifest({ config, objectStore, pointer, directory, setPhase = () => {} }) {
   const file = path.join(directory, 'manifest.json');
   const key = manifestObjectKey(config, pointer.releaseId);
+  setPhase('REMOTE_READ');
   await objectStore.download(key, file);
+  setPhase('VERIFY');
   const bytes = await fsp.readFile(file);
   if (sha256Buffer(bytes) !== pointer.manifestSha256) {
     throw releaseError('CORPUS_RELEASE_MANIFEST_CHECKSUM_MISMATCH', 'Remote manifest does not match the repository pointer.');
@@ -339,30 +346,53 @@ async function downloadRemoteManifest({ config, objectStore, pointer, directory 
 }
 
 async function downloadAndVerifyRelease(options = {}) {
-  const config = options.config || loadCloudConfig(options);
-  const objectStore = options.objectStore || defaultObjectStore(config);
-  const pointer = options.pointer || await readPointer(options);
-  if (!pointer) throw releaseError('CORPUS_RELEASE_POINTER_MISSING', 'bootstrap/corpus-release.json is missing.');
-  const temporary = options.temporaryDirectory
-    || await fsp.mkdtemp(path.join(os.tmpdir(), 'edurag-corpus-release-download-'));
+  let phase = 'REMOTE_READ';
+  let temporary = options.temporaryDirectory || null;
   const ownsTemporary = !options.temporaryDirectory;
   try {
-    const remote = await downloadRemoteManifest({ config, objectStore, pointer, directory: temporary });
+    const config = options.config || loadCloudConfig(options);
+    const objectStore = options.objectStore || defaultObjectStore(config);
+    const pointer = options.pointer || await readPointer(options);
+    if (!pointer) throw releaseError('CORPUS_RELEASE_POINTER_MISSING', 'bootstrap/corpus-release.json is missing.');
+    phase = 'STAGE';
+    temporary = temporary || await (options.createTemporaryDirectory || fsp.mkdtemp)(
+      path.join(os.tmpdir(), 'edurag-corpus-release-download-')
+    );
+    const setPhase = (value) => { phase = value; };
+    const remote = await downloadRemoteManifest({
+      config, objectStore, pointer, directory: temporary, setPhase
+    });
     const files = new Map();
     let index = 0;
     for (const artifact of releaseArtifacts(remote.manifest)) {
+      phase = 'REMOTE_READ';
       const metadata = await objectStore.metadata(artifact.objectKey);
+      phase = 'VERIFY';
       verifyObjectMetadata(metadata, artifact, remote.manifest);
       const file = path.join(temporary, `artifact-${index}`);
       index += 1;
+      phase = 'REMOTE_READ';
       await objectStore.download(artifact.objectKey, file);
+      phase = 'VERIFY';
       await verifyDownloadedArtifact(file, artifact);
       files.set(artifact.objectKey, file);
     }
     return { ...remote, files, temporary, ownsTemporary, config, objectStore, pointer };
   } catch (error) {
-    if (ownsTemporary) await fsp.rm(temporary, { recursive: true, force: true }).catch(() => {});
-    throw error;
+    if (ownsTemporary && temporary) {
+      try {
+        await (options.removeTemporaryDirectory || fsp.rm)(temporary, { recursive: true, force: true });
+      } catch (_cleanupError) {
+        throw markCorpusFailure(releaseError(
+          'CORPUS_TEMP_CLEANUP_FAILED',
+          'The temporary remote corpus staging directory could not be removed safely.'
+        ), { phase: 'FINALIZE', localMutationStarted: false, rollbackConfirmed: false });
+      }
+    }
+    const normalized = phase === 'REMOTE_READ' ? normalizeRemoteReadError(error) : error;
+    throw markCorpusFailure(normalized, {
+      phase, localMutationStarted: false, rollbackConfirmed: false
+    });
   }
 }
 
@@ -1028,12 +1058,23 @@ function assertExpectedCounts(reconciled, manifest) {
 }
 
 async function restoreCorpus(options = {}) {
-  const downloaded = await (options.downloadRelease || downloadAndVerifyRelease)(options);
+  let phase = 'REMOTE_READ';
+  let localMutationStarted = false;
+  let rollbackConfirmed = false;
+  let downloaded;
+  try {
+    downloaded = await (options.downloadRelease || downloadAndVerifyRelease)(options);
+  } catch (error) {
+    if (error?.corpusPhase) throw error;
+    const normalized = normalizeRemoteReadError(error);
+    throw markCorpusFailure(normalized, { phase, localMutationStarted, rollbackConfirmed });
+  }
   const manageWriterLifecycle = options.manageWriterLifecycle ?? !options.restoreStructured;
   let pausedWriters = [];
   let structuredState = null;
   let removeSignalGuard = () => {};
   try {
+    phase = 'STAGE';
     await (options.ensureDataServices || runtime.ensureDataServices)();
     if (manageWriterLifecycle) {
       pausedWriters = await (options.freezeWriters || runtime.freezeWriters)();
@@ -1046,6 +1087,8 @@ async function restoreCorpus(options = {}) {
     const local = await inspect(downloaded.manifest);
     let structuredRestored = false;
     if (local.state === 'EMPTY') {
+      phase = 'APPLY';
+      localMutationStarted = true;
       if (options.restoreStructured) {
         structuredState = await options.restoreStructured(downloaded);
       } else {
@@ -1056,6 +1099,7 @@ async function restoreCorpus(options = {}) {
       }
       structuredRestored = true;
     }
+    phase = 'FINALIZE';
     const reconciled = await (options.reconcileRuntime || runtime.reconcileRuntime)();
     const counts = assertExpectedCounts(reconciled, downloaded.manifest);
     const verifiedLocal = await inspect(downloaded.manifest);
@@ -1078,14 +1122,18 @@ async function restoreCorpus(options = {}) {
     return result;
   } catch (error) {
     if (typeof structuredState?.rollbackRestore === 'function') {
-      try { await structuredState.rollbackRestore(); } catch (_rollbackError) {
-        throw releaseError(
+      phase = 'ROLLBACK';
+      try {
+        await structuredState.rollbackRestore();
+        rollbackConfirmed = true;
+      } catch (_rollbackError) {
+        throw markCorpusFailure(releaseError(
           'CORPUS_RESTORE_ROLLBACK_FAILED',
           'Cloud restore failed and the previous empty state could not be recovered safely.'
-        );
+        ), { phase: 'ROLLBACK', localMutationStarted, rollbackConfirmed: false });
       }
     }
-    throw error;
+    throw markCorpusFailure(error, { phase, localMutationStarted, rollbackConfirmed });
   } finally {
     removeSignalGuard();
     if (manageWriterLifecycle) {
@@ -1177,12 +1225,13 @@ async function bootstrapCorpus(options = {}) {
     try {
       local = await inspectBootstrapStateWithRetry(options);
     } catch (error) {
-      console.warn(`CORPUS_RESTORE_SKIPPED_LOCAL_UNKNOWN mode=auto reason=${error.code || 'CORPUS_LOCAL_STATE_ERROR'}`);
-      return { status: 'CORPUS_RESTORE_SKIPPED_LOCAL_UNKNOWN', reason: error.code || 'CORPUS_LOCAL_STATE_ERROR' };
+      throw releaseError(
+        'CORPUS_LOCAL_STATE_UNKNOWN',
+        `Local corpus state could not be verified (${error.code || 'CORPUS_LOCAL_STATE_ERROR'}).`
+      );
     }
     if (local.state === 'UNKNOWN') {
-      console.warn(`CORPUS_RESTORE_SKIPPED_LOCAL_UNKNOWN mode=auto reason=${local.reason}`);
-      return { status: 'CORPUS_RESTORE_SKIPPED_LOCAL_UNKNOWN', reason: local.reason, stores: local.stores };
+      throw releaseError('CORPUS_LOCAL_STATE_UNKNOWN', 'Local corpus state could not be verified as empty.');
     }
     if (local.state !== 'EMPTY') {
       console.warn(
@@ -1202,27 +1251,50 @@ async function bootstrapCorpus(options = {}) {
     try {
       cloud = validateOptionalCloudConfiguration(options);
     } catch (error) {
+      if (!['GCS_CONFIG_MISSING', 'GCS_CONFIG_INVALID', 'GCS_CREDENTIAL_MISSING', 'GCS_CREDENTIAL_INVALID']
+        .includes(error.code)) throw error;
       console.warn(`CORPUS_BOOTSTRAP_SKIPPED reason=${error.code} local=EMPTY`);
-      return { status: 'DEGRADED', reason: error.code, local: 'EMPTY' };
+      return { status: 'DEGRADED', code: error.code, reason: error.code, local: 'EMPTY', phase: 'REMOTE_READ' };
     }
     if (cloud.state === 'NOT_CONFIGURED') {
       console.warn('CORPUS_BOOTSTRAP_SKIPPED reason=GCS_CONFIG_MISSING local=EMPTY');
-      return { status: 'DEGRADED', reason: 'GCS_CONFIG_MISSING', local: 'EMPTY' };
+      return {
+        status: 'DEGRADED', code: 'GCS_CONFIG_MISSING', reason: 'GCS_CONFIG_MISSING',
+        local: 'EMPTY', phase: 'REMOTE_READ'
+      };
     }
     console.log('CORPUS_LOCAL_EMPTY mode=auto action=RESTORE_SELECTED_RELEASE');
   }
   try {
     return await (options.restore || restoreCorpus)(options);
   } catch (error) {
-    const degradable = new Set([
-      'GCS_CONFIG_MISSING', 'GCS_CREDENTIAL_MISSING', 'GCS_CREDENTIAL_INVALID',
-      'GCS_READ_PERMISSION_REQUIRED', 'GCS_REMOTE_READ_FAILED', 'GCS_OBJECT_MISSING',
-      'CORPUS_RELEASE_POINTER_MISSING'
-    ]);
-    if (mode === 'required' || !degradable.has(error.code)) throw error;
-    const local = await inspectBootstrapStateWithRetry(options);
+    if (mode === 'required' || !isDegradableRemoteReadFailure(error)) throw error;
+    let local;
+    try {
+      local = await inspectBootstrapStateWithRetry(options);
+    } catch (_inspectError) {
+      throw releaseError(
+        'CORPUS_LOCAL_STATE_UNKNOWN',
+        'Local corpus state could not be re-confirmed after the remote-read failure.'
+      );
+    }
+    if (local.state === 'UNKNOWN') {
+      throw releaseError(
+        'CORPUS_LOCAL_STATE_UNKNOWN',
+        'Local corpus state could not be re-confirmed as empty after the remote-read failure.'
+      );
+    }
+    if (local.state !== 'EMPTY') {
+      throw releaseError(
+        'CORPUS_LOCAL_STATE_CHANGED',
+        'Local corpus state changed during remote bootstrap; empty-state fallback is unsafe.'
+      );
+    }
     console.warn(`CORPUS_BOOTSTRAP_SKIPPED reason=${error.code} local=${local.state}`);
-    return { status: 'DEGRADED', reason: error.code, local: local.state };
+    return {
+      status: 'DEGRADED', code: error.code, reason: error.code,
+      local: local.state, phase: error.corpusPhase
+    };
   }
 }
 

@@ -13,6 +13,7 @@ const {
   compose,
   composeProject,
   docker,
+  assertRemoteResetAllowed,
   publishedPort,
   redacted,
   resolvedComposeConfig,
@@ -103,7 +104,11 @@ async function main() {
       cwd: root,
       env: {
         ...process.env,
-        CORPUS_BOOTSTRAP: 'off',
+        CORPUS_BOOTSTRAP: 'auto',
+        GCS_PROJECT_ID: '',
+        GCS_BUCKET: '',
+        GCS_OBJECT_PREFIX: '',
+        GCS_CREDENTIALS_FILE: '',
         REMOTE_DEV_ALL_LOGS: 'false',
         REMOTE_DEV_TEST_SHUTDOWN_AFTER_ATTACH_MS: '1000'
       },
@@ -112,9 +117,12 @@ async function main() {
     });
     let output = '';
     let attached = false;
+    const lifecycleTimeoutMs = Number(process.env.REMOTE_DEV_LIFECYCLE_TIMEOUT_MS || 600000);
+    assert(Number.isFinite(lifecycleTimeoutMs) && lifecycleTimeoutMs >= 60000,
+      'REMOTE_DEV_LIFECYCLE_TIMEOUT_MS must be at least 60000.');
     const deadline = setTimeout(() => {
       if (!child.killed) child.kill('SIGTERM');
-    }, 300000);
+    }, lifecycleTimeoutMs);
 
     function capture(chunk) {
       const text = redacted(chunk.toString());
@@ -136,6 +144,8 @@ async function main() {
       `REMOTE_DEV_TOPOLOGY db=db:3306 hostDbPort=${dbHostPort} mode=remote`
     ));
     assert.match(output, /REMOTE_DEV_RECREATED service=app mode=remote volumes=retained/);
+    assert.match(output, /CORPUS_BOOTSTRAP_SKIPPED reason=GCS_CONFIG_MISSING local=EMPTY/);
+    assert.match(output, /REMOTE_DEV_CORPUS state=DEGRADED/);
     assert.match(output, /REMOTE_DEV_STOPPING reason=TEST_SIGNAL/);
     assert.match(output, /REMOTE_DEV_STOPPED volumes=retained/);
 
@@ -153,12 +163,30 @@ async function main() {
     for (const suffix of ['mysql_data', 'qdrant_data', 'uploads_data']) {
       docker(['volume', 'inspect', `${composeProject}_${suffix}`]);
     }
+
+    compose(['down', '--remove-orphans']);
+    assert.equal(docker([
+      'ps', '-a', '--filter', `label=com.docker.compose.project=${composeProject}`, '--format', '{{.ID}}'
+    ]).trim(), '', 'down must remove project containers.');
+    assert.equal(docker([
+      'network', 'ls', '--filter', `label=com.docker.compose.project=${composeProject}`, '--format', '{{.ID}}'
+    ]).trim(), '', 'down must remove the project network.');
+    for (const suffix of ['mysql_data', 'qdrant_data', 'uploads_data']) {
+      docker(['volume', 'inspect', `${composeProject}_${suffix}`]);
+    }
+    compose(['up', '-d', '--wait', 'db', 'qdrant']);
+    compose(['stop']);
+    for (const suffix of ['mysql_data', 'qdrant_data', 'uploads_data']) {
+      docker(['volume', 'inspect', `${composeProject}_${suffix}`]);
+    }
     console.log(
       'REMOTE_DEV_LIFECYCLE_OK legacy_port_3306=unavailable '
-      + 'internal_db=db:3306 mode=remote controlled_shutdown=true volumes=retained'
+      + 'internal_db=db:3306 mode=remote corpus=degraded_empty '
+      + 'controlled_shutdown=true down=volumes_retained rerun=true'
     );
   } finally {
     if (blocker.owned) docker(['rm', '-f', blocker.name], { allowFailure: true });
+    assertRemoteResetAllowed(['down', '-v', '--remove-orphans']);
     compose(['down', '-v', '--remove-orphans'], { allowFailure: true });
     assert.equal(projectResources().length, 0,
       `Lifecycle test cleanup left Docker resources for ${composeProject}.`);

@@ -68,8 +68,26 @@ function spawnCompose(args, options = {}) {
   });
 }
 
+function assertRemoteResetAllowed(args, environment = process.env, project = composeProject) {
+  const removesVolumes = args.includes('-v') || args.includes('--volumes');
+  if (!removesVolumes) return;
+  const isolatedTest = environment.REMOTE_E2E_CONFIRM_ISOLATED === 'true'
+    && /^edurag_remote_test_[a-zA-Z0-9_.-]+$/.test(project);
+  const explicitlyConfirmed = String(environment.REMOTE_RESET_CONFIRM_PROJECT || '') === project;
+  if (!isolatedTest && !explicitlyConfirmed) {
+    const error = new Error(
+      `Destructive reset is blocked for Compose project ${project}. `
+      + `Set REMOTE_RESET_CONFIRM_PROJECT=${project} for this command only after verifying the target.`
+    );
+    error.code = 'REMOTE_RESET_CONFIRMATION_REQUIRED';
+    throw error;
+  }
+}
+
 function runComposeCli() {
-  const result = spawnSync('docker', composeCommandArgs(process.argv.slice(2)), {
+  const args = process.argv.slice(2);
+  assertRemoteResetAllowed(args);
+  const result = spawnSync('docker', composeCommandArgs(args), {
     cwd: root,
     stdio: 'inherit',
     windowsHide: true,
@@ -172,6 +190,7 @@ module.exports = {
   composePort,
   resolvedComposeConfig,
   publishedPort,
+  assertRemoteResetAllowed,
   assertRemoteDbHostPortAvailable,
   REMOTE_REQUIRED_ENVIRONMENT,
   assertRemoteEnvironment,

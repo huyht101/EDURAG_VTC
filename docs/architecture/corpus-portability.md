@@ -62,11 +62,11 @@ read-only. This is tracked as `CORPUS-EQ-001` in the
 
 | Mode | Hành vi |
 |---|---|
-| `auto` | Chỉ restore selected release khi cả MySQL business state, Qdrant và uploads đều `EMPTY`. `PRESENT` (kể cả partial/in-progress) được giữ, cảnh báo và không exact-compare. `UNKNOWN/ERROR` không bao giờ bị coi là empty: không restore, trả diagnostic và tiếp tục local startup. |
+| `auto` | Chỉ restore selected release khi cả MySQL business state, Qdrant và uploads đều `EMPTY`. `PRESENT` (kể cả partial/in-progress) được giữ, cảnh báo và không exact-compare. `UNKNOWN/ERROR` fail closed. Confirmed `EMPTY` được tiếp tục `DEGRADED` chỉ với remote config/credential/permission/missing-object/transport failure ở phase remote read trước local mutation. |
 | `required` | Acceptance mode: selected release/credential/artifacts phải hợp lệ và local non-empty phải khớp exact release. Mismatch fail closed. |
 | `off` | Không đọc/restore/so sánh cloud release. Local startup tiếp tục độc lập. |
 
-`auto` chỉ fail hard sau khi restore đã thực sự bắt đầu mà package/integrity/apply/rollback lỗi. Cloud/config/credential unavailable và local-state `UNKNOWN/ERROR` không kích hoạt restore; log stable reason code để operator xử lý. Job/document đang xử lý và partial local stores là `PRESENT`, không bị gọi nhầm là cloud fingerprint corruption và không bị overwrite. `required` vẫn fail với unknown/partial/mismatch.
+Bootstrap theo dõi phase `REMOTE_READ`, `STAGE`, `VERIFY`, `APPLY`, `ROLLBACK`, `FINALIZE` cùng cờ local mutation/rollback. `auto` không degrade integrity/incompatible-manifest, local service/filesystem error, unknown programming error, post-apply failure hoặc rollback failure. Raw `TypeError("fetch failed")`, abort/timeout/network, HTTP availability, permission và missing-object được chuẩn hóa tại remote boundary; log chỉ dùng stable code/sanitized reason. Job/document đang xử lý và partial local stores là `PRESENT`, không bị gọi nhầm là cloud fingerprint corruption và không bị overwrite. `required` luôn fail closed với remote failure và unknown/partial/mismatch.
 
 `auto` không chạy deep exact-release verification mỗi lần dev startup. Dùng `required` hoặc `npm run corpus:verify` khi cần acceptance strict.
 
@@ -92,7 +92,7 @@ Flow canonical: [Corpus publish](../flows/mermaid/10_corpus_publish.mmd). Signal
 
 ## Restore và giới hạn
 
-Restore download/stage/verify toàn bộ trước apply và chỉ chạy khi local `EMPTY`. Trong apply, tool giữ writer pause, tạo in-memory recovery dump cho empty MySQL state, phục hồi exact empty Qdrant config và xóa đúng originals vừa materialize nếu bước sau thất bại. Đây là coordinated recovery, không phải distributed transaction; rollback failure trả `CORPUS_RESTORE_ROLLBACK_FAILED` và không được tự merge/overwrite tiếp. Không có hidden `--force` hoặc replace-local command; thay corpus phải dùng project/volumes disposable được operator xác nhận ngoài tool.
+Restore download/stage/verify toàn bộ trước apply và chỉ chạy khi local `EMPTY`. Temporary download/staging được xóa trong normal/error path; upload-volume helper container được xóa trong `finally`. Trong apply, tool giữ writer pause, tạo in-memory recovery dump cho empty MySQL state, phục hồi exact empty Qdrant config và xóa đúng originals vừa materialize nếu bước sau thất bại. Đây là coordinated recovery, không phải distributed transaction; rollback failure trả `CORPUS_RESTORE_ROLLBACK_FAILED` và không được tự merge/overwrite tiếp. Không có hidden `--force` hoặc replace-local command; thay corpus phải dùng project/volumes disposable được operator xác nhận. Remote reset yêu cầu `REMOTE_RESET_CONFIRM_PROJECT` khớp chính xác project (test project `edurag_remote_test_*` dùng isolated confirmation riêng).
 
 Restore không ingest, LlamaParse hoặc document-embed lại. Mỗi live query vẫn cần query embedding và có thể cần LLM generation. Thay model/dimension hoặc incompatible pipeline semantics có thể yêu cầu corpus mới.
 

@@ -73,15 +73,25 @@ class DockerUploadVolume {
     const resolved = this.ensure();
     const name = `edurag-corpus-release-${crypto.randomUUID()}`;
     const image = this.appImage();
+    let helperStarted = false;
     try {
       this.docker([
         'run', '-d', '--name', name,
         '-v', `${resolved.volumeName}:/uploads`,
         image, 'node', '-e', 'setInterval(() => {}, 1000)'
       ]);
+      helperStarted = true;
       return await callback(name, resolved.volumeName);
     } finally {
-      this.docker(['rm', '-f', name], { allowFailure: true });
+      if (helperStarted) {
+        const removed = this.docker(['rm', '-f', name], { allowFailure: true });
+        if (!dockerResultSucceeded(removed)) {
+          throw releaseError(
+            'CORPUS_HELPER_CLEANUP_FAILED',
+            'The temporary upload-volume helper container could not be removed safely.'
+          );
+        }
+      }
     }
   }
 

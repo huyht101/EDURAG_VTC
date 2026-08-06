@@ -1,5 +1,9 @@
 'use strict';
 
+process.env.REMOTE_COMPOSE_PROJECT = process.env.CORPUS_PARTIAL_COMPOSE_PROJECT
+  || `edurag_corpus_partial_${process.pid}`;
+process.env.REMOTE_E2E_CONFIRM_ISOLATED = 'true';
+
 const assert = require('assert/strict');
 
 const { bootstrapCorpus, inspectBootstrapState } = require('./corpus-manager');
