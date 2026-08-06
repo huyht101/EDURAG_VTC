@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     # === Google Gemini API ===
     GOOGLE_API_KEY: str
 
+    # === OCR Mode ===
+    OCR_MODE: str = "OFF"
+
     # === LlamaParse (LlamaIndex Cloud) ===
     LLAMA_CLOUD_API_KEY: str
 

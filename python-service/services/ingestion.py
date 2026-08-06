@@ -146,7 +146,7 @@ async def _activate_attempt_points(
     attempt_count: int,
 ) -> int:
     """
-    Kích hoạt các points của attempt này: set is_hidden=False.
+    Kích hoạt các points của attempt này: set is_active=True.
     CHỈ gọi sau khi Node.js ACK thành công (SUCCEEDED callback được nhận).
 
     Returns: số points đã activate.
@@ -156,7 +156,7 @@ async def _activate_attempt_points(
     client = await get_qdrant_client()
     client.set_payload(
         collection_name=settings.QDRANT_COLLECTION_NAME,
-        payload={"is_hidden": False},
+        payload={"is_active": True},
         points=models.Filter(
             must=[
                 models.FieldCondition(
@@ -201,9 +201,9 @@ async def ingest_document_background(request: IngestRequest) -> None:
     Bước 1: Parse file (PDF/DOCX/TXT).
     Bước 2: Chia chunks bằng SentenceSplitter.
     Bước 3: Tạo embeddings.
-    Bước 4: Upsert Qdrant (is_hidden=True — fail-closed).
+    Bước 4: Upsert Qdrant (is_active=False — fail-closed).
     Bước 5: Callback SUCCEEDED → nhận ACK.
-    Bước 6: ACK OK  → activate (is_hidden=False).
+    Bước 6: ACK OK  → activate (is_active=True).
              ACK FAIL → cleanup attempt này.
     """
     settings = get_settings()
@@ -321,7 +321,8 @@ async def ingest_document_background(request: IngestRequest) -> None:
                     "section": metadata.get("section"),
                     "chunk_index": i,
                     # RAG-001: Fail-closed — KHÔNG retrieval cho đến khi Node ACK
-                    "is_hidden": True,
+                    "is_active": False,
+                    "is_hidden": False,
                     # RAG-002: Đánh dấu attempt để cleanup orphan
                     _ATTEMPT_FIELD: attempt_key,
                     # Teacher metadata
@@ -354,7 +355,7 @@ async def ingest_document_background(request: IngestRequest) -> None:
             )
 
         logger.info(
-            "[INGEST] Upsert thành công %d chunks (is_hidden=True): doc_id=%s, attempt=%d",
+            "[INGEST] Upsert thành công %d chunks (is_active=False): doc_id=%s, attempt=%d",
             len(points), doc_id, attempt_count,
         )
 

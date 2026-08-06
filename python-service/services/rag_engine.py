@@ -282,6 +282,12 @@ async def process_query(request: QueryRequest) -> QueryResponse:
             collection_name=settings.QDRANT_COLLECTION_NAME,
             query=question_vector,
             query_filter=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="is_active",
+                        match=models.MatchValue(value=True),
+                    )
+                ],
                 must_not=[
                     models.FieldCondition(
                         key="is_hidden",
@@ -492,10 +498,22 @@ def _extract_citations(
 ) -> tuple[str, list[Citation]] | None:
     """
     Ánh xạ marker về retrieval result và đánh lại marker liên tục.
-
     Marker không có nguồn hợp lệ làm toàn bộ citation set bị từ chối.
+    Bỏ qua marker nằm trong code blocks hoặc liền kề ký tự (như array[1]).
     """
-    raw_matches = re.findall(r"\[(\d+)\]", answer)
+    # 1. Tạm thời ẩn các đoạn code để không bị regex match nhầm
+    code_pattern = r"(```.*?```|`.*?`)"
+    codes = []
+    def _hide_code(m):
+        codes.append(m.group(0))
+        return f"__CODE_BLOCK_{len(codes)-1}__"
+    
+    answer_no_code = re.sub(code_pattern, _hide_code, answer, flags=re.DOTALL)
+
+    # 2. Tìm marker, không lấy nếu liền trước là chữ/số (ví dụ: array[1])
+    marker_pattern = r"(?<![a-zA-Z0-9_])\[(\d+)\]"
+    raw_matches = re.findall(marker_pattern, answer_no_code)
+    
     if not raw_matches:
         return None
     referenced_indices: list[int] = []
@@ -511,11 +529,17 @@ def _extract_citations(
         original_idx: citation_idx
         for citation_idx, original_idx in enumerate(referenced_indices, start=1)
     }
-    normalized_answer = re.sub(
-        r"\[(\d+)\]",
+    normalized_answer_no_code = re.sub(
+        marker_pattern,
         lambda match: f"[{marker_map[int(match.group(1))]}]",
-        answer,
+        answer_no_code,
     )
+    
+    # Khôi phục code blocks
+    normalized_answer = normalized_answer_no_code
+    for i, code_text in enumerate(codes):
+        normalized_answer = normalized_answer.replace(f"__CODE_BLOCK_{i}__", code_text)
+        
     citations = []
     for idx in referenced_indices:
         result = results[idx - 1]
