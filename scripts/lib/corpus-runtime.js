@@ -169,10 +169,20 @@ async function qdrantBaseUrl() {
 }
 
 async function qdrantRequest(endpoint, options = {}) {
-  const response = await fetch(`${await qdrantBaseUrl()}${endpoint}`, {
-    ...options,
-    signal: options.signal || AbortSignal.timeout(options.timeoutMs || 30000)
-  });
+  let response;
+  try {
+    response = await fetch(`${await qdrantBaseUrl()}${endpoint}`, {
+      ...options,
+      signal: options.signal || AbortSignal.timeout(options.timeoutMs || 30000)
+    });
+  } catch (cause) {
+    const error = corpusError(
+      options.errorCode || 'CORPUS_QDRANT_REQUEST_FAILED',
+      'Qdrant request failed before an HTTP response was received.'
+    );
+    error.cause = cause;
+    throw error;
+  }
   if (!response.ok) {
     const message = (await response.text()).split(/\r?\n/, 1)[0].slice(0, 500);
     throw corpusError(
@@ -485,6 +495,20 @@ async function assertSanitizedSource(points = [], options = {}) {
   };
 }
 
+function assertPointLifecycle(point, chunk) {
+  if (point.payload?.is_active !== true) {
+    throw corpusError(
+      'CORPUS_QDRANT_LIFECYCLE_INCOMPATIBLE',
+      `Qdrant point is not exact-attempt active for ${chunk.vectorNodeId}.`
+    );
+  }
+  const expectedHidden = chunk.visibilityStatus === 'HIDDEN';
+  if (typeof point.payload?.is_hidden !== 'boolean'
+    || point.payload.is_hidden !== expectedHidden) {
+    throw corpusError('CORPUS_CROSS_STORE_MISMATCH', `Qdrant visibility mismatch for ${chunk.vectorNodeId}.`);
+  }
+}
+
 async function reconcileRuntime(options = {}) {
   const stats = databaseStats();
   const qdrant = await qdrantRuntimeInfo();
@@ -516,10 +540,7 @@ async function reconcileRuntime(options = {}) {
       || sha256Buffer(Buffer.from(point.payload.text, 'utf8')) !== chunk.contentHash.toLowerCase()) {
       throw corpusError('CORPUS_CROSS_STORE_MISMATCH', `Qdrant text hash mismatch for ${chunk.vectorNodeId}.`);
     }
-    const expectedHidden = chunk.visibilityStatus === 'HIDDEN';
-    if (Boolean(point.payload?.is_hidden) !== expectedHidden) {
-      throw corpusError('CORPUS_CROSS_STORE_MISMATCH', `Qdrant visibility mismatch for ${chunk.vectorNodeId}.`);
-    }
+    assertPointLifecycle(point, chunk);
   }
   const extras = points.filter((point) => !chunkIds.has(String(point.id)));
   if (extras.length) {
@@ -933,6 +954,7 @@ module.exports = {
   BUNDLE_DIRECTORY,
   activeChunkInventory,
   assertSafeMysqlDump,
+  assertPointLifecycle,
   assertSanitizedSource,
   assertScopedMysqlTables,
   bootstrapEmpty,

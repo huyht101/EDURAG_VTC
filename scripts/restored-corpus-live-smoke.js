@@ -2,8 +2,10 @@
 
 const assert = require('assert/strict');
 const crypto = require('crypto');
+const jwt = require('jsonwebtoken');
 const mysql = require('mysql2/promise');
 
+const authConfig = require('../src/configs/auth');
 const { main: runPreflight } = require('./remote-preflight');
 const { reconcileRuntime } = require('./lib/corpus-runtime');
 const {
@@ -52,6 +54,24 @@ async function httpRequest(baseUrl, requestPath, options = {}, expected = [200])
 
 function bearer(token, extra = {}) {
   return { authorization: `Bearer ${token}`, ...extra };
+}
+
+function existingOwnerToken(row) {
+  return jwt.sign(
+    {
+      id: Number(row.owner_id), role: row.owner_role,
+      authVersion: Number(row.auth_version), type: authConfig.purpose
+    },
+    authConfig.secret,
+    {
+      algorithm: authConfig.algorithm,
+      issuer: authConfig.issuer,
+      audience: authConfig.audience,
+      subject: String(row.owner_id),
+      jwtid: crypto.randomUUID(),
+      expiresIn: '1h'
+    }
+  );
 }
 
 async function adminToken(baseUrl) {
@@ -110,7 +130,7 @@ async function main() {
   });
 
   try {
-    const token = await adminToken(baseUrl);
+    let token = await adminToken(baseUrl);
     const beforeCounts = await databaseCounts(pool);
     const beforeStores = await reconcileRuntime();
     assert(beforeCounts.documents > 0, 'Approved restored corpus contains no documents.');
@@ -121,8 +141,12 @@ async function main() {
     let result;
     if (verifyExisting) {
       const [messages] = await pool.query(
-        `SELECT cm.id, user_message.client_request_id, cm.content, cm.status, cm.no_answer
+        `SELECT cm.id, user_message.client_request_id, cm.content, cm.status, cm.no_answer,
+                cs.user_id AS owner_id, u.auth_version, r.code AS owner_role
          FROM chat_messages cm
+         JOIN chat_sessions cs ON cs.id = cm.session_id
+         JOIN users u ON u.id = cs.user_id
+         JOIN roles r ON r.id = u.role_id
          JOIN chat_messages user_message
            ON user_message.session_id = cm.session_id
           AND user_message.message_order = cm.message_order - 1
@@ -132,6 +156,7 @@ async function main() {
          ORDER BY cm.id DESC LIMIT 1`
       );
       assert(messages[0], 'No persisted live assistant result with citations is available to verify.');
+      token = existingOwnerToken(messages[0]);
       const [citations] = await pool.execute(
         `SELECT id, document_id AS documentId FROM citations WHERE message_id = ? ORDER BY citation_order`,
         [messages[0].id]
@@ -183,20 +208,27 @@ async function main() {
     })).payload.data;
     assert(detail.sourceText && source.sourceText, 'Citation immutable source snapshot is empty.');
     const expectOriginal = process.env.RESTORED_CORPUS_EXPECT_ORIGINAL === 'true';
-    assert.equal(detail.originalAvailable, expectOriginal, 'Restored original availability differs from expectation.');
+    const [[document]] = await pool.execute(
+      'SELECT uploaded_by, checksum_sha256 FROM documents WHERE id = ?',
+      [approved.documentId]
+    );
+    assert(document?.checksum_sha256, 'Restored document checksum metadata is missing.');
+    const actor = jwt.decode(token);
+    const actorCanReadOriginal = expectOriginal && (actor?.role === 'ADMIN'
+      || (actor?.role === 'TEACHER' && Number(actor.id) === Number(document.uploaded_by)));
+    assert.equal(
+      detail.originalAvailable,
+      actorCanReadOriginal,
+      'Restored role-aware original availability differs from expectation.'
+    );
 
     const documentFile = await httpRequest(baseUrl, `/api/documents/${approved.documentId}/file`, {
       headers: bearer(token)
-    }, expectOriginal ? [200] : [404]);
+    }, actorCanReadOriginal ? [200] : (expectOriginal ? [403] : [404]));
     const citationFile = await httpRequest(baseUrl, `/api/citations/${citation.id}/file`, {
       headers: bearer(token)
-    }, expectOriginal ? [200] : [409]);
-    if (expectOriginal) {
-      const [[document]] = await pool.execute(
-        'SELECT checksum_sha256 FROM documents WHERE id = ?',
-        [approved.documentId]
-      );
-      assert(document?.checksum_sha256, 'Restored document checksum metadata is missing.');
+    }, actorCanReadOriginal ? [200] : (expectOriginal ? [403] : [409]));
+    if (actorCanReadOriginal) {
       for (const fileResponse of [documentFile, citationFile]) {
         assert.equal(
           crypto.createHash('sha256').update(fileResponse.body).digest('hex'),

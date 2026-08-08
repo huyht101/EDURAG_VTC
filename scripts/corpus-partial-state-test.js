@@ -3,6 +3,11 @@
 process.env.REMOTE_COMPOSE_PROJECT = process.env.CORPUS_PARTIAL_COMPOSE_PROJECT
   || `edurag_corpus_partial_${process.pid}`;
 process.env.REMOTE_E2E_CONFIRM_ISOLATED = 'true';
+process.env.MYSQL_ROOT_PASSWORD = 'offline-corpus-root-password';
+process.env.DB_PASSWORD = process.env.MYSQL_ROOT_PASSWORD;
+process.env.GOOGLE_API_KEY = 'offline-not-used';
+process.env.RAG_INTERNAL_TOKEN = 'offline-corpus-internal-token-0123456789';
+process.env.OCR_MODE = 'OFF';
 
 const assert = require('assert/strict');
 
@@ -75,18 +80,19 @@ async function main() {
     const previousMode = process.env.CORPUS_BOOTSTRAP;
     process.env.CORPUS_BOOTSTRAP = 'auto';
     try {
-      const result = await bootstrapCorpus({
-        inspectBootstrap: () => inspectBootstrapState({
-          inspectUploads: async () => ({ empty: true, fileCount: 0 })
-        })
-      });
-      assert.equal(result.status, 'CORPUS_RESTORE_SKIPPED_LOCAL_PRESENT');
-      assert.equal(result.partial, true);
+      await assert.rejects(
+        () => bootstrapCorpus({
+          inspectBootstrap: () => inspectBootstrapState({
+            inspectUploads: async () => ({ empty: true, fileCount: 0, releaseState: null })
+          })
+        }),
+        (error) => error.code === 'CORPUS_PARTIAL_STATE'
+      );
     } finally {
       if (previousMode === undefined) delete process.env.CORPUS_BOOTSTRAP;
       else process.env.CORPUS_BOOTSTRAP = previousMode;
     }
-    console.log('CORPUS_PARTIAL_STATE_TEST_OK auto=retained no_overwrite=true');
+    console.log('CORPUS_PARTIAL_STATE_TEST_OK auto=failed_closed no_overwrite=true');
   } finally {
     compose(['down', '-v', '--remove-orphans'], { allowFailure: true });
     assertProjectUnused();

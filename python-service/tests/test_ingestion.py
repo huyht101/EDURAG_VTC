@@ -6,8 +6,8 @@ Unit tests cho services/ingestion.py.
 Kiểm tra:
 - RAG-002: _make_chunk_id() là deterministic (cùng input → cùng output).
 - RAG-002: Các attempt khác nhau → ID khác nhau.
-- RAG-001: Upsert xảy ra với is_hidden=True trước callback.
-- RAG-001: Activate (is_hidden=False) CHỈ xảy ra sau ACK thành công.
+- RAG-001: Upsert xảy ra với is_active=False trước callback.
+- RAG-001: Activate (is_active=True) CHỈ xảy ra sau ACK thành công.
 - RAG-001: Cleanup xảy ra khi ACK thất bại.
 - RAG-002: cleanup_attempt_points xóa đúng points theo attempt_key.
 - EMBEDDING_COUNT_MISMATCH guard vẫn hoạt động.
@@ -41,6 +41,8 @@ from services.ingestion import (
     _make_chunk_id,
     _make_attempt_key,
     _ack_allows_activation,
+    _activate_attempt_points_with_retry,
+    _embedding_validation_error,
     _ATTEMPT_FIELD,
 )
 
@@ -106,6 +108,8 @@ class TestMakeChunkId:
 
     def test_activation_ack_is_fail_closed(self):
         assert _ack_allows_activation(accepted_ack("job1", 1), "job1", 1)
+        replay_ack = {**accepted_ack("job1", 1), "outcome": "IDEMPOTENT_REPLAY"}
+        assert _ack_allows_activation(replay_ack, "job1", 1)
         for ack in [
             None,
             {},
@@ -116,6 +120,39 @@ class TestMakeChunkId:
             {**accepted_ack("job1", 1), "status": "RUNNING"},
         ]:
             assert not _ack_allows_activation(ack, "job1", 1)
+
+
+@pytest.mark.asyncio
+async def test_activation_retries_are_bounded_and_idempotent(caplog):
+    activate = AsyncMock(side_effect=[RuntimeError("temporary"), 2])
+    settings = SimpleNamespace(
+        ACTIVATION_MAX_ATTEMPTS=3,
+        ACTIVATION_RETRY_DELAY_SECONDS=0,
+    )
+    with (
+        patch("services.ingestion.get_settings", return_value=settings),
+        patch("services.ingestion._activate_attempt_points", activate),
+    ):
+        activated = await _activate_attempt_points_with_retry("doc", "job", 2, 2)
+    assert activated == 2
+    assert activate.await_count == 2
+    assert "RAG_ACTIVATION_RETRY code=ACTIVATION_RETRY" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_activation_retry_exhaustion_raises_original_failure():
+    activate = AsyncMock(side_effect=RuntimeError("unavailable"))
+    settings = SimpleNamespace(
+        ACTIVATION_MAX_ATTEMPTS=3,
+        ACTIVATION_RETRY_DELAY_SECONDS=0,
+    )
+    with (
+        patch("services.ingestion.get_settings", return_value=settings),
+        patch("services.ingestion._activate_attempt_points", activate),
+        pytest.raises(RuntimeError, match="unavailable"),
+    ):
+        await _activate_attempt_points_with_retry("doc", "job", 2, 2)
+    assert activate.await_count == 3
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -145,15 +182,15 @@ def mock_ingest_request():
 
 
 @pytest.mark.asyncio
-async def test_ingest_upserts_with_is_hidden_true(mock_qdrant_client, mock_ingest_request):
+async def test_ingest_upserts_with_is_active_false(mock_qdrant_client, mock_ingest_request):
     """
-    RAG-001: Points phải được upsert với is_hidden=True trước callback.
+    RAG-001: Points phải được upsert với is_active=False trước callback.
     """
     upserted_payloads = []
 
-    def capture_upsert(collection_name, points):
+    def capture_upsert(collection_name, points, **kwargs):
         for p in points:
-            upserted_payloads.append(p.payload.get("is_hidden"))
+            upserted_payloads.append(p.payload.get("is_active"))
 
     mock_qdrant_client.upsert.side_effect = capture_upsert
     mock_qdrant_client.set_payload = MagicMock()
@@ -192,10 +229,10 @@ async def test_ingest_upserts_with_is_hidden_true(mock_qdrant_client, mock_inges
         from services.ingestion import ingest_document_background
         await ingest_document_background(mock_ingest_request)
 
-    # Tất cả points upsert phải có is_hidden=True
+    # Tất cả points upsert phải có is_active=False
     assert len(upserted_payloads) > 0, "Phải có ít nhất 1 point được upsert"
-    for is_hidden in upserted_payloads:
-        assert is_hidden is True, f"is_hidden phải là True khi upsert, nhận: {is_hidden}"
+    for is_active in upserted_payloads:
+        assert is_active is False, f"is_active phải là False khi upsert, nhận: {is_active}"
 
 
 @pytest.mark.asyncio
@@ -294,9 +331,9 @@ async def test_cleanup_called_when_ack_fails(mock_qdrant_client, mock_ingest_req
 
 
 @pytest.mark.asyncio
-async def test_previous_attempt_cleaned_on_retry():
+async def test_new_attempt_does_not_cleanup_another_attempt():
     """
-    RAG-002: Khi attempt_count > 1, cleanup attempt_count-1 trước khi bắt đầu.
+    Attempt isolation: starting attempt 2 must not delete attempt 1.
     """
     from models.schemas import IngestRequest
     retry_request = IngestRequest(
@@ -318,8 +355,7 @@ async def test_previous_attempt_cleaned_on_retry():
         from services.ingestion import ingest_document_background
         await ingest_document_background(retry_request)
 
-    # Phải cleanup attempt trước (attempt_count - 1 = 1)
-    cleanup_mock.assert_any_call("doc_retry", "job_retry", 1)
+    cleanup_mock.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -373,6 +409,86 @@ async def test_embedding_count_mismatch_sends_failed():
     mock_qdrant.upsert.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    ("embeddings", "expected_error"),
+    [
+        ([[0.1, 0.2]], "EMBEDDING_DIMENSION_MISMATCH"),
+        ([[0.1, float("nan"), 0.3]], "EMBEDDING_VALUE_INVALID"),
+        ([[0.1, float("inf"), 0.3]], "EMBEDDING_VALUE_INVALID"),
+        ([[0.1, True, 0.3]], "EMBEDDING_VALUE_INVALID"),
+    ],
+)
+def test_embedding_vector_contract_rejects_wrong_dimension_or_non_finite_values(
+    embeddings,
+    expected_error,
+):
+    assert _embedding_validation_error(embeddings, 1, 3) == expected_error
+
+
+async def _run_second_batch_failure(cleanup_mock):
+    from models.schemas import IngestRequest
+
+    request = IngestRequest(
+        doc_id="partial-doc",
+        job_id="partial-job",
+        attempt_count=3,
+        subject_id="subject",
+        file_path="/tmp/partial.pdf",
+        callback_url="http://node/callback",
+    )
+    pages = [{"page_number": 1, "text": "content", "chapter": "", "section": ""}]
+    nodes = []
+    for index in range(101):
+        node = MagicMock()
+        node.get_content.return_value = f"chunk-{index}"
+        node.metadata = {"page_number": 1}
+        nodes.append(node)
+
+    qdrant = MagicMock()
+    qdrant.upsert.side_effect = [None, RuntimeError("second batch unavailable")]
+    failed = AsyncMock()
+    succeeded = AsyncMock()
+    with (
+        patch("services.ingestion.parse_document", new=AsyncMock(return_value=pages)),
+        patch("services.ingestion.SentenceSplitter") as splitter_class,
+        patch("services.ingestion.get_embedding_model") as embedding_factory,
+        patch("services.ingestion.get_qdrant_client", new=AsyncMock(return_value=qdrant)),
+        patch("services.ingestion.send_progress", new=AsyncMock()),
+        patch("services.ingestion.send_failed", failed),
+        patch("services.ingestion.send_succeeded_ingest", succeeded),
+        patch("services.ingestion._cleanup_attempt_points", cleanup_mock),
+    ):
+        splitter_class.return_value.get_nodes_from_documents.return_value = nodes
+        embedding_factory.return_value.aget_text_embedding_batch = AsyncMock(
+            return_value=[[0.1] * 768 for _ in nodes]
+        )
+        from services.ingestion import ingest_document_background
+
+        await ingest_document_background(request)
+    return request, qdrant, failed, succeeded
+
+
+@pytest.mark.asyncio
+async def test_second_batch_failure_cleans_only_exact_current_attempt():
+    cleanup = AsyncMock(return_value=100)
+    request, qdrant, failed, succeeded = await _run_second_batch_failure(cleanup)
+    assert qdrant.upsert.call_count == 2
+    cleanup.assert_awaited_once_with(request.doc_id, request.job_id, request.attempt_count)
+    succeeded.assert_not_awaited()
+    assert "QDRANT_UPSERT_FAILED" in str(failed.call_args)
+    assert "second batch unavailable" not in str(failed.call_args)
+
+
+@pytest.mark.asyncio
+async def test_second_batch_failure_reports_residual_state_when_cleanup_fails():
+    cleanup = AsyncMock(side_effect=RuntimeError("cleanup unavailable"))
+    request, _qdrant, failed, succeeded = await _run_second_batch_failure(cleanup)
+    cleanup.assert_awaited_once_with(request.doc_id, request.job_id, request.attempt_count)
+    succeeded.assert_not_awaited()
+    assert "QDRANT_UPSERT_CLEANUP_FAILED" in str(failed.call_args)
+    assert "cleanup unavailable" not in str(failed.call_args)
+
+
 @pytest.mark.asyncio
 async def test_ingest_payload_contains_attempt_key():
     """
@@ -391,7 +507,7 @@ async def test_ingest_payload_contains_attempt_key():
 
     upserted_points = []
 
-    def capture_upsert(collection_name, points):
+    def capture_upsert(collection_name, points, **kwargs):
         upserted_points.extend(points)
 
     mock_qdrant = MagicMock()

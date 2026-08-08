@@ -29,7 +29,7 @@ Node.js (Core)  ──POST /api/ingest──►  Python RAG Service
 - Python 3.11+
 - Qdrant đang chạy (local Docker hoặc Qdrant Cloud)
 - Google API Key (Gemini)
-- LlamaParse API Key (optional — có fallback)
+- LlamaParse API Key (chỉ bắt buộc khi `OCR_MODE=AUTO`)
 
 ### Cài đặt dependencies
 
@@ -42,7 +42,8 @@ pip install -r requirements.txt
 
 ```bash
 cp .env.example .env
-# Điền GOOGLE_API_KEY, INTERNAL_SECRET (phải trùng Node.js), LLAMA_CLOUD_API_KEY
+# Điền GOOGLE_API_KEY và INTERNAL_SECRET.
+# OCR_MODE mặc định OFF; khi đặt AUTO phải điền LLAMA_CLOUD_API_KEY.
 ```
 
 ### Chạy standalone (dev)
@@ -64,7 +65,7 @@ npm run docker:remote:dev
 
 | Method | Path | Auth | Mô tả |
 |--------|------|------|-------|
-| `GET` | `/api/health` | Public | Health check |
+| `GET` | `/api/health` | Public | Health check và OCR mode đã resolve |
 | `POST` | `/api/ingest` | Internal Bearer | Nạp tài liệu (async, 202) |
 | `POST` | `/api/query` | Internal Bearer | Chat/Query RAG (sync, 200) |
 | `PATCH` | `/api/docs/{doc_id}/visibility` | Internal Bearer | Hide/Unhide |
@@ -80,20 +81,19 @@ Swagger UI: `http://localhost:8000/docs`
 Node.js gửi POST /api/ingest
   → Python trả 202 ngay
   → Background task:
-      0. Cleanup orphan points của attempt trước (nếu retry)
-      1. Parse file (LlamaParse → fallback pypdf/docx/txt)
+      1. Parse file; PDF AUTO chỉ OCR trang ảnh/scan thiếu native text
       2. Chunk (SentenceSplitter)
       3. Embed (Gemini Embedding)
-      4. Upsert Qdrant với is_hidden=True (fail-closed — CHƯA retrieval)
+      4. Upsert Qdrant với is_active=False (fail-closed — CHƯA retrieval)
       5. Callback SUCCEEDED → chờ Node.js ACK
-      6a. ACK OK  → set is_hidden=False (kích hoạt retrieval)
+      6a. ACK OK  → set is_active=True (kích hoạt retrieval)
       6b. ACK FAIL → xóa toàn bộ points attempt này
 ```
 
 **Deterministic Point ID (RAG-002):**
 - chunk_id = deterministic UUID từ `(doc_id, job_id, attempt_count, chunk_index)`
 - Retry cùng attempt → upsert overwrite, không tạo duplicate points
-- Attempt mới → ID khác → cleanup attempt cũ trước khi chạy
+- Attempt mới → ID khác; không tự xóa attempt khác trong ingest hiện tại
 
 ---
 
@@ -105,7 +105,7 @@ Node.js gửi POST /api/query
   → CHIT_CHAT: LLM trả lời giao tiếp, no_answer=True  [usage_calls[1]]
   → RAG_REQUIRED:
       1. Embed câu hỏi
-      2. Search Qdrant (filter is_hidden=False — chỉ READY+VISIBLE)
+      2. Search Qdrant (filter is_active=True và is_hidden=False — chỉ READY+VISIBLE)
       3. Không chunk nào vượt threshold → no_answer=True
       4. LLM sinh answer với citations [N]              [usage_calls[1]]
       5. Extract citations từ [1],[2],...
@@ -133,10 +133,29 @@ pytest tests/ -v
 pytest tests/test_ingestion.py -v    # RAG-001, RAG-002
 pytest tests/test_rag_engine.py -v  # RAG-004, citations, no_answer
 pytest tests/test_database.py -v    # Qdrant collection init
+pytest tests/test_qdrant_lifecycle.py -v  # active/hidden/exact-attempt lifecycle
+pytest tests/test_parser_ocr.py -v  # OCR OFF/AUTO, digital/scanned/mixed (mocked provider)
+pytest tests/test_evaluator_safety.py -v  # disposable-target guard
 pytest tests/test_api.py -v         # API endpoints mock
 pytest tests/test_schemas.py -v     # Pydantic schemas
 pytest tests/test_rag_contract_safety.py -v  # Contract safety
 ```
+
+Sau Node machine ACK hợp lệ, activation được retry có giới hạn bằng
+`ACTIVATION_MAX_ATTEMPTS` và `ACTIVATION_RETRY_DELAY_SECONDS`. Nếu vẫn lỗi, log
+`RAG_ACTIVATION_FAILED` chứa exact document/job/attempt và ingest gửi compensation
+`ACTIVATION_FAILED`; không activate attempt khác.
+
+Kiểm tra/recover thủ công chỉ dành cho operator đã xác minh exact Node attempt đang
+`READY`:
+
+```bash
+python scripts/recover_attempt.py --document-id <id> --job-id <id> --attempt-count <n> --expected-node-status READY
+python scripts/recover_attempt.py --document-id <id> --job-id <id> --attempt-count <n> --expected-node-status READY --recover --confirm-ready-exact-attempt
+```
+
+Tool từ chối recovery nếu có point của attempt khác, exact attempt thiếu point hoặc
+Node status không được operator xác nhận; chạy lại recovery exact attempt là idempotent.
 
 ---
 
@@ -144,7 +163,7 @@ pytest tests/test_rag_contract_safety.py -v  # Contract safety
 
 | ID | Vấn đề | Mức độ |
 |----|---------|--------|
-| RAG-001 | ✅ Fixed: Activation protocol (is_hidden=True trước ACK) | DONE |
+| RAG-001 | ✅ Fixed: Activation protocol (is_active=False trước ACK) | DONE |
 | RAG-002 | ✅ Fixed: Deterministic point ID + orphan cleanup | DONE |
 | RAG-004 | ✅ Fixed: usage_calls[] multi-call tracking | DONE |
 | Durable queue | FastAPI BackgroundTasks không survive restart | LATER |

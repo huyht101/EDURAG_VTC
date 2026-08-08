@@ -263,7 +263,10 @@ function loadCloudConfig(options = {}) {
     projectId,
     bucket: validateBucket(environment.GCS_BUCKET),
     objectPrefix: normalizeObjectPrefix(environment.GCS_OBJECT_PREFIX),
-    credentialsFile: resolveCredentialsFile(rootDirectory, environment.GCS_CREDENTIALS_FILE)
+    credentialsFile: resolveCredentialsFile(rootDirectory, environment.GCS_CREDENTIALS_FILE),
+    privateTargetOwnerAttestation: String(
+      environment.GCS_PRIVATE_TARGET_OWNER_ATTESTATION || ''
+    ).trim()
   };
 }
 

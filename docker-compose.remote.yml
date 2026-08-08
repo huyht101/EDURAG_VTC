@@ -31,7 +31,11 @@ services:
     restart: unless-stopped
     environment:
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:?GOOGLE_API_KEY is required}
-      LLAMA_CLOUD_API_KEY: ${LLAMA_CLOUD_API_KEY:?LLAMA_CLOUD_API_KEY is required}
+      OCR_MODE: ${OCR_MODE:-OFF}
+      OCR_NATIVE_TEXT_MIN_CHARS: ${OCR_NATIVE_TEXT_MIN_CHARS:-32}
+      OCR_TIMEOUT_SECONDS: ${OCR_TIMEOUT_SECONDS:-120}
+      OCR_LANGUAGE: ${OCR_LANGUAGE:-vi}
+      LLAMA_CLOUD_API_KEY: ${LLAMA_CLOUD_API_KEY:-}
       # Deployment auth is owned by the root topology. A possibly stale/weak
       # snapshot INTERNAL_SECRET is deliberately overridden for both services.
       INTERNAL_SECRET: ${RAG_INTERNAL_TOKEN:?RAG_INTERNAL_TOKEN is required}
@@ -42,6 +46,8 @@ services:
       EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-768}
       CALLBACK_TIMEOUT: ${RAG_CALLBACK_TIMEOUT_SECONDS:-30}
       CALLBACK_MAX_RETRIES: ${RAG_CALLBACK_MAX_RETRIES:-3}
+      ACTIVATION_MAX_ATTEMPTS: ${RAG_ACTIVATION_MAX_ATTEMPTS:-3}
+      ACTIVATION_RETRY_DELAY_SECONDS: ${RAG_ACTIVATION_RETRY_DELAY_SECONDS:-0.25}
       NODE_CALLBACK_URL: http://app:5000/api/internal/rag/processing-callback
       PYTHON_SHARED_UPLOAD_DIR: /shared/uploads
     ports:

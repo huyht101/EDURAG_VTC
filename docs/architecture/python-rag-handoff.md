@@ -36,11 +36,11 @@ A delivery copy sent outside the repository must pin the exact Node and Python r
 
 | ID            | Classification                                                  | Required outcome                                                                           |
 | ------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `PY-MD-001`   | P0 — **REQUIRED FROM PYTHON**                                   | Make citation extraction Markdown-aware and add deterministic regression tests             |
-| `RAG-REC-001` | P0 analysis — **PROPOSAL REQUIRED / JOINT DECISION**            | Python proposes a bounded MVP recovery/reconciliation design; no unilateral implementation |
+| `PY-MD-001`   | P0 — **IMPLEMENTED + OFFLINE TESTED IN SNAPSHOT**                | Markdown-aware citation resolution; upstream delivery still required                        |
+| `RAG-REC-001` | P0 — **MVP IMPLEMENTED + OFFLINE TESTED IN SNAPSHOT**            | Bounded activation retry, residual log, consistency check and exact manual recovery         |
 | `INT-E2E-001` | P0 — **INTEGRATION VERIFICATION**                               | Run isolated live Node → Python → Qdrant/provider acceptance on pinned revisions           |
-| `PY-OCR-001`  | P1 before any affected keyed runtime — **REQUIRED FROM PYTHON** | Ensure API-key presence cannot silently enable a premium/alternate parser                  |
-| `PY-EVAL-001` | P1 — **REQUIRED FROM PYTHON**                                   | Isolate and harden the evaluation script                                                   |
+| `PY-OCR-001`  | P1 MVP — **IMPLEMENTED + OFFLINE TESTED IN SNAPSHOT**             | Explicit `OFF|AUTO`, safe key handling and deterministic digital/scanned/mixed-page OCR     |
+| `PY-EVAL-001` | P1 — **IMPLEMENTED + OFFLINE TESTED IN SNAPSHOT**                | Disposable-only evaluator guard and behavioral tests                                       |
 | `PY-LOC-001`  | P2 — **OPTIONAL/LATER**                                         | Implement trustworthy page-bounded geometry only if precise highlighting is promoted       |
 
 The recovery proposal must not block `PY-MD-001`, safe current integration verification or other independently assigned work.
@@ -60,7 +60,7 @@ Node owns:
 
 Python owns:
 
-* parsing and optional OCR;
+* parsing and OCR;
 * chunking;
 * embeddings;
 * Qdrant points and payloads;
@@ -172,11 +172,9 @@ Activation failure after an accepted ACK must clean the exact attempt and use th
 
 A Node dispatch timeout is an unknown transport outcome. It does not by itself authorize Python or Node to create a different effective attempt.
 
-## `RAG-REC-001`: Python proposal and joint decision
+## `RAG-REC-001`: bounded MVP recovery
 
-FastAPI `BackgroundTasks` is not a durable execution mechanism. Restart, lost-callback and uncertain-ACK behavior therefore require a bounded MVP design.
-
-The Python/Data-RAG team must inspect the actual runtime and propose a recovery/reconciliation design. This is an analysis and design assignment, not permission to implement a new wire contract unilaterally.
+FastAPI `BackgroundTasks` is not a durable execution mechanism. The current snapshot keeps the wire contract unchanged and implements the approved MVP subset: idempotent exact-attempt activation, bounded retry after valid ACK, machine-readable residual logging, READY-versus-active consistency inspection and explicit exact-attempt manual recovery. A durable queue/reconciler remains later work.
 
 ### Required invariants
 
@@ -194,26 +192,9 @@ The proposal must preserve all of the following:
 * No Node database schema, public API or terminal-state transition changes without joint approval.
 * Queue or infrastructure vendor selection remains OPTIONAL/LATER unless separately approved.
 
-### Python proposal must cover
+### Operational limits and later work
 
-1. Actual failure points in the current ingest runtime.
-2. How incomplete or stale work can be detected.
-3. Whether Node or Python initiates reconciliation.
-4. Lost callback before Node persistence.
-5. Callback accepted by Node but ACK not received by Python.
-6. Activation failure after an accepted ACK.
-7. Process restart during parse, embed, upsert, callback or activation.
-8. Late callbacks after retry or a newer attempt.
-9. Detection and cleanup of exact-attempt hidden points.
-10. Retry count, backoff and total time budget.
-11. Terminal handling when safe automatic recovery is impossible.
-12. Minimal MVP approach versus a longer-term durable approach.
-13. Any proposed contract change, with justification.
-14. Acceptance tests for races, duplicate execution and incorrect cleanup.
-
-Python may implement improvements that remain entirely inside the existing approved contract only after confirming that they preserve these invariants. New endpoints, callback shapes, state transitions or automatic retry lifecycles require joint approval first.
-
-`RAG-REC-001` does not block `PY-MD-001` or current integration diagnostics.
+The recovery CLI never reads MySQL and therefore requires an operator to verify that the supplied `document_id + job_id + attempt_count` is the exact current Node `READY` attempt. It refuses missing points, partially active points and any other-attempt points for that document. Restart before callback/ACK is still not automatically resumed; a durable queue or scheduler remains OPTIONAL/LATER and would require joint design. New endpoints, callback shapes or state transitions remain prohibited without approval.
 
 ## Complete manifest and source provenance
 
@@ -306,19 +287,18 @@ This does not block baseline MVP citations, which use:
 
 Precise occurrence-to-box mapping, Qdrant locator preservation and visual highlighting remain **OPTIONAL/LATER** until the Owner explicitly promotes that capability. Only then does `PY-LOC-001` become an implementation and UI acceptance requirement.
 
-## Parser-mode guard and optional OCR policy
+## Parser-mode guard and MVP OCR policy
 
-The immediate requirement is configuration safety. The presence of a provider/API key must not silently change the parser or enable a premium mode.
+The presence of a provider/API key must not silently change the parser or enable a premium mode. OCR behavior is an MVP requirement; live provider acceptance remains a separate gate because offline tests must not use real credentials.
 
-Full OCR quality is not a baseline MVP blocker.
+**Current repair candidate `PY-OCR-001` (uncommitted):**
 
-**Observed mismatch `PY-OCR-001`:**
+* `core/config.py` validates explicit `OCR_MODE=OFF|AUTO`; key presence alone leaves `OFF` unchanged;
+* `services/parser.py` uses native text for digital pages and calls the OCR provider only for image pages below the configured native-text threshold;
+* required OCR timeout, provider failure or empty output raises `OCRProcessingError` and fails the whole ingest;
+* `tests/test_parser_ocr.py` provides offline deterministic coverage. Live provider behavior remains **NOT VERIFIED**.
 
-* `services/parser.py::parse_document()` selects LlamaParse based on `LLAMA_CLOUD_API_KEY` presence;
-* `_parse_with_llamaparse()` enables `premium_mode=True`;
-* broad fallback behavior may omit scan content while allowing ingest to continue.
-
-### P1 requirement before an affected keyed runtime
+### P1 MVP requirement
 
 Python must add an explicit parser-mode setting with a safe default that does not enable LlamaParse, premium parsing or OCR merely because an API key exists.
 
@@ -330,9 +310,9 @@ Tests must prove, without a real provider, that:
 * invalid parser mode fails configuration clearly;
 * secrets are not exposed in responses or logs.
 
-### OCR policy if later promoted
+### OCR policy
 
-If the Owner promotes OCR/AUTO/FORCE, the following invariants apply:
+The following invariants apply:
 
 * OCR remains Python-owned.
 * OCR consumes only the canonical PDF artifact.
@@ -347,14 +327,7 @@ If the Owner promotes OCR/AUTO/FORCE, the following invariants apply:
 * Provider errors, secrets and private paths must not cross the public boundary or be logged unsafely.
 * OCR cost is not recorded as a chat `llm_usage_logs` row.
 
-Before OCR/AUTO/FORCE is accepted, Owner and Python must decide:
-
-* page eligibility rules;
-* page and file limits;
-* timeout budget;
-* provider privacy and cost acceptance;
-* secret rotation policy;
-* valid blank/OCR-empty behavior.
+Before live OCR acceptance, Owner and Python must verify provider privacy/cost, quota, timeout and file/page limits. These operational decisions do not permit silent fallback or weaken the offline MVP invariants above.
 
 ## Query, Markdown, citations and usage
 
@@ -459,18 +432,12 @@ Acceptance requires:
 * no Node schema, public API or wire-contract change;
 * exact Python upstream commit reported.
 
-### Proposal required: `RAG-REC-001`
+### MVP acceptance: `RAG-REC-001`
 
-Acceptance of this action means:
-
-* Python submits the required technical proposal;
-* current failure points are tied to actual code/runtime behavior;
-* MVP and longer-term alternatives are separated;
-* required invariants are preserved;
-* proposed contract changes, if any, are explicit;
-* Node/Core and Python/RAG record the resulting decision.
-
-Submitting the proposal does not authorize implementation automatically.
+Acceptance requires bounded exact-attempt activation retry, stable failure logging,
+fail-closed consistency inspection, explicit manual recovery confirmation and tests that
+prove stale/conflicting attempts are never activated. The current snapshot satisfies
+this offline; upstreaming and live operational acceptance remain.
 
 ### Integration verification: `INT-E2E-001`
 
@@ -520,11 +487,9 @@ Record:
 
 Mock RAG, offline fixtures and historical E2E results must be labelled separately and do not satisfy this live gate.
 
-### Conditional acceptance only if promoted
+### Required OCR acceptance and conditional geometry acceptance
 
-The following fixtures become required only when the associated capability is promoted:
-
-**OCR:**
+**OCR (required MVP, provider mocked for default tests):**
 
 * digital PDF;
 * scan-only PDF;
@@ -545,7 +510,7 @@ The following fixtures become required only when the associated capability is pr
 * locator-null fallback;
 * visual overlay verification against the canonical PDF.
 
-These conditional fixtures are not baseline blockers while OCR and precise highlighting remain OPTIONAL/LATER.
+Geometry fixtures remain conditional because precise highlighting is OPTIONAL/LATER. OCR fixtures are required; a live provider run may remain `NOT RUN` until an approved credential/quota environment exists.
 
 ## Expected return from the Python team
 
@@ -567,11 +532,10 @@ Do not present snapshot inspection, mock tests or historical results as current 
 
 ## Action order
 
-1. **P0 Python:** implement and test `PY-MD-001`.
-2. **P0 analysis in parallel:** prepare the `RAG-REC-001` proposal for joint review; do not implement a new recovery contract yet.
-3. **P0 integration:** run `INT-E2E-001` on exact pinned revisions after the immediate compatible fixes are available.
-4. **P1 before an affected keyed runtime:** implement `PY-OCR-001`.
-5. **P1 Python tooling:** isolate and harden evaluation through `PY-EVAL-001`.
-6. **P2 OPTIONAL/LATER:** implement OCR quality policy and `PY-LOC-001` only if the Owner promotes OCR or precise highlighting.
+1. **P0 delivery:** upstream the verified `PY-MD-001` and `RAG-REC-001` snapshot changes.
+2. **P0 integration:** run `INT-E2E-001` on exact pinned revisions with the real Node app/provider after the offline repair is accepted.
+3. **P1 MVP:** upstream `PY-OCR-001`; keep live-provider evidence separate.
+4. **P1 Python tooling:** upstream `PY-EVAL-001` and retain the canonical-target refusal test.
+5. **P2 OPTIONAL/LATER:** implement `PY-LOC-001` only if the Owner promotes precise highlighting.
 
 The earlier [OCR/Markdown handoff](python-rag-ocr-markdown-handoff.md) remains a supporting findings record. Where it differs from this canonical action register, this document takes precedence.

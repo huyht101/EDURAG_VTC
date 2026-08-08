@@ -35,7 +35,7 @@ async def get_qdrant_client() -> QdrantClient:
     settings = get_settings()
 
     try:
-        logger.info("Đang khởi tạo kết nối tới Qdrant tại: %s", settings.QDRANT_URL)
+        logger.info("Đang khởi tạo kết nối tới Qdrant")
 
         _qdrant_client = QdrantClient(
             url=settings.QDRANT_URL,
@@ -53,8 +53,8 @@ async def get_qdrant_client() -> QdrantClient:
         logger.info("Kết nối Qdrant thành công ✓")
         return _qdrant_client
 
-    except Exception as e:
-        logger.error("Lỗi khi kết nối tới Qdrant: %s", str(e))
+    except Exception as error:
+        logger.error("Qdrant initialization failed: error_type=%s", type(error).__name__)
         _qdrant_client = None
         raise
 
@@ -172,6 +172,8 @@ def _create_payload_indexes(client: QdrantClient, collection_name: str) -> None:
         ("doc_id", models.PayloadSchemaType.KEYWORD),
         ("subject_id", models.PayloadSchemaType.KEYWORD),
         ("is_hidden", models.PayloadSchemaType.BOOL),
+        ("is_active", models.PayloadSchemaType.BOOL),
+        ("ingest_attempt_key", models.PayloadSchemaType.KEYWORD),
     ]
 
     for field_name, schema_type in indexes:
@@ -182,8 +184,11 @@ def _create_payload_indexes(client: QdrantClient, collection_name: str) -> None:
                 field_schema=schema_type,
             )
             logger.info("Đã tạo index cho field '%s' ✓", field_name)
-        except Exception as e:
-            logger.warning("Không tạo được index cho '%s': %s", field_name, str(e))
+        except Exception as error:
+            logger.warning(
+                "Không tạo được index cho '%s': error_type=%s",
+                field_name, type(error).__name__,
+            )
 
 
 async def close_qdrant_client() -> None:
@@ -194,7 +199,7 @@ async def close_qdrant_client() -> None:
         try:
             _qdrant_client.close()
             logger.info("Đã đóng kết nối Qdrant ✓")
-        except Exception as e:
-            logger.warning("Lỗi khi đóng kết nối Qdrant: %s", str(e))
+        except Exception as error:
+            logger.warning("Qdrant close failed: error_type=%s", type(error).__name__)
         finally:
             _qdrant_client = None

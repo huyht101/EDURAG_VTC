@@ -220,6 +220,42 @@ class TestExtractCitations:
         assert normalized == "Theo [1], rồi [2], lại [1]."
         assert [item.doc_id for item in citations] == ["3", "1"]
 
+    def test_mixed_valid_and_out_of_range_markers_keep_valid_citations(self):
+        results = [self._make_result("uuid-1", "1", "first")]
+        normalized, citations = _extract_citations(
+            "Valid [1], invalid [9], repeated [1].",
+            results,
+        )
+        assert normalized == "Valid [1], invalid , repeated [1]."
+        assert [item.vector_node_id for item in citations] == ["uuid-1"]
+
+    def test_does_not_create_citation_for_result_without_resolvable_source(self):
+        invalid = SimpleNamespace(id="uuid-1", score=0.8, payload={"doc_id": "1", "text": ""})
+        valid = self._make_result("uuid-2", "2", "source")
+        normalized, citations = _extract_citations("Bad [1], good [2].", [invalid, valid])
+        assert normalized == "Bad , good [1]."
+        assert [item.vector_node_id for item in citations] == ["uuid-2"]
+
+    def test_inline_and_fenced_code_markers_and_array_indexes_are_not_citations(self):
+        answer = (
+            "Evidence [1]; `literal [2]`; array[0].\n\n"
+            "```python\nrefs = [1]\n```"
+        )
+        results = [
+            self._make_result("uuid-1", "1", "source one"),
+            self._make_result("uuid-2", "2", "source two"),
+        ]
+        normalized, citations = _extract_citations(answer, results)
+        assert normalized == answer
+        assert [item.vector_node_id for item in citations] == ["uuid-1"]
+
+    def test_non_numeric_brackets_are_preserved_as_non_citation_markdown(self):
+        answer = "Evidence [1], label [draft], malformed [1."
+        results = [self._make_result("uuid-1", "1", "source")]
+        normalized, citations = _extract_citations(answer, results)
+        assert normalized == answer
+        assert len(citations) == 1
+
     def test_preserves_markdown_latex_and_table(self):
         answer = (
             "So sánh từ nguồn [1]:\n\n"
@@ -234,6 +270,13 @@ class TestExtractCitations:
 
         assert normalized == answer
         assert len(citations) == 1
+
+    def test_citation_inside_markdown_table_cell_is_resolved(self):
+        answer = "| Claim | Source |\n|---|---|\n| A | [1] |"
+        results = [self._make_result("uuid-1", "1", "table source")]
+        normalized, citations = _extract_citations(answer, results)
+        assert normalized == answer
+        assert [item.doc_id for item in citations] == ["1"]
 
 
 def test_rag_prompt_allows_rich_markdown_without_chart_protocol():
@@ -281,7 +324,7 @@ class TestFinalizeRagAnswer:
     def test_usage_calls_propagated(self):
         """usage_calls[] phải được giữ trong response."""
         usage_info = UsageInfo(prompt_tokens=10, completion_tokens=5, total_tokens=15, model="m")
-        uc = _make_usage_call(0, "QUERY_REWRITE", "m", usage_info)
+        uc = _make_usage_call(1, "QUERY_REWRITE", "m", usage_info)
         response = _finalize_rag_answer("text", [], "low", [uc], self._empty_usage())
         assert len(response.usage_calls) == 1
         assert response.usage_calls[0].call_index == 1

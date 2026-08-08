@@ -22,6 +22,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, status, Depends
 from fastapi.responses import JSONResponse
 
 from api.dependencies import verify_internal_token
+from core.config import get_settings
 from models.schemas import (
     IngestRequest,
     IngestAcceptedResponse,
@@ -92,10 +93,9 @@ async def ingest_endpoint(
     Luồng: Trả 202 → Background task → Callback khi xong.
     """
     logger.info(
-        "[INGEST] Nhận request: doc_id=%s, job_id=%s, file=%s",
+        "[INGEST] Nhận request: doc_id=%s, job_id=%s",
         request.doc_id,
         request.job_id,
-        request.file_path,
     )
 
     # Thêm task xử lý vào background
@@ -130,9 +130,9 @@ async def query_endpoint(request: QueryRequest) -> QueryResponse:
 
     try:
         logger.info(
-            "[QUERY] Nhận request: conv=%s, q='%s', history=%d msgs",
+            "[QUERY] Nhận request: conv=%s, question_length=%d, history=%d msgs",
             request.conversation_id,
-            request.question[:80],
+            len(request.question),
             len(request.history or []),
         )
 
@@ -148,26 +148,26 @@ async def query_endpoint(request: QueryRequest) -> QueryResponse:
 
         return response
 
-    except FileNotFoundError as e:
+    except FileNotFoundError:
         return _error_response(
             status.HTTP_404_NOT_FOUND,
             "FILE_NOT_FOUND",
-            str(e),
+            "Required query resource was not found.",
         )
 
-    except ValueError as e:
+    except ValueError:
         return _error_response(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "INVALID_INPUT",
-            str(e),
+            "Query input is invalid.",
         )
 
-    except Exception as e:
-        logger.exception("[QUERY] Lỗi không xác định")
+    except Exception as error:
+        logger.error("[QUERY] Internal failure: error_type=%s", type(error).__name__)
         return _error_response(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
             "INTERNAL_ERROR",
-            f"Lỗi server khi xử lý truy vấn: {str(e)}",
+            "Query processing failed.",
         )
 
 
@@ -274,8 +274,10 @@ async def delete_endpoint(
 )
 async def health_check() -> dict:
     """Trả về trạng thái hoạt động của service."""
+    settings = get_settings()
     return {
         "status": "healthy",
         "service": "rag-education-service",
         "version": "3.0.0",
+        "ocr_mode": settings.OCR_MODE.value,
     }
