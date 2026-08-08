@@ -1,8 +1,9 @@
 # Phase 2 live acceptance runbook
 
 Owner-run only. Phase 1 proved the production Node/MySQL/Python/Qdrant boundary with
-deterministic local providers and synthetic corpus. This runbook does not authorize a
-corpus publish, pointer change, IAM change or canonical-data mutation.
+deterministic local providers and synthetic corpus. Publication, pointer changes and local
+reset require explicit Owner authorization for the exact target/release. This runbook never
+authorizes IAM changes or deletion/overwrite of an immutable cloud release.
 
 ## Preconditions
 
@@ -25,9 +26,11 @@ corpus publish, pointer change, IAM change or canonical-data mutation.
    ```
 
    PASS: release ID and manifest checksum equal `bootstrap/corpus-release.json`; every
-   artifact checksum, schema compatibility, embedding model/dimension and required
-   Qdrant payload (`is_active`) pass. FAIL: stop on missing legacy `is_active`, mismatch,
-   permission, integrity or compatibility error.
+   artifact checksum, schema compatibility and embedding model/dimension pass. Then run
+   `npm run corpus:reset -- --dry-run` against the isolated project: its disposable-Qdrant
+   preflight must prove `is_active`, `is_hidden` and `ingest_attempt_key` before any local
+   mutation. FAIL: stop on missing legacy lifecycle payload, mismatch, permission,
+   integrity or compatibility error.
 
 2. Restore only into the isolated project, then run health and cross-store checks:
 
@@ -57,6 +60,14 @@ If the selected release lacks `is_active` or fails compatibility, do not modify 
 corpus writer may create and verify a new immutable release only after Owner approval.
 Upload all artifacts, read them back, verify checksums/equivalence, and update the pointer
 only after that verification passes and the Owner explicitly approves the new release.
+The writer configuration must satisfy the private-target guard. Normally the tool verifies
+Public Access Prevention or IAM metadata directly. If a least-privilege `corpus-writer`
+has object Viewer + Creator but bucket-metadata introspection returns 403, an Owner may set
+`GCS_PRIVATE_TARGET_OWNER_ATTESTATION` to the exact `project-id/bucket-name` after checking
+that target in Cloud Console. The fallback is exact-target and writer-identity bound, is
+logged, and remains fail-closed for missing/mismatched attestation, unauthenticated or
+wrong credentials, public targets and object-prefix collisions. It must not be used with
+a reader-only identity.
 
 ## Cleanup and evidence
 

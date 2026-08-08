@@ -39,6 +39,7 @@ const { approvedCorpusConfig } = require('./restored-corpus-live-smoke');
 const { auditDownloadedRelease } = require('./corpus-prepublish-audit');
 const { assertRemoteResetAllowed } = require('./remote-test-utils');
 const { DockerUploadVolume } = require('./lib/docker-upload-volume');
+const { GcsObjectStore } = require('./lib/gcs-object-store');
 const {
   markCorpusFailure,
   normalizeRemoteReadError
@@ -204,6 +205,75 @@ function reconciledFixture() {
 }
 
 async function main() {
+  const privacyRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'edurag-gcs-privacy-test-'));
+  const writerCredential = path.join(privacyRoot, 'writer.json');
+  const readerCredential = path.join(privacyRoot, 'reader.json');
+  const wrongProjectCredential = path.join(privacyRoot, 'wrong-project-writer.json');
+  await fsp.writeFile(writerCredential, JSON.stringify({
+    type: 'service_account', project_id: 'valid-project',
+    client_email: 'edurag-corpus-writer@example.invalid'
+  }));
+  await fsp.writeFile(readerCredential, JSON.stringify({
+    type: 'service_account', project_id: 'valid-project',
+    client_email: 'edurag-corpus-reader@example.invalid'
+  }));
+  await fsp.writeFile(wrongProjectCredential, JSON.stringify({
+    type: 'service_account', project_id: 'other-project',
+    client_email: 'edurag-corpus-writer@example.invalid'
+  }));
+  const privateStore = ({ attestation = '', credential = writerCredential, metadata, policy }) => {
+    const store = Object.create(GcsObjectStore.prototype);
+    store.projectId = 'valid-project';
+    store.bucketName = 'valid-private-bucket';
+    store.credentialsFile = credential;
+    store.privateTargetOwnerAttestation = attestation;
+    store.bucket = {
+      getMetadata: async () => {
+        if (metadata instanceof Error) throw metadata;
+        return [metadata];
+      },
+      iam: { getPolicy: async () => [policy || { bindings: [] }] }
+    };
+    return store;
+  };
+  await privateStore({ metadata: { iamConfiguration: { publicAccessPrevention: 'enforced' } } })
+    .assertPrivateTarget();
+  const forbidden = Object.assign(new Error('permission denied'), { code: 403 });
+  await privateStore({
+    attestation: 'valid-project/valid-private-bucket', metadata: forbidden
+  }).assertPrivateTarget();
+  await assert.rejects(
+    () => privateStore({ metadata: forbidden }).assertPrivateTarget(),
+    (error) => error.code === 'GCS_BUCKET_PRIVACY_UNVERIFIED'
+  );
+  await assert.rejects(
+    () => privateStore({ attestation: 'other-project/valid-private-bucket', metadata: forbidden })
+      .assertPrivateTarget(),
+    (error) => error.code === 'GCS_BUCKET_PRIVACY_UNVERIFIED'
+  );
+  await assert.rejects(
+    () => privateStore({
+      attestation: 'valid-project/valid-private-bucket', credential: readerCredential,
+      metadata: forbidden
+    }).assertPrivateTarget(),
+    (error) => error.code === 'GCS_WRITER_IDENTITY_MISMATCH'
+  );
+  await assert.rejects(
+    () => privateStore({
+      attestation: 'valid-project/valid-private-bucket', credential: wrongProjectCredential,
+      metadata: forbidden
+    }).assertPrivateTarget(),
+    (error) => error.code === 'GCS_WRITER_IDENTITY_MISMATCH'
+  );
+  await assert.rejects(
+    () => privateStore({
+      metadata: { iamConfiguration: { publicAccessPrevention: 'inherited' } },
+      policy: { bindings: [{ members: ['allUsers'] }] }
+    }).assertPrivateTarget(),
+    (error) => error.code === 'GCS_PUBLIC_BUCKET_BLOCKED'
+  );
+  await fsp.rm(privacyRoot, { recursive: true, force: true });
+
   assert.doesNotThrow(() => corpusRuntime.assertPointLifecycle(
     { payload: { is_active: true, is_hidden: false } },
     { vectorNodeId: 'active-point', visibilityStatus: 'VISIBLE' }

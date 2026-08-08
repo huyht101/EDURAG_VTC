@@ -36,7 +36,7 @@ Các guard luôn được giữ:
 - restore không ghi đè non-empty/ambiguous local stores.
 
 `bootstrap/corpus-release.json` là selected-release transport pointer. Pointer hiện chọn
-`v1-e7a8109f714792d4312713f5` và ghi thời điểm publish 2026-08-01; metadata trong Git
+`v1-d07f526e059e53751402a4f3`; metadata trong Git
 không tự chứng minh object remote còn tồn tại, checksum download đúng hoặc local stores
 đang khớp release. Data approval không còn được ghi là blocker hiện hành. Exact remote
 availability/restore/query phải được kết luận từ `corpus:verify` hoặc isolated acceptance
@@ -73,7 +73,7 @@ Sau restore thành công, upload volume ghi `.edurag-corpus-release-state.json` 
 
 ## Publish một release mới
 
-Target phải là private/internal. Publish kiểm tra Public Access Prevention/IAM trước upload và chặn public hoặc unverifiable target. Reader credential dùng restore/verify; writer credential mới publish.
+Target phải là private/internal. Publish kiểm tra Public Access Prevention/IAM trước upload và chặn public hoặc unverifiable target. Reader credential dùng restore/verify; writer credential mới publish. Với writer least-privilege có Object Viewer + Creator nhưng bị 403 khi đọc bucket metadata, Owner có thể opt-in bằng `GCS_PRIVATE_TARGET_OWNER_ATTESTATION=<exact-project-id>/<exact-bucket-name>` sau khi tự kiểm tra đúng target. Fallback chỉ chấp nhận credential service-account có identity `corpus-writer`, ghi diagnostic không chứa secret và không áp dụng cho 401, target mismatch, public bucket hay collision. Bỏ trống biến này để giữ mặc định fail-closed.
 
 ```powershell
 npm run corpus:publish -- --dry-run

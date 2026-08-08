@@ -1,5 +1,6 @@
 'use strict';
 
+const fs = require('fs');
 const { Storage } = require('@google-cloud/storage');
 const { normalizeRemoteReadError } = require('./corpus-bootstrap-errors');
 
@@ -18,10 +19,42 @@ function upstreamStatus(error) {
 }
 
 class GcsObjectStore {
-  constructor({ projectId, bucket, credentialsFile }) {
+  constructor({ projectId, bucket, credentialsFile, privateTargetOwnerAttestation }) {
+    this.projectId = projectId;
     this.bucketName = bucket;
+    this.credentialsFile = credentialsFile;
+    this.privateTargetOwnerAttestation = privateTargetOwnerAttestation;
     this.storage = new Storage({ projectId, keyFilename: credentialsFile });
     this.bucket = this.storage.bucket(bucket);
+  }
+
+  assertOwnerAttestation() {
+    const expected = `${this.projectId}/${this.bucketName}`;
+    if (this.privateTargetOwnerAttestation !== expected) {
+      throw gcsError(
+        'GCS_BUCKET_PRIVACY_UNVERIFIED',
+        'Bucket privacy introspection was denied and no matching Owner attestation is configured.'
+      );
+    }
+    let credential;
+    try {
+      credential = JSON.parse(fs.readFileSync(this.credentialsFile, 'utf8'));
+    } catch (_error) {
+      throw gcsError('GCS_CREDENTIAL_INVALID', 'GCS credential identity could not be verified.');
+    }
+    const identity = String(credential?.client_email || '').trim().toLowerCase();
+    const localPart = identity.split('@', 1)[0];
+    if (credential?.type !== 'service_account'
+      || credential?.project_id !== this.projectId
+      || !/(?:^|[-_])corpus[-_]?writer$/.test(localPart)) {
+      throw gcsError(
+        'GCS_WRITER_IDENTITY_MISMATCH',
+        'Owner-attested publishing requires the configured corpus-writer service account.'
+      );
+    }
+    console.warn(
+      `GCS_PRIVATE_TARGET_OWNER_ATTESTED project=${this.projectId} bucket=${this.bucketName} identity=corpus-writer`
+    );
   }
 
   async assertPrivateTarget() {
@@ -30,10 +63,14 @@ class GcsObjectStore {
       [metadata] = await this.bucket.getMetadata();
     } catch (error) {
       const status = upstreamStatus(error);
-      if (status === 401 || status === 403) {
+      if (status === 403) {
+        this.assertOwnerAttestation();
+        return;
+      }
+      if (status === 401) {
         throw gcsError(
           'GCS_BUCKET_PRIVACY_UNVERIFIED',
-          'Publisher cannot verify that the target bucket is private/internal.'
+          'Bucket privacy verification was rejected because the credential is not authenticated.'
         );
       }
       throw gcsError('GCS_BUCKET_PRIVACY_UNVERIFIED', 'Target bucket privacy metadata is unavailable.');

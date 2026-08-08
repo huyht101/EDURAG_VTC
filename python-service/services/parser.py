@@ -129,10 +129,12 @@ async def _parse_with_llamaparse(
     except Exception as error:
         raise OCRProcessingError("OCR provider failed.") from error
 
-    return [
+    pages = [
         {"page_number": page_number, "text": (document.text or "").strip()}
         for page_number, document in enumerate(documents, start=1)
     ]
+    logger.info("OCR provider completed: pages=%d", len(pages))
+    return pages
 
 
 async def _parse_pdf_auto(file_path: str, settings) -> list[dict]:

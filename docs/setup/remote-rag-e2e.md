@@ -25,7 +25,10 @@ Copy-Item .env.example .env
 - `REMOTE_MYSQL_HOST_PORT=13306` là loopback port cho host-side E2E tooling;
   containers luôn kết nối MySQL bằng `db:3306`;
 - `CORPUS_BOOTSTRAP=auto`;
-- `GCS_PROJECT_ID`, `GCS_BUCKET`, `GCS_OBJECT_PREFIX`, `GCS_CREDENTIALS_FILE`.
+- `GCS_PROJECT_ID`, `GCS_BUCKET`, `GCS_OBJECT_PREFIX`, `GCS_CREDENTIALS_FILE`. Chỉ khi
+  bucket-metadata introspection của least-privilege `corpus-writer` bị 403 và Owner đã
+  kiểm tra exact target, đặt `GCS_PRIVATE_TARGET_OWNER_ATTESTATION` thành chính xác
+  `<project-id>/<bucket-name>`; không dùng biến này cho reader credential.
 
 Không cần file env phụ, terminal `$env:...`, Compose `-f/-p` dài hoặc GCS key trong container. Root Compose chỉ inject provider/internal variables mà runtime cần; host corpus tooling tự đọc GCS config.
 
