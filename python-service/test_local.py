@@ -6,16 +6,13 @@ sys.stdout.reconfigure(encoding='utf-8')
 # Thêm đường dẫn hiện tại vào sys.path để import từ services
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from dotenv import load_dotenv
-load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"))
-import os
-os.environ["INTERNAL_SECRET"] = "mock_secret"
-
-from llama_index.core.schema import Document
-from llama_index.core.node_parser import MarkdownNodeParser, SentenceSplitter
-from services.parser import parse_document
-
 async def main():
+    from dotenv import load_dotenv
+    from llama_index.core.schema import Document
+    from llama_index.core.node_parser import MarkdownNodeParser, SentenceSplitter
+    from services.parser import parse_document
+
+    load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"))
     file_path = r"..\file ảnh scan.pdf"
     if not os.path.exists(file_path):
         print(f"File {file_path} không tồn tại.")
@@ -49,4 +46,6 @@ async def main():
         print(f"- Text Content:\n{node.get_content()[:200]}...")
 
 if __name__ == "__main__":
+    if os.environ.get("RAG_MANUAL_LIVE_CONFIRM") != "true":
+        raise SystemExit("Refusing manual parser run without RAG_MANUAL_LIVE_CONFIRM=true.")
     asyncio.run(main())

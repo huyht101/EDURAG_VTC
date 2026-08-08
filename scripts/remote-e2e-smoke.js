@@ -3,6 +3,7 @@
 const assert = require('assert/strict');
 const crypto = require('crypto');
 const fs = require('fs');
+const path = require('path');
 const mysql = require('mysql2/promise');
 
 const { main: runPreflight } = require('./remote-preflight');
@@ -203,8 +204,14 @@ async function main() {
   const suffix = `${Date.now()}-${crypto.randomInt(1000, 9999)}`;
   const email = `remote.e2e.${suffix}@smoke.test`;
   const password = `RemoteE2E@${crypto.randomInt(100000, 999999)}`;
-  const source = fs.readFileSync(`${root}/tests/fixtures/remote-e2e/source.txt`);
-  const question = 'According to the indexed test document, what color is the Week 3 validation beacon? Cite the source.';
+  const fixturePath = path.resolve(
+    process.env.REMOTE_E2E_FIXTURE_PATH || `${root}/tests/fixtures/remote-e2e/source.txt`
+  );
+  const fixtureFilename = process.env.REMOTE_E2E_FIXTURE_FILENAME || path.basename(fixturePath);
+  const fixtureMime = process.env.REMOTE_E2E_FIXTURE_MIME || 'text/plain';
+  const source = fs.readFileSync(fixturePath);
+  const question = process.env.REMOTE_E2E_QUERY
+    || 'According to the indexed test document, what color is the Week 3 validation beacon? Cite the source.';
   const ingestStarted = new Date();
 
   try {
@@ -233,7 +240,7 @@ async function main() {
     })).payload.data.token;
 
     const form = new FormData();
-    form.append('file', new Blob([source], { type: 'text/plain' }), 'week3-remote-source.txt');
+    form.append('file', new Blob([source], { type: fixtureMime }), fixtureFilename);
     form.append('title', `Remote E2E ${suffix}`);
     const uploaded = (await httpRequest(baseUrl, '/api/documents', {
       method: 'POST', headers: bearer(token), body: form, timeoutMs: 30000
@@ -290,10 +297,18 @@ async function main() {
     assert.equal(qdrantPoints.length, chunks.length);
     assert(qdrantPoints.every((point) => Number(point.payload.doc_id) === documentId));
     assert(qdrantPoints.every((point) => point.payload.is_hidden === false));
+    assert(qdrantPoints.every((point) => point.payload.is_active === true));
+    assert(qdrantPoints.every(
+      (point) => point.payload.ingest_attempt_key
+        === `${documentId}::${ingestJob.id}::${ingestJob.attemptCount}`
+    ));
 
     if (process.env.REMOTE_E2E_REQUIRE_LLAMAPARSE !== 'false') {
       const logs = compose(['logs', '--no-color', '--since', ingestStarted.toISOString(), 'rag-service']);
-      assert(/LlamaParse[^\r\n]*\d+\s+pages/i.test(logs), 'LlamaParse success was not observed in Python logs.');
+      assert(
+        /OCR provider completed: pages=\d+/i.test(logs),
+        'OCR provider success was not observed in Python logs.'
+      );
     }
 
     await testCallbackEdges({ baseUrl, token, pool, documentId, ingestJob, chunks });
@@ -340,6 +355,10 @@ async function main() {
     assert(citationRow.source_text_snapshot);
     assert(usageRows.length >= 1, 'Live usage was not persisted.');
     assert(usageRows.every((row) => row.status === 'SUCCEEDED' && row.model));
+    const promptTokens = usageRows.reduce((total, row) => total + Number(row.prompt_tokens || 0), 0);
+    const completionTokens = usageRows.reduce(
+      (total, row) => total + Number(row.completion_tokens || 0), 0
+    );
 
     const hide = (await httpRequest(baseUrl, `/api/documents/${documentId}/hide`, {
       method: 'POST', headers: bearer(token)
@@ -420,6 +439,9 @@ async function main() {
       chunks: chunks.length,
       citations: initialChat.answer.assistantMessage.citations.length,
       usageRows: usageRows.length,
+      promptTokens,
+      completionTokens,
+      fixtureType: fixtureMime,
       noAnswerLiveAssertion: 'NOT_DETERMINISTIC'
     }));
   } finally {

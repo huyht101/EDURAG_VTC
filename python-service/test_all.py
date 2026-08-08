@@ -1,4 +1,5 @@
 import asyncio
+import os
 from services.rag_engine import process_query
 from services.doc_manager import hide_document_background, delete_document_background
 from models.schemas import QueryRequest, VisibilityRequest, DeleteRequest
@@ -25,8 +26,8 @@ async def test_search(desc=""):
                 print(f"  - Doc ID: {cit.doc_id} | Đoạn văn: {cit.snippet[:100]}...")
         else:
             print("\n❌ Không tìm thấy thông tin.")
-    except Exception as e:
-        print(f"❌ LỖI RAG: {e}")
+    except Exception as error:
+        print(f"❌ LỖI RAG: error_type={type(error).__name__}")
 
 async def main():
     print("🚀 BẮT ĐẦU KIỂM THỬ TOÀN BỘ CÁC CHỨC NĂNG RAG...")
@@ -61,4 +62,9 @@ async def main():
     print("\n🎉 KIỂM THỬ HOÀN TẤT!")
 
 if __name__ == "__main__":
+    collection = os.environ.get("QDRANT_COLLECTION_NAME", "")
+    if os.environ.get("RAG_MANUAL_LIVE_CONFIRM") != "true":
+        raise SystemExit("Refusing live test without RAG_MANUAL_LIVE_CONFIRM=true.")
+    if not collection.startswith(("edurag_test_", "edurag_eval_")):
+        raise SystemExit("Refusing non-disposable Qdrant collection for live test.")
     asyncio.run(main())

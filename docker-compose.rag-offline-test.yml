@@ -1,0 +1,50 @@
+name: ${RAG_OFFLINE_COMPOSE_PROJECT:?RAG_OFFLINE_COMPOSE_PROJECT is required}
+
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.18.2
+    ports:
+      - "127.0.0.1::6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/6333"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  rag-service:
+    build:
+      context: ./python-service
+    command: ["python", "scripts/offline_rag_server.py"]
+    environment:
+      GOOGLE_API_KEY: offline-not-used
+      INTERNAL_SECRET: offline-rag-internal-secret-0123456789abcdef
+      OCR_MODE: OFF
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_COLLECTION_NAME: edurag_test_offline_e2e
+      EMBEDDING_DIMENSION: 768
+      CALLBACK_TIMEOUT: 3
+      CALLBACK_MAX_RETRIES: 2
+      ACTIVATION_MAX_ATTEMPTS: 3
+      ACTIVATION_RETRY_DELAY_SECONDS: 0.01
+      OFFLINE_ACTIVATION_FAILURES: ${OFFLINE_ACTIVATION_FAILURES:-0}
+    ports:
+      - "127.0.0.1::8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=2)"
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+volumes:
+  qdrant_data:

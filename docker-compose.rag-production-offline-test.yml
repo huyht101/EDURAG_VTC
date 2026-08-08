@@ -1,0 +1,122 @@
+name: ${RAG_PRODUCTION_OFFLINE_COMPOSE_PROJECT:?RAG_PRODUCTION_OFFLINE_COMPOSE_PROJECT is required}
+
+services:
+  db:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: offline-root-password
+      MYSQL_DATABASE: edurag
+    ports:
+      - "127.0.0.1::3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./src/database/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+      - ./src/database/demo_seed.sql:/docker-entrypoint-initdb.d/02_demo_seed.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-poffline-root-password"]
+      interval: 2s
+      timeout: 3s
+      retries: 40
+
+  qdrant:
+    image: qdrant/qdrant:v1.18.2
+    ports:
+      - "127.0.0.1::6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/6333"]
+      interval: 2s
+      timeout: 2s
+      retries: 40
+
+  rag-service:
+    build:
+      context: ./python-service
+    command: ["python", "scripts/offline_rag_server.py"]
+    environment:
+      GOOGLE_API_KEY: offline-not-used
+      INTERNAL_SECRET: offline-production-internal-secret-0123456789abcdef
+      OCR_MODE: OFF
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_COLLECTION_NAME: edurag_production_offline_e2e
+      EMBEDDING_DIMENSION: 768
+      CALLBACK_TIMEOUT: 10
+      CALLBACK_MAX_RETRIES: 2
+      ACTIVATION_MAX_ATTEMPTS: 3
+      ACTIVATION_RETRY_DELAY_SECONDS: 0.01
+      OFFLINE_ACTIVATION_FAILURES: ${OFFLINE_ACTIVATION_FAILURES:-0}
+    ports:
+      - "127.0.0.1::8000"
+    volumes:
+      - uploads_data:/shared/uploads:ro
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=2)"]
+      interval: 2s
+      timeout: 2s
+      retries: 40
+
+  app:
+    build:
+      context: .
+    environment:
+      NODE_ENV: test
+      PORT: 5000
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: offline-root-password
+      DB_NAME: edurag
+      JWT_SECRET: offline-jwt-secret-0123456789abcdef
+      TOKEN_HMAC_PEPPER: offline-token-pepper-0123456789abcdef
+      RAG_MODE: remote
+      RAG_SERVICE_URL: http://rag-service:8000
+      RAG_INTERNAL_TOKEN: offline-production-internal-secret-0123456789abcdef
+      RAG_CALLBACK_URL: http://callback-proxy:9000/api/internal/rag/processing-callback
+      RAG_SHARED_UPLOAD_DIR: /shared/uploads
+      RAG_REQUEST_TIMEOUT_MS: 15000
+      RAG_QUERY_TIMEOUT_MS: 15000
+      AUTH_RATE_LIMIT_MAX: 1000
+      AUTH_SENSITIVE_RATE_LIMIT_MAX: 1000
+      AUTH_DEV_DELIVERY_LOG_SECRETS: "false"
+      UPLOAD_DIR: /usr/src/app/uploads
+    ports:
+      - "127.0.0.1::5000"
+    volumes:
+      - uploads_data:/usr/src/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+      rag-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:5000/ready').then(r=>{if(!r.ok)process.exit(1)})"]
+      interval: 2s
+      timeout: 3s
+      retries: 40
+
+  callback-proxy:
+    build:
+      context: .
+    command: ["node", "scripts/rag-production-offline-callback-proxy.js"]
+    environment:
+      OFFLINE_CALLBACK_TARGET: http://app:5000
+      OFFLINE_CALLBACK_PROXY_PORT: 9000
+    ports:
+      - "127.0.0.1::9000"
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:9000/__test__/health').then(r=>{if(!r.ok)process.exit(1)})"]
+      interval: 2s
+      timeout: 3s
+      retries: 40
+
+volumes:
+  mysql_data:
+  qdrant_data:
+  uploads_data:

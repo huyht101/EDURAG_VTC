@@ -33,6 +33,23 @@ giữ host port `3306` không chặn remote startup.
 
 Command này resolve remote Compose override và force-recreate app để áp dụng `RAG_MODE=remote`; không dùng `docker compose restart` khi chuyển mode vì restart giữ nguyên environment của container cũ. `Ctrl+C` dừng containers nhưng giữ named volumes. Fresh volumes cần reader-capable GCS credential để restore release được pointer chọn; pointer không phải bằng chứng source data đã được phê duyệt. `CORPUS_BOOTSTRAP=auto` chỉ tiếp tục ở trạng thái `DEGRADED` khi local đã được xác nhận `EMPTY` và remote read/configuration thất bại trước mọi local mutation; local `UNKNOWN`, integrity/manifest/apply/rollback failure vẫn fail closed. Live corpus acceptance chỉ chạy sau explicit data approval.
 
+`auto` restores only when MySQL/Qdrant/originals are all empty. A dynamically verified
+local release is retained without replacement: exact selected release is a no-op; a valid
+different release returns `CORPUS_LOCAL_RELEASE_RETAINED`. Partial/busy/unknown,
+invalid-marker and cross-store mismatch states fail closed. The immutable target for an empty restore still comes only from
+[`bootstrap/corpus-release.json`](bootstrap/corpus-release.json). Clone/giải nén source mới không xóa Docker volumes cũ; explicit reinstall xem
+[Remote Docker RAG](docs/setup/remote-rag-e2e.md#5-lifecycle).
+
+Explicit local reinstall is one command. It pre-verifies the selected release, shows the
+exact project/volumes/inventory, asks once, resets only those stores, restores and starts
+the stack, then writes READY only after health and consistency pass:
+
+```powershell
+npm run corpus:reset
+# automation/disposable CI only
+npm run corpus:reset -- --yes
+```
+
 - Swagger: <http://localhost:5001/api-docs>
 - OpenAPI: <http://localhost:5001/api-docs.json>
 - Health: <http://localhost:5001/health>

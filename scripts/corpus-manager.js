@@ -42,6 +42,8 @@ const MIME_TYPES = Object.freeze({
   DOCX: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   TXT: 'text/plain'
 });
+const LOCAL_RELEASE_STATE_SCHEMA_VERSION = '1.0.0';
+const SHA256 = /^[0-9a-f]{64}$/i;
 
 function canonicalJson(value) {
   if (Array.isArray(value)) return value.map(canonicalJson);
@@ -302,6 +304,64 @@ function releaseSummary(manifest, pointer = null) {
     artifactCount: artifacts.length,
     payloadBytes: artifacts.reduce((sum, artifact) => sum + artifact.sizeBytes, 0),
     manifestSha256: pointer?.manifestSha256 || null
+  };
+}
+
+function localReleaseState(manifest, pointer) {
+  if (!pointer || pointer.releaseId !== manifest.releaseId
+    || !SHA256.test(String(pointer.manifestSha256 || ''))) {
+    throw releaseError(
+      'CORPUS_RELEASE_STATE_INVALID',
+      'A verified selected-release pointer is required before recording local corpus state.'
+    );
+  }
+  return {
+    stateSchemaVersion: LOCAL_RELEASE_STATE_SCHEMA_VERSION,
+    releaseId: manifest.releaseId,
+    manifestSha256: pointer.manifestSha256,
+    sourceFingerprint: manifest.sourceFingerprint,
+    contentIdentityVersion: manifest.contentIdentityVersion,
+    compatibility: manifest.compatibility,
+    expectedCounts: manifest.expectedCounts,
+    documents: manifest.artifacts.documents.map((document) => ({
+      documentId: String(document.documentId),
+      localStorageKey: document.localStorageKey,
+      sha256: document.sha256,
+      sizeBytes: Number(document.sizeBytes)
+    }))
+  };
+}
+
+function manifestFromLocalReleaseState(state, pointer, options = {}) {
+  if (!state || state.stateSchemaVersion !== LOCAL_RELEASE_STATE_SCHEMA_VERSION
+    || typeof state.releaseId !== 'string'
+    || !SHA256.test(String(state.manifestSha256 || ''))
+    || !SHA256.test(String(state.sourceFingerprint || ''))
+    || !state.compatibility || !state.expectedCounts || !Array.isArray(state.documents)) {
+    throw releaseError('CORPUS_RELEASE_STATE_INVALID', 'Local corpus release-state marker is invalid.');
+  }
+  if (options.requireSelected !== false && (!pointer || state.releaseId !== pointer.releaseId
+    || state.manifestSha256 !== pointer.manifestSha256)) {
+    throw releaseError(
+      'CORPUS_EXISTING_STATE_MISMATCH',
+      'Local corpus release-state marker differs from bootstrap/corpus-release.json.'
+    );
+  }
+  return {
+    releaseId: state.releaseId,
+    sourceFingerprint: state.sourceFingerprint,
+    contentIdentityVersion: state.contentIdentityVersion,
+    compatibility: state.compatibility,
+    expectedCounts: state.expectedCounts,
+    artifacts: {
+      documents: state.documents.map((document) => ({
+        kind: 'document',
+        documentId: String(document.documentId),
+        localStorageKey: document.localStorageKey,
+        sha256: document.sha256,
+        sizeBytes: Number(document.sizeBytes)
+      }))
+    }
   };
 }
 
@@ -949,7 +1009,10 @@ function classifyBootstrapState(stats, qdrant, uploads) {
     uploads: uploads.empty ? 'EMPTY' : 'PRESENT'
   };
   if (Object.values(stores).every((state) => state === 'EMPTY')) {
-    return { state: 'EMPTY', stores, activeJobs, uploads: uploads.fileCount || 0, partial: false };
+    return {
+      state: 'EMPTY', stores, activeJobs, uploads: uploads.fileCount || 0, partial: false,
+      releaseState: uploads.releaseState || null
+    };
   }
   const inProgress = activeJobs > 0 || inProgressDocuments > 0;
   const partial = new Set(Object.values(stores)).size > 1
@@ -963,6 +1026,7 @@ function classifyBootstrapState(stats, qdrant, uploads) {
     inProgress,
     partial,
     exactRelease: 'NOT_CHECKED',
+    releaseState: uploads.releaseState || null,
     diagnostics: {
       readyDocuments,
       activeChunks,
@@ -979,6 +1043,43 @@ async function inspectBootstrapState(options = {}) {
     ? options.inspectUploads()
     : volume.inspectPresence());
   return classifyBootstrapState(stats, qdrant, uploads);
+}
+
+async function inspectOriginalsState(manifest, options = {}) {
+  const volume = options.volumeStore || new DockerUploadVolume();
+  const documents = manifest.artifacts.documents;
+  let present = 0;
+  for (const document of documents) {
+    const current = await volume.stat(document.localStorageKey);
+    if (!current.exists) continue;
+    present += 1;
+    if (current.sha256 !== document.sha256 || Number(current.sizeBytes) !== Number(document.sizeBytes)) {
+      throw releaseError(
+        'CORPUS_ORIGINAL_LOCAL_MISMATCH',
+        'A local original differs from the selected release.'
+      );
+    }
+  }
+  if (present === 0) return { state: 'EMPTY', present, expected: documents.length };
+  if (present !== documents.length) {
+    throw releaseError(
+      'CORPUS_PARTIAL_STATE',
+      'Only part of the selected release original-file inventory exists locally.'
+    );
+  }
+  return { state: 'COMPATIBLE', present, expected: documents.length };
+}
+
+async function verifyLocalSelectedRelease(manifest, options = {}) {
+  const structured = await inspectLocalStateWithRetry(manifest, options);
+  const originals = await (options.inspectOriginals || inspectOriginalsState)(manifest, options);
+  if (structured.state !== 'COMPATIBLE' || originals.state !== 'COMPATIBLE') {
+    throw releaseError(
+      'CORPUS_EXISTING_STATE_MISMATCH',
+      'Local MySQL, Qdrant and originals do not all match the selected release.'
+    );
+  }
+  return { structured, originals };
 }
 
 async function inspectBootstrapStateWithRetry(options = {}) {
@@ -1040,7 +1141,20 @@ async function restoreOriginals(downloaded, options = {}) {
     }
     throw error;
   }
-  return { restored, skipped, targetVolume: targetVolume || 'resolved-upload-volume' };
+  let rolledBack = false;
+  const rollbackOriginals = async () => {
+    if (rolledBack) return;
+    for (const document of [...applied].reverse()) {
+      await volume.removeExact(document.localStorageKey, document);
+    }
+    rolledBack = true;
+  };
+  return {
+    restored,
+    skipped,
+    targetVolume: targetVolume || 'resolved-upload-volume',
+    rollbackOriginals
+  };
 }
 
 function assertExpectedCounts(reconciled, manifest) {
@@ -1072,6 +1186,7 @@ async function restoreCorpus(options = {}) {
   const manageWriterLifecycle = options.manageWriterLifecycle ?? !options.restoreStructured;
   let pausedWriters = [];
   let structuredState = null;
+  let originalsState = null;
   let removeSignalGuard = () => {};
   try {
     phase = 'STAGE';
@@ -1083,10 +1198,37 @@ async function restoreCorpus(options = {}) {
         options.resumeWriters || runtime.resumeWriters
       );
     }
-    const inspect = (manifest) => inspectLocalStateWithRetry(manifest, options);
+    const volume = options.volumeStore || new DockerUploadVolume();
+    const scopedOptions = { ...options, volumeStore: volume };
+    const uploadPresence = await (options.inspectUploads
+      ? options.inspectUploads()
+      : volume.inspectPresence());
+    if (uploadPresence.releaseState) {
+      const recorded = manifestFromLocalReleaseState(
+        uploadPresence.releaseState,
+        downloaded.pointer || options.pointer
+      );
+      if (recorded.sourceFingerprint !== downloaded.manifest.sourceFingerprint) {
+        throw releaseError(
+          'CORPUS_EXISTING_STATE_MISMATCH',
+          'Local release-state marker does not match the downloaded selected manifest.'
+        );
+      }
+    }
+    const inspect = (manifest) => inspectLocalStateWithRetry(manifest, scopedOptions);
     const local = await inspect(downloaded.manifest);
+    const originalsBefore = await (options.inspectOriginals || inspectOriginalsState)(
+      downloaded.manifest,
+      scopedOptions
+    );
     let structuredRestored = false;
     if (local.state === 'EMPTY') {
+      if (uploadPresence.releaseState || !uploadPresence.empty || originalsBefore.state !== 'EMPTY') {
+        throw releaseError(
+          'CORPUS_PARTIAL_STATE',
+          'Structured stores are empty but upload storage or its release marker is not empty.'
+        );
+      }
       phase = 'APPLY';
       localMutationStarted = true;
       if (options.restoreStructured) {
@@ -1098,33 +1240,56 @@ async function restoreCorpus(options = {}) {
         });
       }
       structuredRestored = true;
+    } else if (local.state !== 'COMPATIBLE' || originalsBefore.state !== 'COMPATIBLE') {
+      throw releaseError(
+        'CORPUS_EXISTING_STATE_MISMATCH',
+        'Local MySQL, Qdrant and originals do not all match the selected release.'
+      );
     }
     phase = 'FINALIZE';
-    const reconciled = await (options.reconcileRuntime || runtime.reconcileRuntime)();
-    const counts = assertExpectedCounts(reconciled, downloaded.manifest);
-    const verifiedLocal = await inspect(downloaded.manifest);
-    if (verifiedLocal.state !== 'COMPATIBLE') {
-      throw releaseError('CORPUS_RESTORE_VERIFY_FAILED', 'Restored state is not compatible with the cloud release.');
+    if (structuredRestored) {
+      originalsState = await (options.restoreOriginals || restoreOriginals)(
+        downloaded,
+        { ...scopedOptions, retainRecovery: true }
+      );
+    } else {
+      originalsState = {
+        restored: 0,
+        skipped: originalsBefore.present,
+        targetVolume: 'resolved-upload-volume',
+        rollbackOriginals: async () => {}
+      };
     }
-    const originals = await (options.restoreOriginals || restoreOriginals)(downloaded, options);
+    const verified = await verifyLocalSelectedRelease(downloaded.manifest, scopedOptions);
+    const counts = assertExpectedCounts(verified.structured.reconciled, downloaded.manifest);
+    const state = localReleaseState(downloaded.manifest, downloaded.pointer || options.pointer);
+    const writeState = options.writeReleaseState
+      || ((value) => volume.writeReleaseState(value));
+    await writeState(state);
     const result = {
       status: structuredRestored ? 'CORPUS_RESTORE_OK' : 'CORPUS_ALREADY_RESTORED',
       releaseId: downloaded.manifest.releaseId,
       mysql: structuredRestored ? 1 : 0,
       qdrant: structuredRestored ? 1 : 0,
-      originalsRestored: originals.restored,
-      originalsSkipped: originals.skipped,
-      targetVolume: originals.targetVolume,
+      originalsRestored: originalsState.restored,
+      originalsSkipped: originalsState.skipped,
+      targetVolume: originalsState.targetVolume,
       counts,
-      checksumVerified: true
+      checksumVerified: true,
+      releaseState: 'VERIFIED'
     };
     console.log(JSON.stringify(result));
     return result;
   } catch (error) {
-    if (typeof structuredState?.rollbackRestore === 'function') {
+    if (localMutationStarted) {
       phase = 'ROLLBACK';
       try {
-        await structuredState.rollbackRestore();
+        if (typeof originalsState?.rollbackOriginals === 'function') {
+          await originalsState.rollbackOriginals();
+        }
+        if (typeof structuredState?.rollbackRestore === 'function') {
+          await structuredState.rollbackRestore();
+        }
         rollbackConfirmed = true;
       } catch (_rollbackError) {
         throw markCorpusFailure(releaseError(
@@ -1220,6 +1385,7 @@ async function bootstrapCorpus(options = {}) {
     console.log('CORPUS_BOOTSTRAP_SKIPPED reason=OFF');
     return { status: 'SKIPPED', reason: 'OFF' };
   }
+  let initialLocal = null;
   if (mode === 'auto') {
     let local;
     try {
@@ -1233,42 +1399,92 @@ async function bootstrapCorpus(options = {}) {
     if (local.state === 'UNKNOWN') {
       throw releaseError('CORPUS_LOCAL_STATE_UNKNOWN', 'Local corpus state could not be verified as empty.');
     }
-    if (local.state !== 'EMPTY') {
-      console.warn(
-        `CORPUS_RESTORE_SKIPPED_LOCAL_PRESENT mode=auto partial=${local.partial} `
-        + `exactRelease=NOT_CHECKED activeJobs=${local.activeJobs}`
+    initialLocal = local;
+    if (local.state === 'EMPTY' && local.releaseState) {
+      throw releaseError(
+        'CORPUS_RELEASE_STATE_STALE',
+        'Local release-state marker exists while all corpus stores are empty.'
       );
-      return {
-        status: 'CORPUS_RESTORE_SKIPPED_LOCAL_PRESENT',
-        local: local.state,
-        stores: local.stores,
-        partial: local.partial,
-        exactRelease: 'NOT_CHECKED',
-        divergence: 'ALLOWED'
+    }
+    if (local.state !== 'EMPTY' && local.partial) {
+      throw releaseError(
+        'CORPUS_PARTIAL_STATE',
+        'Local MySQL, originals and Qdrant are not a complete consistent set.'
+      );
+    }
+    if (local.state !== 'EMPTY' && (local.inProgress || Number(local.activeJobs || 0) > 0)) {
+      throw releaseError(
+        'CORPUS_LOCAL_STATE_BUSY',
+        'Local corpus has in-progress processing and cannot be treated as a selected-release no-op.'
+      );
+    }
+    if (local.state !== 'EMPTY' && local.releaseState) {
+      const pointer = options.pointer || await (options.readPointer || readPointer)(options);
+      if (!pointer) {
+        throw releaseError(
+          'CORPUS_RELEASE_POINTER_MISSING',
+          'bootstrap/corpus-release.json is required to verify local corpus state.'
+        );
+      }
+      const selectedMatches = local.releaseState.releaseId === pointer.releaseId
+        && local.releaseState.manifestSha256 === pointer.manifestSha256;
+      const differentRelease = local.releaseState.releaseId !== pointer.releaseId;
+      const manifest = manifestFromLocalReleaseState(
+        local.releaseState,
+        pointer,
+        { requireSelected: !differentRelease }
+      );
+      const verified = await (options.verifyMarkedLocalRelease || verifyLocalSelectedRelease)(
+        manifest,
+        options
+      );
+      const counts = assertExpectedCounts(verified.structured.reconciled, manifest);
+      const result = {
+        status: selectedMatches ? 'CORPUS_ALREADY_RESTORED' : 'CORPUS_LOCAL_RELEASE_RETAINED',
+        releaseId: manifest.releaseId,
+        selectedReleaseId: pointer.releaseId,
+        local: 'COMPATIBLE',
+        originals: 'COMPATIBLE',
+        counts,
+        checksumVerified: true,
+        releaseState: 'VERIFIED'
       };
+      if (!selectedMatches) {
+        console.warn(
+          `CORPUS_LOCAL_PRESENT mode=auto action=RETAIN_VALID_LOCAL_RELEASE `
+          + `localRelease=${manifest.releaseId} selectedRelease=${pointer.releaseId}`
+        );
+      }
+      console.log(JSON.stringify(result));
+      return result;
     }
-    let cloud;
-    try {
-      cloud = validateOptionalCloudConfiguration(options);
-    } catch (error) {
-      if (!['GCS_CONFIG_MISSING', 'GCS_CONFIG_INVALID', 'GCS_CREDENTIAL_MISSING', 'GCS_CREDENTIAL_INVALID']
-        .includes(error.code)) throw error;
-      console.warn(`CORPUS_BOOTSTRAP_SKIPPED reason=${error.code} local=EMPTY`);
-      return { status: 'DEGRADED', code: error.code, reason: error.code, local: 'EMPTY', phase: 'REMOTE_READ' };
+    if (local.state !== 'EMPTY') {
+      console.log('CORPUS_LOCAL_PRESENT mode=auto action=VERIFY_SELECTED_RELEASE');
+    } else {
+      let cloud;
+      try {
+        cloud = validateOptionalCloudConfiguration(options);
+      } catch (error) {
+        if (!['GCS_CONFIG_MISSING', 'GCS_CONFIG_INVALID', 'GCS_CREDENTIAL_MISSING', 'GCS_CREDENTIAL_INVALID']
+          .includes(error.code)) throw error;
+        console.warn(`CORPUS_BOOTSTRAP_SKIPPED reason=${error.code} local=EMPTY`);
+        return { status: 'DEGRADED', code: error.code, reason: error.code, local: 'EMPTY', phase: 'REMOTE_READ' };
+      }
+      if (cloud.state === 'NOT_CONFIGURED') {
+        console.warn('CORPUS_BOOTSTRAP_SKIPPED reason=GCS_CONFIG_MISSING local=EMPTY');
+        return {
+          status: 'DEGRADED', code: 'GCS_CONFIG_MISSING', reason: 'GCS_CONFIG_MISSING',
+          local: 'EMPTY', phase: 'REMOTE_READ'
+        };
+      }
+      console.log('CORPUS_LOCAL_EMPTY mode=auto action=RESTORE_SELECTED_RELEASE');
     }
-    if (cloud.state === 'NOT_CONFIGURED') {
-      console.warn('CORPUS_BOOTSTRAP_SKIPPED reason=GCS_CONFIG_MISSING local=EMPTY');
-      return {
-        status: 'DEGRADED', code: 'GCS_CONFIG_MISSING', reason: 'GCS_CONFIG_MISSING',
-        local: 'EMPTY', phase: 'REMOTE_READ'
-      };
-    }
-    console.log('CORPUS_LOCAL_EMPTY mode=auto action=RESTORE_SELECTED_RELEASE');
   }
   try {
     return await (options.restore || restoreCorpus)(options);
   } catch (error) {
-    if (mode === 'required' || !isDegradableRemoteReadFailure(error)) throw error;
+    if (mode === 'required' || initialLocal?.state !== 'EMPTY'
+      || !isDegradableRemoteReadFailure(error)) throw error;
     let local;
     try {
       local = await inspectBootstrapStateWithRetry(options);
@@ -1347,6 +1563,9 @@ module.exports = {
   downloadAndVerifyRelease,
   inspectCorpus,
   inspectBootstrapState,
+  inspectOriginalsState,
+  localReleaseState,
+  manifestFromLocalReleaseState,
   inspectReadOnlyPublishSource,
   installWriterSignalGuard,
   inspectPublishSource,
@@ -1359,6 +1578,7 @@ module.exports = {
   stageOriginalFile,
   validatePublishIntent,
   validateOptionalCloudConfiguration,
+  verifyLocalSelectedRelease,
   verifyCorpus,
   verifyDownloadedArtifact,
   verifyObjectMetadata

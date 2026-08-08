@@ -6,7 +6,7 @@ Hướng dẫn canonical cho topology NodeJS, MySQL 8.4, Python RAG và Qdrant t
 
 - Node.js 20+, Docker Desktop và Docker Compose.
 - Root `.env` tạo từ `.env.example`.
-- Gemini/LlamaParse credentials cho live RAG.
+- Gemini credential cho live RAG; LlamaParse credential chỉ khi `OCR_MODE=AUTO`.
 - Reader-capable `secrets/gcs.json` để fresh machine verify/restore selected release. Writer key chỉ dành cho manager publish.
 
 ```powershell
@@ -18,13 +18,17 @@ Copy-Item .env.example .env
 
 - app/database/auth secrets;
 - `RAG_INTERNAL_TOKEN` tối thiểu 32 ký tự; `.env.example` và remote Compose override đều chọn `RAG_MODE=remote`;
-- `GOOGLE_API_KEY`, `LLAMA_CLOUD_API_KEY`;
+- `GOOGLE_API_KEY`;
+- `OCR_MODE=OFF|AUTO`; mặc định `OFF`. Chỉ `AUTO` yêu cầu `LLAMA_CLOUD_API_KEY`;
 - `GEMINI_LLM_MODEL=models/gemini-3.5-flash`;
 - `GEMINI_EMBEDDING_MODEL=models/gemini-embedding-001`, `EMBEDDING_DIMENSION=768`;
 - `REMOTE_MYSQL_HOST_PORT=13306` là loopback port cho host-side E2E tooling;
   containers luôn kết nối MySQL bằng `db:3306`;
 - `CORPUS_BOOTSTRAP=auto`;
-- `GCS_PROJECT_ID`, `GCS_BUCKET`, `GCS_OBJECT_PREFIX`, `GCS_CREDENTIALS_FILE`.
+- `GCS_PROJECT_ID`, `GCS_BUCKET`, `GCS_OBJECT_PREFIX`, `GCS_CREDENTIALS_FILE`. Chỉ khi
+  bucket-metadata introspection của least-privilege `corpus-writer` bị 403 và Owner đã
+  kiểm tra exact target, đặt `GCS_PRIVATE_TARGET_OWNER_ATTESTATION` thành chính xác
+  `<project-id>/<bucket-name>`; không dùng biến này cho reader credential.
 
 Không cần file env phụ, terminal `$env:...`, Compose `-f/-p` dài hoặc GCS key trong container. Root Compose chỉ inject provider/internal variables mà runtime cần; host corpus tooling tự đọc GCS config.
 
@@ -80,13 +84,13 @@ CORPUS_RESTORE_OK
 REMOTE_PREFLIGHT_OK
 ```
 
-Trên retained volumes, expected `CORPUS_RESTORE_SKIPPED_LOCAL_PRESENT ... exactRelease=NOT_CHECKED`; `auto` không chạy deep exact-release comparison. Partial/in-progress local state cũng được coi là `PRESENT`, giữ nguyên và cảnh báo. Nếu probe trả `UNKNOWN/ERROR`, tool fail closed với `CORPUS_LOCAL_STATE_UNKNOWN`: không restore và không gọi đó là degraded-empty startup. `auto` chỉ báo `CORPUS_BOOTSTRAP_SKIPPED`/`DEGRADED` rồi tiếp tục empty khi local đã được xác nhận `EMPTY` và lỗi config/credential/permission/missing-object/transport xảy ra ở remote read trước local mutation. Raw fetch/timeout/network error được chuẩn hóa thành stable reason; không fallback sang dump/snapshot trong Git.
+Trên retained volumes, `auto` verify động release-state marker với MySQL/Qdrant/originals. Exact selected release trả `CORPUS_ALREADY_RESTORED`; một release local khác nhưng đầy đủ và tự nhất quán trả `CORPUS_LOCAL_RELEASE_RETAINED` và không bị replace. Partial/in-progress, thiếu hoặc stale marker, same-release checksum mismatch và cross-store mismatch đều fail closed; không silent merge/replace. Nếu probe trả `UNKNOWN/ERROR`, tool fail closed với `CORPUS_LOCAL_STATE_UNKNOWN`: không restore và không gọi đó là degraded-empty startup. `auto` chỉ báo `CORPUS_BOOTSTRAP_SKIPPED`/`DEGRADED` rồi tiếp tục empty khi local đã được xác nhận `EMPTY` và lỗi config/credential/permission/missing-object/transport xảy ra ở remote read trước local mutation. Raw fetch/timeout/network error được chuẩn hóa thành stable reason; không fallback sang dump/snapshot trong Git.
 
 Checksum/integrity, manifest không tương thích, lỗi local filesystem/MySQL/Qdrant, lỗi sau khi apply bắt đầu, hoặc rollback không được xác nhận đều fatal trong cả `auto` và `required`. `required` cũng fail closed với mọi remote-read failure thay vì tiếp tục bằng corpus rỗng.
 
 Chọn mode theo mục đích:
 
-- `auto`: development; bootstrap khi empty, ưu tiên local khi đã có dữ liệu;
+- `auto`: development; restore khi cả ba store empty; no-op exact release; retain release khác đã verify động;
 - `required`: acceptance strict; selected release và local non-empty phải khớp exact;
 - `off`: không đọc/restore/so sánh cloud release.
 
@@ -115,7 +119,7 @@ Workflow manager chuẩn:
 
 1. Xác nhận source/bundle đã được owner phê duyệt; pointer hoặc local files không tự tạo approval.
 2. Dùng viewer credential và chạy `npm run docker:remote:dev`.
-3. `auto` restore selected release nếu local empty; nếu local existing thì giữ local.
+3. `auto` restore selected release nếu local empty; local existing hợp lệ được verify và giữ nguyên, không implicit replace.
 4. Upload/process document mới và poll đến `READY`.
 5. Nhấn `Ctrl+C`; containers dừng, volumes được giữ.
 6. Chuyển sang writer credential qua kênh an toàn.
@@ -157,17 +161,26 @@ chỉ cần `content`; `clientRequestId` optional và server tự sinh UUID.
 | `npm run preflight:remote` | Health/auth/network/shared-volume checks. |
 | `npm run docker:remote:stop` | Stop containers, giữ volumes. |
 | `npm run docker:remote:down` | Xóa containers/network, giữ named volumes. |
-| `npm run docker:remote:reset` | **Destructive:** xóa volumes của configured remote project; cần xác nhận exact project bằng `REMOTE_RESET_CONFIRM_PROJECT`. |
+| `npm run corpus:reset` | **Destructive local reinstall:** verify manifest/checksum và Qdrant lifecycle payload trong container tạm trước mutation, show exact inventory, confirm once, reset/restore/start/verify. |
+| `npm run docker:remote:reset` | Compatibility alias của `corpus:reset`; không có destructive flow thứ hai. |
 
 `Ctrl+C` best-effort stop containers và giữ volumes. Abrupt kill, Docker crash hoặc mất điện không bảo đảm signal cleanup; lần chạy sau reuse volumes và verify state. Đặt `REMOTE_DEV_ALL_LOGS=true` trong `.env` nếu cần attach cả MySQL/Qdrant logs, hoặc dùng `REMOTE_DEV_SERVICES=app,rag-service` để chọn rõ các service cần theo dõi.
 
 Giải nén source/clone mới không đồng nghĩa Docker state mới: named volumes của cùng Compose project vẫn được reuse. Fresh reset chỉ dùng sau khi kiểm tra đúng project và chấp nhận mất dữ liệu của project đó:
 
 ```powershell
-$env:REMOTE_RESET_CONFIRM_PROJECT='edurag_remote_e2e'
-npm run docker:remote:reset
-Remove-Item Env:REMOTE_RESET_CONFIRM_PROJECT
+npm run corpus:reset
+# maintainer inventory, không delete/restore (data services có thể được start để inspect)
+npm run corpus:reset -- --dry-run
+# CI/disposable automation only
+npm run corpus:reset -- --yes
 ```
+
+Command tự đọc exact release từ `bootstrap/corpus-release.json`, download/verify manifest,
+checksum và compatibility trước confirmation và trước `down -v`. Không nhập release ID,
+không chọn latest object và không ghi GCS. Reader chỉ cần Storage Object Viewer. Marker
+READY chỉ được ghi sau restore, full-stack health và dynamic consistency PASS; failure có
+thể rerun cùng command và không được đánh dấu READY giả.
 
 `stop` chỉ dừng services và giữ container/network/volumes. `down` gỡ container/network/orphan theo Compose nhưng giữ named volumes. Test lifecycle dùng project `edurag_remote_test_*` riêng và cleanup volumes chỉ sau isolated-project guard; không dùng reset cho project development không disposable.
 
@@ -177,11 +190,11 @@ Remove-Item Env:REMOTE_RESET_CONFIRM_PROJECT
 |---|---|
 | Port in use | Đổi host port trong root `.env`. |
 | `GCS_CREDENTIAL_MISSING` | Với `auto`, stack chạy degraded; fresh canonical restore cần reader key. |
-| `CORPUS_RESTORE_SKIPPED_LOCAL_PRESENT` | `auto` phát hiện local data/partial/in-progress và giữ nguyên; dùng inspect/diagnostic thay vì restore đè. |
+| `CORPUS_PARTIAL_STATE` / `CORPUS_LOCAL_STATE_BUSY` | Local không phải một exact, quiescent selected release; dừng và inspect, không restore đè. |
 | `CORPUS_LOCAL_STATE_UNKNOWN` | Không xác định an toàn emptiness; cả `auto` và `required` fail closed. Kiểm tra MySQL/Qdrant/upload probe rồi chạy lại. |
 | `GCS_REMOTE_UNAVAILABLE` | Fetch/timeout/network/remote availability đã được chuẩn hóa. Chỉ `auto` + confirmed `EMPTY` + pre-mutation remote read được tiếp tục `DEGRADED`; `required` fail closed. |
 | `CORPUS_RESTORE_ROLLBACK_FAILED` | Apply thất bại và không thể phục hồi exact empty pre-state; dừng, không chạy replace/merge tự động. |
-| `CORPUS_EXISTING_STATE_MISMATCH` | Chỉ strict `required`/restore/verify: local không khớp selected release. Development `auto` không ép exact match. |
+| `CORPUS_EXISTING_STATE_MISMATCH` / `CORPUS_RELEASE_STATE_STALE` | Marker, pointer hoặc dynamic MySQL–Qdrant–original fingerprint không khớp; cả `auto` và `required` fail closed. |
 | `CORPUS_REVIEW_CONFIRMATION_REQUIRED` | Chạy dry-run, review plan rồi dùng đúng `--confirm-reviewed`. |
 | `401` public API | Dùng user JWT, không dùng internal token. |
 | Original unavailable | Corpus/original chưa restore; citation snapshot vẫn dùng được nếu structured local data tồn tại. |

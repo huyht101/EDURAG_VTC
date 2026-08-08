@@ -13,8 +13,10 @@ def main():
         for m in models:
             if 'generateContent' in m.supported_generation_methods:
                 print(f" - {m.name}")
-    except Exception as e:
-        print(f"Lỗi: {e}")
+    except Exception as error:
+        print(f"Lỗi: error_type={type(error).__name__}")
 
 if __name__ == "__main__":
+    if os.environ.get("RAG_MANUAL_LIVE_CONFIRM") != "true":
+        raise SystemExit("Refusing provider call without RAG_MANUAL_LIVE_CONFIRM=true.")
     main()

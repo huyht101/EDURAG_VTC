@@ -8,6 +8,7 @@ const { compose, composeProject, docker } = require('../remote-test-utils');
 const { releaseError, validateLocalStorageKey } = require('./corpus-release');
 
 const APP_UPLOAD_DESTINATION = '/usr/src/app/uploads';
+const RELEASE_STATE_FILE = '/uploads/.edurag-corpus-release-state.json';
 
 function dockerResultSucceeded(result) {
   return typeof result === 'string' || (result && result.status === 0);
@@ -120,11 +121,13 @@ class DockerUploadVolume {
     return this.withHelper(async (helper, volumeName) => {
       const script = [
         "const fs=require('fs'),path=require('path');",
-        "const root='/uploads';let files=0;",
+        `const root='/uploads',marker=${JSON.stringify(RELEASE_STATE_FILE)};let files=0,releaseState=null;`,
         'const walk=(directory)=>{for(const entry of fs.readdirSync(directory,{withFileTypes:true})){' +
           "const target=path.join(directory,entry.name);if(entry.isSymbolicLink()){process.exit(4)}" +
-          'if(entry.isDirectory())walk(target);else if(entry.isFile())files+=1;}};',
-        'walk(root);console.log(JSON.stringify({empty:files===0,fileCount:files}));'
+          'if(entry.isDirectory())walk(target);else if(entry.isFile()){' +
+          "if(target===marker){try{releaseState=JSON.parse(fs.readFileSync(target,'utf8'))}catch(_error){process.exit(5)}}" +
+          'else files+=1;}}};',
+        'walk(root);console.log(JSON.stringify({empty:files===0,fileCount:files,releaseState}));'
       ].join('');
       try {
         const state = JSON.parse(this.docker(['exec', helper, 'node', '-e', script]));
@@ -135,6 +138,29 @@ class DockerUploadVolume {
           'Cannot safely determine whether the upload volume is empty.'
         );
       }
+    });
+  }
+
+  async writeReleaseState(state) {
+    return this.withHelper(async (helper, volumeName) => {
+      const serialized = `${JSON.stringify(state, null, 2)}\n`;
+      const script = [
+        "const fs=require('fs'),crypto=require('crypto');",
+        'const [target,content]=process.argv.slice(1);',
+        "if(fs.existsSync(target)){if(fs.readFileSync(target,'utf8')===content){process.exit(0)}process.exit(3)}",
+        "const temporary=target+'.tmp-'+crypto.randomUUID();",
+        "try{fs.writeFileSync(temporary,content,{encoding:'utf8',flag:'wx'});fs.renameSync(temporary,target)}",
+        'catch(error){try{fs.unlinkSync(temporary)}catch(_cleanupError){}throw error}'
+      ].join('');
+      try {
+        this.docker(['exec', helper, 'node', '-e', script, RELEASE_STATE_FILE, serialized]);
+      } catch (_error) {
+        throw releaseError(
+          'CORPUS_RELEASE_STATE_WRITE_FAILED',
+          'Cannot atomically persist the verified local corpus release state.'
+        );
+      }
+      return { volumeName };
     });
   }
 
@@ -222,4 +248,4 @@ class DockerUploadVolume {
   }
 }
 
-module.exports = { APP_UPLOAD_DESTINATION, DockerUploadVolume };
+module.exports = { APP_UPLOAD_DESTINATION, RELEASE_STATE_FILE, DockerUploadVolume };

@@ -1,5 +1,6 @@
 import asyncio
-from services.rag_engine import query_rag
+import os
+from services.rag_engine import process_query
 from models.schemas import QueryRequest
 
 async def main():
@@ -18,7 +19,7 @@ async def main():
     print("--------------------------------------------------\n")
     
     try:
-        response = await query_rag(req)
+        response = await process_query(req)
         
         print("✅ TRẢ LỜI TỪ AI:\n")
         print(response.answer)
@@ -35,8 +36,10 @@ async def main():
         print("📊 THỐNG KÊ TOKEN:")
         print(response.usage)
         
-    except Exception as e:
-        print(f"❌ LỖI: {e}")
+    except Exception as error:
+        print(f"❌ LỖI: error_type={type(error).__name__}")
 
 if __name__ == "__main__":
+    if os.environ.get("RAG_MANUAL_LIVE_CONFIRM") != "true":
+        raise SystemExit("Refusing live provider query without RAG_MANUAL_LIVE_CONFIRM=true.")
     asyncio.run(main())

@@ -76,7 +76,7 @@ async def test_first_creator_validates_postcondition_and_creates_indexes():
     await _ensure_collection_exists(client, COLLECTION, DIMENSION)
 
     client.create_collection.assert_called_once()
-    assert client.create_payload_index.call_count == 3
+    assert client.create_payload_index.call_count == 5
 
 
 @pytest.mark.asyncio

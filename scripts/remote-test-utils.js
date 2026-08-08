@@ -17,11 +17,17 @@ const composePrefix = [
 
 const REMOTE_REQUIRED_ENVIRONMENT = Object.freeze([
   'GOOGLE_API_KEY',
-  'LLAMA_CLOUD_API_KEY',
   'RAG_INTERNAL_TOKEN',
   'DB_PASSWORD',
   'MYSQL_ROOT_PASSWORD'
 ]);
+
+function remoteRequiredEnvironment(environment = process.env) {
+  const required = [...REMOTE_REQUIRED_ENVIRONMENT];
+  const ocrMode = String(environment.OCR_MODE || 'OFF').trim().toUpperCase();
+  if (ocrMode === 'AUTO') required.push('LLAMA_CLOUD_API_KEY');
+  return required;
+}
 
 function redacted(value) {
   let text = String(value || '');
@@ -149,19 +155,19 @@ async function assertRemoteDbHostPortAvailable() {
   return port;
 }
 
-function assertRemoteEnvironment() {
-  const missing = REMOTE_REQUIRED_ENVIRONMENT.filter((name) => !process.env[name]);
+function assertRemoteEnvironment(environment = process.env) {
+  const missing = remoteRequiredEnvironment(environment).filter((name) => !environment[name]);
   if (missing.length) {
     const error = new Error(`Missing required environment variables: ${missing.join(', ')}`);
     error.code = 'REMOTE_PREFLIGHT_ENV_MISSING';
     throw error;
   }
-  if (process.env.RAG_INTERNAL_TOKEN.length < 32) {
+  if (environment.RAG_INTERNAL_TOKEN.length < 32) {
     const error = new Error('RAG_INTERNAL_TOKEN must contain at least 32 characters.');
     error.code = 'REMOTE_PREFLIGHT_TOKEN_INVALID';
     throw error;
   }
-  if (process.env.DB_PASSWORD !== process.env.MYSQL_ROOT_PASSWORD) {
+  if (environment.DB_PASSWORD !== environment.MYSQL_ROOT_PASSWORD) {
     const error = new Error(
       'Remote demo uses the MySQL root user, so DB_PASSWORD and MYSQL_ROOT_PASSWORD must match.'
     );
@@ -193,6 +199,7 @@ module.exports = {
   assertRemoteResetAllowed,
   assertRemoteDbHostPortAvailable,
   REMOTE_REQUIRED_ENVIRONMENT,
+  remoteRequiredEnvironment,
   assertRemoteEnvironment,
   delay,
   fetchWithTimeout

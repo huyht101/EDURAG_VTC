@@ -39,6 +39,25 @@ def test_health_check():
     response = client.get("/api/health")
     assert response.status_code == 200
     assert response.json()["status"] == "healthy"
+    assert response.json()["ocr_mode"] == "OFF"
+
+
+@patch("api.routes.process_query", side_effect=RuntimeError("secret provider detail"))
+def test_query_error_response_is_sanitized(_mock_process_query):
+    response = client.post(
+        "/api/query",
+        json={
+            "question": "test",
+            "request_id": "request-error",
+            "user_id": "user-1",
+            "conversation_id": "conv-error",
+            "history": [],
+        },
+        headers=AUTH_HEADERS,
+    )
+    assert response.status_code == 500
+    assert response.json()["error_code"] == "INTERNAL_ERROR"
+    assert "secret provider detail" not in response.text
 
 def test_business_route_rejects_missing_token():
     response = client.post("/api/query", json={})

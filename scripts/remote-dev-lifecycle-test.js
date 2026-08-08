@@ -187,7 +187,7 @@ async function main() {
   } finally {
     if (blocker.owned) docker(['rm', '-f', blocker.name], { allowFailure: true });
     assertRemoteResetAllowed(['down', '-v', '--remove-orphans']);
-    compose(['down', '-v', '--remove-orphans'], { allowFailure: true });
+    compose(['down', '-v', '--remove-orphans', '--rmi', 'local'], { allowFailure: true });
     assert.equal(projectResources().length, 0,
       `Lifecycle test cleanup left Docker resources for ${composeProject}.`);
   }

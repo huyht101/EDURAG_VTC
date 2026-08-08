@@ -1,6 +1,6 @@
 # EDURAG project handoff
 
-Updated: 2026-08-02. This document is the canonical current-state handoff for the
+Updated: 2026-08-08. This document is the canonical current-state handoff for the
 NodeJS/Core repository. It summarizes evidence and remaining ownership; it does not
 replace the runtime OpenAPI, database DDL, or the internal Node–Python contract.
 
@@ -44,13 +44,13 @@ persistence boundary.
 | Roles, registration, approval, lock, password lifecycle and JWT invalidation | **IMPLEMENTED + CONTRACT/LOCAL TESTED** | `src/services/auth-service.js`, `src/services/user-service.js`; Node consolidation and user-assets regressions. Rate limiting is process-local. |
 | Avatar and Admin CSV export | **IMPLEMENTED + CONTRACT/LOCAL TESTED** | Authenticated self-only avatar and ADMIN-only CSV are in OpenAPI and `scripts/user-assets-test.js`; existing DBs require `20260801_user_avatar_storage.sql`. |
 | Document Management and Student Library | **IMPLEMENTED + CONTRACT/LOCAL TESTED** on Node | Node tests cover ownership, `READY + VISIBLE`, search aliases, stable pagination and IDOR. No Web/Mobile implementation repository was audited. |
-| PDF/DOCX/TXT artifacts | **IMPLEMENTED + CONTRACT/LOCAL TESTED; RUNTIME NOT RE-VERIFIED** | Node tests cover uploaded PDF/TXT and persistent DOCX-derived PDF mapping across preview/download/ingest. LibreOffice conversion was not rerun in this documentation work, and live Python ingest of that artifact is not current evidence. |
-| Whole-document ingest boundary | **CONTRACT AGREED; LIVE CROSS-RUNTIME NOT VERIFIED** | Node jobs, complete-manifest transaction/ACK and timeout semantics are covered by contract tests. The current HEAD has no fresh Node → Python → Qdrant/provider acceptance. |
-| Chat, rich Markdown persistence, idempotency and usage | **IMPLEMENTED + CONTRACT/LOCAL TESTED** on Node | Node preserves answer strings and citation/usage transactions. Python citation parsing has an open defect for code/index syntax; see `PY-MD-001`. |
+| PDF/DOCX/TXT artifacts | **IMPLEMENTED + CONTRACT/LOCAL TESTED; CURRENT DOCX CONVERSION AND LIVE PDF INGEST VERIFIED** | Node tests cover uploaded PDF/TXT and persistent DOCX-derived PDF mapping across preview/download/ingest. Phase 2 ran `test:part2` inside the app image with LibreOffice and ingested digital/scanned PDFs through the live Python path. TXT behavior was not rerun live in Phase 2. |
+| Whole-document ingest boundary | **IMPLEMENTED + PRODUCTION OFFLINE AND ISOLATED LIVE-PROVIDER E2E VERIFIED** | `test:rag-production-offline-e2e` verifies the production Node/adapter/callback boundary with deterministic providers. Phase 2 ran `test:remote` in an isolated project for one digital and one scanned PDF with the configured Google embedding/LLM and LlamaParse OCR providers; upload, exact-attempt active payload, query/citation and hide/unhide/delete passed. This is not canonical-corpus acceptance. |
+| Chat, rich Markdown persistence, idempotency and usage | **IMPLEMENTED + CONTRACT/LOCAL TESTED; BASIC LIVE QUERY/CITATION VERIFIED** | Node preserves answer strings and citation/usage transactions. Python resolves valid prose/table markers independently, preserves code/index syntax and rejects unresolvable sources in offline tests. Phase 2 verified live answers with structured citations; rich Markdown formatting itself was not specifically asserted in the live run. |
 | Citation snapshot and dynamic file URLs | **IMPLEMENTED + CONTRACT/LOCAL TESTED** on Node | Snapshot data is immutable; URLs are computed from current actor/state. Citation history authorization is separate from Library visibility. |
 | `sourceLocator` Node boundary | **IMPLEMENTED + CONTRACT/LOCAL TESTED** on Node | Node validates/persists/maps nullable ordered normalized boxes. Python snapshot does not produce geometry. Baseline citation uses document name, `pageNumber` and `sourceText`; precise highlight is **OPTIONAL/LATER** and waits for Python. |
-| OCR/parser selection | **CONTRACT_GAP before keyed runtime; OCR quality OPTIONAL/LATER** | Current snapshot may select premium cloud parsing solely from key presence. Explicit parser mode is required before running with that key; AUTO/FORCE thresholds, provider policy and OCR quality are not baseline MVP blockers. |
-| Private corpus release/equivalence | **VERIFICATION_GAP** | Local pointer currently selects `v1-e7a8109f714792d4312713f5`; historical evidence mentions `v1-7463f169257976a90e65ab7c`. Repository metadata does not prove why they differ or that GCS artifacts, originals, MySQL and Qdrant are equivalent. `corpus:inspect` was local-only. |
+| OCR/parser selection | **IMPLEMENTED + OFFLINE AND ISOLATED LIVE-PROVIDER TESTED** | Python uses explicit `OFF|AUTO`; key presence alone does not enable OCR. Mock fixtures cover digital/scanned/mixed/blank and required OCR failure. Phase 2 verified a scanned PDF through LlamaParse OCR and the production ingest/query path. Mixed/blank remain offline-only; quota/cost policy remains operational. |
+| Private corpus release/equivalence | **IMPLEMENTED + LIVE RELEASE ACCEPTED** | Pointer `v1-d07f526e059e53751402a4f3` was rebuilt only from the previous selected release, published create-only, read back, restored in a clean namespace and reset into local-current. The release has 3 READY/VISIBLE documents, 81 MySQL chunks = 81 Qdrant points, exact attempt keys, `is_active=true`, `is_hidden=false`, 3 verified originals and no missing/orphan point. Owner/non-owner citation and original-file RBAC smoke passed. |
 
 ## Artifact and authorization contract
 
@@ -76,8 +76,11 @@ Node upload/job → Python parse/chunk/embed → Qdrant hidden upsert
 
 Node does not implement partial business success. An ingest dispatch timeout is an
 unknown transport outcome and leaves the same attempt `RUNNING`; definitive rejection
-may fail it. Python `BackgroundTasks` is not durable, so restart recovery/reconciliation
-is still open. See the [Python handoff](docs/architecture/python-rag-handoff.md).
+may fail it. Python now retries exact-attempt activation after ACK with a bounded budget,
+emits machine-readable residual state, and provides fail-closed exact-attempt
+consistency/recovery tooling. `BackgroundTasks` itself is still not durable; operator
+confirmation against Node's current READY attempt is required before manual activation.
+See the [Python handoff](docs/architecture/python-rag-handoff.md).
 
 ## Current decisions and limitations
 
@@ -85,9 +88,9 @@ is still open. See the [Python handoff](docs/architecture/python-rag-handoff.md)
   `edurag-chart`, and `visualizations` are not CURRENT.
 - Citation `pageNumber` is 1-based. `sourceLocator` is nullable and, when present,
   contains ordered normalized top-left boxes. Node never invents geometry.
-- Parser/OCR mode must be explicit before any environment carries a cloud parser key.
-  AUTO/FORCE trigger thresholds, mixed-page handling limits, provider acceptance and
-  OCR quality remain **OPTIONAL/LATER** unless Owner promotes them.
+- Parser/OCR mode is explicit and defaults `OFF`; a provider key alone must not change it.
+  OCR is required for MVP, with deterministic offline coverage for digital, scanned and
+  mixed PDFs. Live provider/privacy/quota acceptance is still **NOT VERIFIED**.
 - Existing vectors remain query-compatible. Re-ingest is optional to gain future OCR or
   geometry; old citation snapshots must not be rewritten or given synthetic boxes.
 - PPTX, subject/course/class scope, byte Range, public reprocess, image chat, object
@@ -97,16 +100,14 @@ is still open. See the [Python handoff](docs/architecture/python-rag-handoff.md)
 
 ## Safe next actions
 
-1. Python team addresses P0 citation correctness and bounded recovery, then the P1
-   explicit parser-mode guard, using offline fixtures.
-2. Run an isolated Node → Python → Qdrant acceptance for the exact current HEAD/snapshot;
-   record provider/model/collection without exposing credentials.
-3. Verify the selected private corpus release and cross-store equivalence before corpus
-   acceptance; do not infer equivalence from either historical release ID.
-4. FE/Mobile teams can implement authenticated artifact fetching and locator-null
+1. Upstream the reviewed Python snapshot repair to the Python-owned repository; retain
+   exact offline commands and results in its delivery.
+2. Run mixed/blank live OCR only if Owner requires live evidence beyond their existing
+   deterministic offline fixtures; digital and scanned live-provider paths are verified.
+3. FE/Mobile teams can implement authenticated artifact fetching and locator-null
    fallback from the guidance; their implementation has not been audited here. Precise
    overlay is optional and waits for verified Python geometry.
-5. Before the next schema migration, harden or document recovery for partially applied
+4. Before the next schema migration, harden or document recovery for partially applied
    MySQL DDL (`DB-MIG-001`).
 
 ## Verification recorded by the documentation audit
@@ -114,20 +115,36 @@ is still open. See the [Python handoff](docs/architecture/python-rag-handoff.md)
 | Command | Result | Evidence class |
 |---|---|---|
 | `npm run check` | PASS | Static Node syntax |
-| `npm run test:docs` | PASS (`40` files, `141` relative links, `77` npm commands) | Documentation/link/command contract |
+| `npm run test:docs` | PASS (`42` files, `145` relative links, `88` npm commands) | Documentation/link/command contract |
 | `npm run test:openapi` | PASS (`44` operations, `12` tags) | Static OpenAPI contract |
 | `npm run test:contract` | PASS | Node–RAG mocked contract boundary |
 | `npm run test:documents` | PASS | Node unit/mock document/preview contract |
 | `npm run test:library` | PASS | Node Library authorization/DTO contract |
 | `npm run test:user-assets` | PASS | Node HTTP/unit avatar, CSV and Unicode multipart regression |
 | `npm run test:node-consolidation` | PASS | Node local regression; not cross-runtime |
+| `npm run test:rag-config` | PASS | Explicit OCR mode/root Compose prerequisite |
+| Python container `pytest tests -q` | PASS (`120`) | Offline unit/mock Python behavior; network disabled |
+| `npm run test:rag-offline-e2e` | PASS | Python HTTP + disposable Qdrant lifecycle with callback harness; not full Node |
+| `npm run test:rag-production-offline-e2e` | PASS | Production Node + disposable MySQL + Python HTTP + Qdrant; deterministic providers, no live provider |
+| `npm run test:remote` with digital PDF | PASS | Isolated production Node/Python/Qdrant with live Google embedding/LLM; OCR AUTO selected native extraction |
+| `npm run test:remote` with scanned PDF | PASS | Isolated production Node/Python/Qdrant with live LlamaParse OCR and Google embedding/LLM |
+| `npm run test:part2` in the app image | PASS | Current Node/MySQL/HTTP and LibreOffice regression against disposable MySQL |
+| `npm run test:corpus:fresh` | PASS | Synthetic three-store restore, marker/no-op, one-command reset rerun, full-stack start and disposable cleanup |
+| `npm run test:corpus:reset` | PASS | Reset orchestration failure matrix; preflight fail-closed and no false READY |
+| `npm run test:corpus:partial` | PASS | Partial local state fails closed in disposable project |
+| `npm run corpus:verify` | PASS | Selected release remote manifest/artifacts/checksums and local-current dynamic inventory are compatible |
+| `npm run corpus:reset -- --yes` | PASS | Exact local-current three-store replacement, restore, health and READY marker for the selected release |
+| Restored-corpus smoke (`RESTORED_CORPUS_VERIFY_EXISTING=true`) | PASS | Production health/login plus persisted chat-owner citation/source and role-aware original access without ingest/query mutation |
 | `npm run test:document-schema` | BLOCKED (`ECONNREFUSED`) | MySQL runtime was not running; no schema mutation was attempted |
-| Python AST parse | STATIC PASS (`31` files) | Syntax only |
-| `python -m pytest python-service/tests -q` | BLOCKED | Host is Python 3.14.3 and has no `pytest`; dependencies were not changed |
+| Python container `compileall` | PASS | Syntax/import compilation in the built Python 3.11 image |
 | `npm run corpus:inspect` | PASS | Local-only, read-only pointer inspection; remote/local stores not checked |
 
-No Docker conversion, provider call, GCS verification, corpus restore/publish, or live
-Node → Python → Qdrant flow was run by this audit.
+Phase 2 called the approved live providers only in disposable projects. Release
+`v1-d07f526e059e53751402a4f3` was published create-only after lifecycle repair, verified by
+remote read-back and clean restore, then selected and restored to local-current. The prior
+immutable release was not overwritten or deleted. Provider usage rows recorded two calls
+per live query, while the current SDK did not expose token counts (persisted values were
+zero), so cost was not computed.
 
 Historical Week 3/4 files remain for chronology only. They are not the current readiness
 source and must not override this handoff or the canonical contracts above.

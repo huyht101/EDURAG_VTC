@@ -10,9 +10,20 @@ Phiên bản v3:
 - Thêm CALLBACK_TIMEOUT, CALLBACK_MAX_RETRIES cho callback mechanism.
 """
 
+from enum import Enum
 from functools import lru_cache
+
 # pyrefly: ignore [missing-import]
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class OCRMode(str, Enum):
+    """Explicit parser/OCR mode. API-key presence never changes this value."""
+
+    OFF = "OFF"
+    AUTO = "AUTO"
+
 
 class Settings(BaseSettings):
     """
@@ -27,10 +38,16 @@ class Settings(BaseSettings):
     )
 
     # === Google Gemini API ===
-    GOOGLE_API_KEY: str
+    GOOGLE_API_KEY: str = Field(min_length=1)
+
+    # === OCR Mode ===
+    OCR_MODE: OCRMode = OCRMode.OFF
+    OCR_NATIVE_TEXT_MIN_CHARS: int = Field(default=32, ge=1, le=10000)
+    OCR_TIMEOUT_SECONDS: int = Field(default=120, ge=1, le=3600)
+    OCR_LANGUAGE: str = Field(default="vi", min_length=2, max_length=16)
 
     # === LlamaParse (LlamaIndex Cloud) ===
-    LLAMA_CLOUD_API_KEY: str
+    LLAMA_CLOUD_API_KEY: str = ""
 
     # === Tên model Gemini ===
     GEMINI_LLM_MODEL: str = "models/gemini-3.5-flash"
@@ -51,12 +68,27 @@ class Settings(BaseSettings):
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
 
     # === Embedding Dimension (gemini-embedding-001 trả về 768 chiều) ===
-    EMBEDDING_DIMENSION: int = 768
+    EMBEDDING_DIMENSION: int = Field(default=768, ge=1)
 
     # === Callback — gọi ngược Node.js sau khi xử lý xong ===
-    INTERNAL_SECRET: str
-    CALLBACK_TIMEOUT: int = 30      # seconds
-    CALLBACK_MAX_RETRIES: int = 3
+    INTERNAL_SECRET: str = Field(min_length=32)
+    CALLBACK_TIMEOUT: int = Field(default=30, ge=1, le=600)
+    CALLBACK_MAX_RETRIES: int = Field(default=3, ge=1, le=10)
+    ACTIVATION_MAX_ATTEMPTS: int = Field(default=3, ge=1, le=5)
+    ACTIVATION_RETRY_DELAY_SECONDS: float = Field(default=0.25, ge=0, le=5)
+
+    @field_validator("OCR_MODE", mode="before")
+    @classmethod
+    def normalize_ocr_mode(cls, value):
+        if isinstance(value, str):
+            return value.strip().upper()
+        return value
+
+    @model_validator(mode="after")
+    def validate_ocr_provider_configuration(self):
+        if self.OCR_MODE == OCRMode.AUTO and not self.LLAMA_CLOUD_API_KEY.strip():
+            raise ValueError("LLAMA_CLOUD_API_KEY is required when OCR_MODE=AUTO.")
+        return self
 
 
 @lru_cache()

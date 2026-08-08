@@ -51,13 +51,12 @@ async def send_callback(
     for retry_idx in range(1, max_retries + 1):
         try:
             logger.info(
-                "[CALLBACK] Gửi callback (retry %d/%d): job_id=%s, event=%s, attempt_count=%d → %s",
+                "[CALLBACK] Gửi callback (retry %d/%d): job_id=%s, event=%s, attempt_count=%d",
                 retry_idx,
                 max_retries,
                 payload.job_id,
                 payload.event_type,
                 payload.attempt_count,
-                callback_url,
             )
 
             async with httpx.AsyncClient(timeout=timeout) as client:
@@ -115,16 +114,15 @@ async def send_callback(
 
         except httpx.ConnectError:
             logger.warning(
-                "[CALLBACK] Không kết nối được tới %s (retry %d/%d)",
-                callback_url,
+                "[CALLBACK] Không kết nối được tới Node (retry %d/%d)",
                 retry_idx,
                 max_retries,
             )
 
-        except Exception as e:
+        except Exception as error:
             logger.error(
-                "[CALLBACK] Lỗi không xác định: %s (retry %d/%d)",
-                str(e),
+                "[CALLBACK] Unexpected transport failure: error_type=%s (retry %d/%d)",
+                type(error).__name__,
                 retry_idx,
                 max_retries,
             )

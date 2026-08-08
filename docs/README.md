@@ -18,6 +18,7 @@ Tài liệu hiện hành của NodeJS/Core. Khi có khác biệt, ưu tiên runt
 | Bàn giao implementation phía Python | [Python/Data-RAG handoff](architecture/python-rag-handoff.md) |
 | Tra database | [Database index](database/README.md) |
 | Kiểm thử remote độc lập | [Week 3 test plan](testing/week3-remote-test-plan.md) |
+| Phase 2 live acceptance (Owner-run) | [Phase 2 runbook](testing/phase2-live-acceptance-runbook.md) |
 | Refresh Python snapshot | [Python snapshot](architecture/python-rag.md) và [refresh guide](setup/python-snapshot-refresh.md) |
 
 Tài liệu module: [Account/Auth](modules/account-auth.md), [Documents](modules/documents.md), [Chat/Citations](modules/chat-citations.md), [Usage/Dashboard](modules/usage-dashboard.md). Mermaid sources nằm tại [flow index](flows/README.md).

@@ -8,14 +8,14 @@ Phiên bản v4 (Tuần 4):
   Mỗi LLM call (router + answer) tạo 1 UsageCall entry với call_index stable.
   Node.js nhận usage_calls[] để lưu đủ vào llm_usage_logs.
   Legacy usage field giữ aggregate để backward-compatible.
-- Retrieval filter: is_hidden != true (chỉ READY + VISIBLE).
+- Retrieval filter: is_active == true và is_hidden == false (chỉ point đã ACK và visible).
 - Citation quality: no_answer=True bắt buộc khi không có structured citation.
 - CHIT_CHAT trả no_answer=True (không có indexed evidence).
 
 Luồng:
   1. Router: phân loại câu hỏi → CHIT_CHAT hoặc RAG_REQUIRED.
   2. CHIT_CHAT → LLM trả lời giao tiếp (no_answer=True, no citation).
-  3. RAG_REQUIRED → Search (is_hidden!=true) → LLM → Citations.
+  3. RAG_REQUIRED → Search (is_active=true, is_hidden=false) → LLM → Citations.
   4. Không citation hợp lệ → no_answer=True (fail-closed).
 """
 
@@ -156,8 +156,11 @@ async def _classify_intent(
         usage_call = _make_usage_call(call_index, "QUERY_REWRITE", model_name, usage_info)
         logger.info("[RAG] Router phân loại: %s (tokens=%d)", intent.intent, usage_info.total_tokens)
 
-    except (json.JSONDecodeError, Exception) as e:
-        logger.warning("Router fallback → RAG_REQUIRED. Lỗi: %s", str(e))
+    except Exception as error:
+        logger.warning(
+            "Router fallback → RAG_REQUIRED: error_type=%s",
+            type(error).__name__,
+        )
         intent = QueryIntent(intent="RAG_REQUIRED")
         # Track router call dù thất bại
         empty_usage = UsageInfo(prompt_tokens=0, completion_tokens=0, total_tokens=0, model=model_name)
@@ -205,8 +208,11 @@ async def _handle_chit_chat(
         usage_info = _extract_usage_info(response, model_name)
         answer_usage_call = _make_usage_call(call_index, "ANSWER_GENERATION", model_name, usage_info)
 
-    except Exception as e:
-        logger.error("[RAG] Lỗi khi xử lý CHIT_CHAT: %s", str(e))
+    except Exception as error:
+        logger.error(
+            "[RAG] CHIT_CHAT provider failed: error_type=%s",
+            type(error).__name__,
+        )
         empty_usage = UsageInfo(prompt_tokens=0, completion_tokens=0, total_tokens=0, model=model_name)
         answer_usage_call = _make_usage_call(
             call_index, "ANSWER_GENERATION", model_name, empty_usage,
@@ -238,7 +244,7 @@ async def process_query(request: QueryRequest) -> QueryResponse:
 
     Bước 1: Router — Phân loại intent → usage_calls[0].
     Bước 2: CHIT_CHAT → trả lời giao tiếp → usage_calls[1].
-    Bước 3: RAG_REQUIRED → Embedding → Search (filter is_hidden) → LLM → Citations → usage_calls[1].
+    Bước 3: RAG_REQUIRED → Embedding → Search (active + visible) → LLM → Citations → usage_calls[1].
     """
     settings = get_settings()
     model_name = settings.GEMINI_LLM_MODEL
@@ -271,33 +277,32 @@ async def process_query(request: QueryRequest) -> QueryResponse:
     embed_model = get_embedding_model()
     try:
         question_vector = await embed_model.aget_text_embedding(request.question)
-    except Exception as e:
-        logger.error("[RAG] Lỗi embedding câu hỏi: %s", str(e))
+    except Exception as error:
+        logger.error(
+            "[RAG] Query embedding failed: error_type=%s",
+            type(error).__name__,
+        )
         raise
 
-    # ── Bước 4: Search Qdrant (filter is_hidden != true) ─────────
+    # ── Bước 4: Search Qdrant (is_active=true, is_hidden=false) ──
     client = await get_qdrant_client()
     try:
         search_results = client.query_points(
             collection_name=settings.QDRANT_COLLECTION_NAME,
             query=question_vector,
-            query_filter=models.Filter(
-                must_not=[
-                    models.FieldCondition(
-                        key="is_hidden",
-                        match=models.MatchValue(value=True),
-                    )
-                ]
-            ),
+            query_filter=_active_retrieval_filter(),
             limit=settings.TOP_K,
             with_payload=True,
         )
-    except Exception as e:
-        logger.error("[RAG] Lỗi query Qdrant: %s", str(e))
+    except Exception as error:
+        logger.error(
+            "[RAG] Qdrant query failed: error_type=%s",
+            type(error).__name__,
+        )
         raise
 
     results = search_results.points
-    logger.info("[RAG] Tìm thấy %d kết quả (is_hidden filter)", len(results))
+    logger.info("[RAG] Tìm thấy %d kết quả (active + visible filter)", len(results))
 
     # ── Bước 5: Guardrail — similarity threshold ──────────────────
     filtered_results = [r for r in results if r.score >= settings.SIMILARITY_THRESHOLD]
@@ -338,8 +343,11 @@ async def process_query(request: QueryRequest) -> QueryResponse:
         answer_usage_call = _make_usage_call(2, "ANSWER_GENERATION", model_name, usage_info)
         logger.info("[RAG] LLM answer tokens=%d", usage_info.total_tokens)
 
-    except Exception as e:
-        logger.error("[RAG] Lỗi gọi LLM: %s", str(e))
+    except Exception as error:
+        logger.error(
+            "[RAG] Answer provider failed: error_type=%s",
+            type(error).__name__,
+        )
         empty_usage = UsageInfo(prompt_tokens=0, completion_tokens=0, total_tokens=0, model=model_name)
         answer_usage_call = _make_usage_call(
             2, "ANSWER_GENERATION", model_name, empty_usage,
@@ -438,6 +446,24 @@ def _build_context(results: list[Any]) -> str:
     return "\n\n---\n\n".join(context_parts)
 
 
+def _active_retrieval_filter() -> models.Filter:
+    """Fail closed: legacy/missing is_active and hidden points are not retrievable."""
+    return models.Filter(
+        must=[
+            models.FieldCondition(
+                key="is_active",
+                match=models.MatchValue(value=True),
+            )
+        ],
+        must_not=[
+            models.FieldCondition(
+                key="is_hidden",
+                match=models.MatchValue(value=True),
+            )
+        ],
+    )
+
+
 def _build_rag_prompt(
     question: str,
     context: str,
@@ -491,31 +517,51 @@ def _extract_citations(
     question: str = "",
 ) -> tuple[str, list[Citation]] | None:
     """
-    Ánh xạ marker về retrieval result và đánh lại marker liên tục.
+    Resolve valid Markdown citation markers without rewriting unrelated syntax.
 
-    Marker không có nguồn hợp lệ làm toàn bộ citation set bị từ chối.
+    Numeric markers inside inline/fenced code or attached to an identifier are
+    ignored. Out-of-range markers are removed individually so they cannot be
+    rendered as fabricated citations; other valid markers remain usable.
     """
-    raw_matches = re.findall(r"\[(\d+)\]", answer)
-    if not raw_matches:
+    marker_pattern = re.compile(r"(?<!\w)\[(\d+)\]", flags=re.UNICODE)
+    protected_ranges = _markdown_code_ranges(answer)
+
+    def is_protected(position: int) -> bool:
+        return any(start <= position < end for start, end in protected_ranges)
+
+    matches = [
+        match for match in marker_pattern.finditer(answer)
+        if not is_protected(match.start())
+    ]
+    if not matches:
         return None
+
     referenced_indices: list[int] = []
     seen: set[int] = set()
-    for match in raw_matches:
-        idx = int(match)
-        if not 1 <= idx <= len(results):
-            return None
+    for match in matches:
+        idx = int(match.group(1))
+        if not 1 <= idx <= len(results) or not _has_citable_source(results[idx - 1]):
+            continue
         if idx not in seen:
             seen.add(idx)
             referenced_indices.append(idx)
+
+    if not referenced_indices:
+        return None
+
     marker_map = {
         original_idx: citation_idx
         for citation_idx, original_idx in enumerate(referenced_indices, start=1)
     }
-    normalized_answer = re.sub(
-        r"\[(\d+)\]",
-        lambda match: f"[{marker_map[int(match.group(1))]}]",
-        answer,
-    )
+
+    def replace_marker(match: re.Match) -> str:
+        if is_protected(match.start()):
+            return match.group(0)
+        mapped = marker_map.get(int(match.group(1)))
+        return f"[{mapped}]" if mapped is not None else ""
+
+    normalized_answer = marker_pattern.sub(replace_marker, answer)
+
     citations = []
     for idx in referenced_indices:
         result = results[idx - 1]
@@ -544,6 +590,36 @@ def _extract_citations(
             )
         )
     return normalized_answer, citations
+
+
+def _has_citable_source(result: Any) -> bool:
+    payload = getattr(result, "payload", None)
+    if not isinstance(payload, dict) or getattr(result, "id", None) is None:
+        return False
+    return bool(str(payload.get("doc_id") or "").strip() and str(payload.get("text") or "").strip())
+
+
+def _markdown_code_ranges(answer: str) -> list[tuple[int, int]]:
+    """Return inline/fenced-code ranges, including unclosed spans to end-of-answer."""
+    ranges: list[tuple[int, int]] = []
+    index = 0
+    length = len(answer)
+    while index < length:
+        if answer.startswith("```", index) or answer.startswith("~~~", index):
+            fence = answer[index:index + 3]
+            end = answer.find(fence, index + 3)
+            end = length if end < 0 else end + 3
+            ranges.append((index, end))
+            index = end
+            continue
+        if answer[index] == "`":
+            end = answer.find("`", index + 1)
+            end = length if end < 0 else end + 1
+            ranges.append((index, end))
+            index = end
+            continue
+        index += 1
+    return ranges
 
 
 def _select_relevant_snippet(
