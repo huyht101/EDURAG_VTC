@@ -59,4 +59,3 @@ docs/ss_handoff
 /bootstrap/.corpus-build-*/
 /bootstrap/.corpus-previous-*/
 /bootstrap/.corpus-release-*/
-docs/handoffs/python-rag-mvp-handoff.md

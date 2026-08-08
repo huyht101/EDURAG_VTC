@@ -83,7 +83,7 @@ async def hide_document_background(
 ) -> None:
     """
     Ẩn tài liệu khỏi RAG: set is_hidden=True trên toàn bộ points có doc_id.
-    Sau hide, query với filter is_hidden!=true sẽ bỏ qua chunks này.
+    Sau hide, query với filter active + visible sẽ bỏ qua chunks này.
     Idempotent: gọi nhiều lần trên doc đã hide → kết quả như nhau.
     """
     try:
@@ -113,9 +113,15 @@ async def hide_document_background(
         logger.info("[DOC_MANAGER] Đã hide doc_id=%s (%d chunks)", doc_id, count)
         await send_succeeded_visibility(callback_url, job_id, attempt_count, updated_count=count)
 
-    except Exception as e:
-        logger.exception("[DOC_MANAGER] Lỗi khi hide doc_id=%s", doc_id)
-        await send_failed(callback_url, job_id, attempt_count, "HIDE_ERROR", str(e))
+    except Exception as error:
+        logger.error(
+            "[DOC_MANAGER] Hide failed: doc_id=%s, error_type=%s",
+            doc_id, type(error).__name__,
+        )
+        await send_failed(
+            callback_url, job_id, attempt_count,
+            "HIDE_ERROR", "Document visibility update failed.",
+        )
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -157,9 +163,15 @@ async def unhide_document_background(
         logger.info("[DOC_MANAGER] Đã unhide doc_id=%s (%d chunks)", doc_id, count)
         await send_succeeded_visibility(callback_url, job_id, attempt_count, updated_count=count)
 
-    except Exception as e:
-        logger.exception("[DOC_MANAGER] Lỗi khi unhide doc_id=%s", doc_id)
-        await send_failed(callback_url, job_id, attempt_count, "UNHIDE_ERROR", str(e))
+    except Exception as error:
+        logger.error(
+            "[DOC_MANAGER] Unhide failed: doc_id=%s, error_type=%s",
+            doc_id, type(error).__name__,
+        )
+        await send_failed(
+            callback_url, job_id, attempt_count,
+            "UNHIDE_ERROR", "Document visibility update failed.",
+        )
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -206,6 +218,12 @@ async def delete_document_background(
         logger.info("[DOC_MANAGER] Đã xóa doc_id=%s (%d vectors)", doc_id, count)
         await send_succeeded_delete(callback_url, job_id, attempt_count, deleted_count=count)
 
-    except Exception as e:
-        logger.exception("[DOC_MANAGER] Lỗi khi xóa doc_id=%s", doc_id)
-        await send_failed(callback_url, job_id, attempt_count, "DELETE_ERROR", str(e))
+    except Exception as error:
+        logger.error(
+            "[DOC_MANAGER] Delete failed: doc_id=%s, error_type=%s",
+            doc_id, type(error).__name__,
+        )
+        await send_failed(
+            callback_url, job_id, attempt_count,
+            "DELETE_ERROR", "Document vector deletion failed.",
+        )

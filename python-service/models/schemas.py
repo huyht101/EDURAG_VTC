@@ -13,7 +13,7 @@ Phiên bản v4 (Tuần 4):
 from datetime import datetime, timezone
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 # ============================================================
@@ -63,12 +63,12 @@ class IngestRequest(BaseModel):
     """
     doc_id: str = Field(..., description="ID duy nhất của tài liệu")
     job_id: str = Field(..., description="ID job do Node.js tạo trước")
-    attempt_count: int = Field(..., description="Processing attempt hiện tại, số nguyên từ 1")
+    attempt_count: int = Field(..., ge=1, description="Processing attempt hiện tại, số nguyên từ 1")
     subject_id: str = Field(..., description="ID môn học mà tài liệu thuộc về")
     file_path: str = Field(..., description="Đường dẫn tuyệt đối tới file trên server")
     callback_url: str = Field(..., description="URL để Python callback kết quả về Node.js")
     teacher_metadata: Optional[dict] = Field(
-        default={},
+        default_factory=dict,
         description="Metadata bổ sung từ giáo viên (tên tác giả, ghi chú, ...)"
     )
 
@@ -78,7 +78,7 @@ class IngestAcceptedResponse(BaseModel):
     Response 202 Accepted — Python nhận request và bắt đầu xử lý nền.
     Node.js nhận response này ngay lập tức, không cần chờ xử lý xong.
     """
-    status: str = Field(default="accepted", description="Luôn là 'accepted'")
+    status: Literal["accepted"] = Field(default="accepted", description="Luôn là 'accepted'")
     job_id: str = Field(..., description="Job ID để tracking")
     message: str = Field(default="Tài liệu đang được xử lý", description="Thông báo")
 
@@ -89,12 +89,12 @@ class IngestAcceptedResponse(BaseModel):
 
 class ChunkManifestItem(BaseModel):
     """Thông tin tóm tắt của một chunk trong manifest."""
-    chunk_index: int = Field(..., description="Thứ tự chunk (0-indexed)")
+    chunk_index: int = Field(..., ge=0, description="Thứ tự chunk (0-indexed)")
     chunk_id: str = Field(..., description="UUID thực dùng làm Qdrant point ID")
     chunk_text: str = Field(..., description="Toàn bộ text đã được embedding/index")
     content_hash: str = Field(..., description="SHA-256 lowercase hex của exact UTF-8 chunk_text")
-    token_count: Optional[int] = Field(default=None, description="Số lượng token (ước tính)")
-    page_number: Optional[int] = Field(default=None, description="Số trang nguồn (1-based)")
+    token_count: Optional[int] = Field(default=None, ge=0, description="Số lượng token (ước tính)")
+    page_number: Optional[int] = Field(default=None, ge=1, description="Số trang nguồn (1-based)")
     chapter: Optional[str] = Field(default=None, description="Tên chương")
     section: Optional[str] = Field(default=None, description="Tên mục/phần")
     text_preview: Optional[str] = Field(default=None, description="50 ký tự đầu tiên của chunk")
@@ -112,7 +112,7 @@ class CallbackPayload(BaseModel):
     - CANCELLED: Đã bị hủy
     """
     job_id: str = Field(..., description="Job ID matching với request ban đầu")
-    attempt_count: int = Field(..., description="Processing-job attempt, giữ nguyên từ request")
+    attempt_count: int = Field(..., ge=1, description="Processing-job attempt, giữ nguyên từ request")
     event_type: Literal["PROGRESS", "SUCCEEDED", "FAILED", "CANCELLED"] = Field(
         ..., description="Loại sự kiện"
     )
@@ -124,16 +124,16 @@ class CallbackPayload(BaseModel):
     )
 
     # === Dùng cho SUCCEEDED (ingest) ===
-    chunks_count: Optional[int] = Field(default=None, description="Tổng số chunks đã tạo")
+    chunks_count: Optional[int] = Field(default=None, ge=0, description="Tổng số chunks đã tạo")
     chunk_manifest: Optional[List[ChunkManifestItem]] = Field(
         default=None, description="Danh sách metadata của từng chunk"
     )
 
     # === Dùng cho SUCCEEDED (delete) ===
-    deleted_count: Optional[int] = Field(default=None, description="Số vectors đã xóa")
+    deleted_count: Optional[int] = Field(default=None, ge=0, description="Số vectors đã xóa")
 
     # === Dùng cho SUCCEEDED (hide/unhide) ===
-    updated_count: Optional[int] = Field(default=None, description="Số vectors đã cập nhật")
+    updated_count: Optional[int] = Field(default=None, ge=0, description="Số vectors đã cập nhật")
 
     # === Dùng cho FAILED ===
     error: Optional[dict] = Field(
@@ -152,7 +152,7 @@ class VisibilityRequest(BaseModel):
     Ẩn hoặc hiện tài liệu trong RAG (bật/tắt truy xuất).
     """
     job_id: str = Field(..., description="ID job do Node.js tạo")
-    attempt_count: int = Field(..., description="Processing attempt hiện tại")
+    attempt_count: int = Field(..., ge=1, description="Processing attempt hiện tại")
     action: Literal["hide", "unhide"] = Field(
         ..., description="'hide' = ẩn khỏi RAG, 'unhide' = hiện lại"
     )
@@ -165,7 +165,7 @@ class DeleteRequest(BaseModel):
     Xóa toàn bộ vectors của tài liệu khỏi Qdrant.
     """
     job_id: str = Field(..., description="ID job do Node.js tạo")
-    attempt_count: int = Field(..., description="Processing attempt hiện tại")
+    attempt_count: int = Field(..., ge=1, description="Processing attempt hiện tại")
     callback_url: str = Field(..., description="URL callback kết quả")
 
 
@@ -173,7 +173,7 @@ class AcceptedResponse(BaseModel):
     """
     Response 202 chung cho hide/unhide/delete.
     """
-    status: str = Field(default="accepted", description="Luôn là 'accepted'")
+    status: Literal["accepted"] = Field(default="accepted", description="Luôn là 'accepted'")
     job_id: str = Field(..., description="Job ID để tracking")
 
 
@@ -191,12 +191,12 @@ class QueryRequest(BaseModel):
     """
     Request gửi tới endpoint POST /api/query.
     Node.js gửi câu hỏi kèm lịch sử gần nhất để Python dùng làm context.
-    Search trên toàn bộ tài liệu READY + VISIBLE (is_hidden != true).
+    Search chỉ dùng point đã activate và visible (is_active == true, is_hidden == false).
     """
     question: str = Field(..., description="Câu hỏi của người dùng")
     conversation_id: str = Field(..., description="ID cuộc hội thoại hiện tại do NodeJS tạo")
     history: Optional[List[ChatMessage]] = Field(
-        default=[],
+        default_factory=list,
         description="Lịch sử hội thoại gần nhất (Node.js gửi kèm)"
     )
     request_id: Optional[str] = Field(default=None, description="Correlation/idempotency extension")
@@ -212,7 +212,7 @@ class Citation(BaseModel):
     vector_node_id: str = Field(..., description="Qdrant point ID của retrieved chunk")
     doc_id: str = Field(..., description="ID của tài liệu được trích dẫn")
     snippet: str = Field(..., description="Đoạn trích ngắn từ tài liệu gốc")
-    page_number: Optional[int] = Field(default=None, description="Số trang chứa thông tin (1-based)")
+    page_number: Optional[int] = Field(default=None, ge=1, description="Số trang chứa thông tin (1-based)")
     chapter: Optional[str] = Field(
         default=None,
         description="Tên chương (H1) chứa đoạn trích dẫn"
@@ -229,9 +229,9 @@ class UsageInfo(BaseModel):
     Giữ backward-compatible với Node.js contract hiện tại.
     Nếu có usage_calls[], đây là tổng aggregate của tất cả calls SUCCEEDED.
     """
-    prompt_tokens: int = Field(default=0, description="Số token trong prompt")
-    completion_tokens: int = Field(default=0, description="Số token LLM sinh ra")
-    total_tokens: int = Field(default=0, description="Tổng token")
+    prompt_tokens: int = Field(default=0, ge=0, description="Số token trong prompt")
+    completion_tokens: int = Field(default=0, ge=0, description="Số token LLM sinh ra")
+    total_tokens: int = Field(default=0, ge=0, description="Tổng token")
     model: str = Field(default="", description="Tên model đã sử dụng")
 
 
@@ -261,9 +261,9 @@ class UsageCall(BaseModel):
     )
     provider: str = Field(default="google", description="Provider: 'google', 'openai', ...")
     model: str = Field(..., description="Tên model đã dùng cho call này")
-    prompt_tokens: int = Field(default=0, description="Số token trong prompt của call này")
-    completion_tokens: int = Field(default=0, description="Số token output của call này")
-    total_tokens: int = Field(default=0, description="Tổng token của call này")
+    prompt_tokens: int = Field(default=0, ge=0, description="Số token trong prompt của call này")
+    completion_tokens: int = Field(default=0, ge=0, description="Số token output của call này")
+    total_tokens: int = Field(default=0, ge=0, description="Tổng token của call này")
     status: Literal["SUCCEEDED", "FAILED"] = Field(
         default="SUCCEEDED",
         description="Kết quả của call: SUCCEEDED hoặc FAILED"
@@ -288,10 +288,10 @@ class QueryResponse(BaseModel):
     """
     answer: str = Field(..., description="Câu trả lời được sinh bởi LLM")
     citations: List[Citation] = Field(
-        default=[],
+        default_factory=list,
         description="Danh sách trích dẫn nguồn tương ứng với [1], [2],..."
     )
-    confidence: str = Field(
+    confidence: Literal["high", "medium", "low"] = Field(
         default="high",
         description="Mức độ tin cậy: 'high', 'medium', 'low'"
     )
@@ -301,7 +301,7 @@ class QueryResponse(BaseModel):
     )
     # Multi-call usage tracking (RAG-004)
     usage_calls: List[UsageCall] = Field(
-        default=[],
+        default_factory=list,
         description=(
             "Danh sách usage của từng LLM call riêng (router, answer, ...). "
             "Mỗi call thật → 1 entry với call_index stable. "
@@ -316,3 +316,15 @@ class QueryResponse(BaseModel):
             "Tổng token của tất cả usage_calls có status=SUCCEEDED."
         )
     )
+
+    @model_validator(mode="after")
+    def validate_contract_invariants(self):
+        if self.no_answer and self.citations:
+            raise ValueError("no_answer=true requires an empty citations array.")
+        if not self.no_answer and not self.citations:
+            raise ValueError("no_answer=false requires at least one structured citation.")
+        expected_indices = list(range(1, len(self.usage_calls) + 1))
+        actual_indices = [call.call_index for call in self.usage_calls]
+        if actual_indices != expected_indices:
+            raise ValueError("usage_calls call_index must be contiguous and 1-based.")
+        return self

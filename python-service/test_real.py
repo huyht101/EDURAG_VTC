@@ -17,9 +17,14 @@ async def main():
         file_path=pdf_path,
         callback_url="http://localhost:3000/callback" 
     )
-    print(f"Bắt đầu xử lý file: {pdf_path}")
+    print("Bắt đầu xử lý fixture ingest.")
     await ingest_document_background(req)
     print("Tiến trình đã chạy xong!")
 
 if __name__ == "__main__":
+    collection = os.environ.get("QDRANT_COLLECTION_NAME", "")
+    if os.environ.get("RAG_MANUAL_LIVE_CONFIRM") != "true":
+        raise SystemExit("Refusing live ingest without RAG_MANUAL_LIVE_CONFIRM=true.")
+    if not collection.startswith(("edurag_test_", "edurag_eval_")):
+        raise SystemExit("Refusing non-disposable Qdrant collection for live ingest.")
     asyncio.run(main())

@@ -9,16 +9,17 @@ Theo sơ đồ 3 (Ingest Flow):
 - Trích xuất heading hierarchy (chapter, section)
 
 Strategy:
-- Primary: LlamaParse (nếu có LLAMA_CLOUD_API_KEY)
-- Fallback: pypdf (PDF) + python-docx (DOCX) + plain read (TXT)
+- PDF OFF: native extraction only.
+- PDF AUTO: native extraction for digital pages and OCR for image-only pages.
+- DOCX/TXT: local parser only. Integrated DOCX ingest receives Node's derived PDF.
 """
 
+import asyncio
 import logging
 import re
 from pathlib import Path
-from typing import Any, Dict, List
 
-from core.config import get_settings
+from core.config import OCRMode, get_settings
 
 try:
     # pyrefly: ignore [missing-import]
@@ -30,7 +31,11 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 # Định dạng file được hỗ trợ
-SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".doc", ".txt"}
+SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".txt"}
+
+
+class OCRProcessingError(RuntimeError):
+    """Required OCR could not produce trustworthy text for the document."""
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -65,27 +70,20 @@ async def parse_document(file_path: str) -> list[dict]:
 
     settings = get_settings()
 
-    # Thử LlamaParse trước nếu có API key
-    if settings.LLAMA_CLOUD_API_KEY:
-        try:
-            pages = await _parse_with_llamaparse(file_path, settings.LLAMA_CLOUD_API_KEY)
-            if pages:
-                logger.info("LlamaParse thành công: %d pages từ %s", len(pages), path.name)
-                return _enrich_with_headings(pages)
-        except Exception as e:
-            logger.warning("LlamaParse thất bại, chuyển sang fallback: %s", str(e))
-
-    # Fallback: parser cục bộ
     if ext == ".pdf":
-        pages = _parse_pdf_fallback(file_path)
-    elif ext in (".docx", ".doc"):
+        pages = (
+            await _parse_pdf_auto(file_path, settings)
+            if settings.OCR_MODE == OCRMode.AUTO
+            else _parse_pdf_fallback(file_path)
+        )
+    elif ext == ".docx":
         pages = _parse_docx_fallback(file_path)
     elif ext == ".txt":
         pages = _parse_txt(file_path)
     else:
         raise ValueError(f"Không có parser cho định dạng: {ext}")
 
-    logger.info("Fallback parser: %d pages từ %s", len(pages), path.name)
+    logger.info("Parser hoàn tất: extension=%s, pages=%d", ext, len(pages))
     return _enrich_with_headings(pages)
 
 
@@ -93,7 +91,13 @@ async def parse_document(file_path: str) -> list[dict]:
 # LLAMAPARSE (PRIMARY)
 # ══════════════════════════════════════════════════════════════════
 
-async def _parse_with_llamaparse(file_path: str, api_key: str) -> list[dict]:
+async def _parse_with_llamaparse(
+    file_path: str,
+    api_key: str,
+    *,
+    timeout_seconds: int,
+    language: str,
+) -> list[dict]:
     """
     Parse tài liệu bằng LlamaParse (LlamaIndex Cloud).
     Hỗ trợ PDF, DOCX, TXT — trả về structured markdown.
@@ -101,30 +105,74 @@ async def _parse_with_llamaparse(file_path: str, api_key: str) -> list[dict]:
     try:
         # pyrefly: ignore [missing-import]
         from llama_parse import LlamaParse
+    except ImportError as error:
+        raise OCRProcessingError("OCR provider dependency is unavailable.") from error
 
-        parser = LlamaParse(
-            api_key=api_key,
-            result_type="markdown",
-            language="vi",
-            premium_mode=True,
+    parser = LlamaParse(
+        api_key=api_key,
+        result_type="markdown",
+        language=language,
+        premium_mode=True,
+        split_by_page=True,
+        ignore_errors=False,
+        show_progress=False,
+        max_timeout=timeout_seconds,
+    )
+
+    try:
+        documents = await asyncio.wait_for(
+            parser.aload_data(file_path),
+            timeout=timeout_seconds,
         )
+    except asyncio.TimeoutError as error:
+        raise OCRProcessingError("OCR provider timed out.") from error
+    except Exception as error:
+        raise OCRProcessingError("OCR provider failed.") from error
 
-        documents = await parser.aload_data(file_path)
+    return [
+        {"page_number": page_number, "text": (document.text or "").strip()}
+        for page_number, document in enumerate(documents, start=1)
+    ]
 
-        pages = []
-        for i, doc in enumerate(documents, start=1):
-            text = doc.text.strip()
-            if text:
-                pages.append({
-                    "page_number": i,
-                    "text": text,
-                })
 
-        return pages
+async def _parse_pdf_auto(file_path: str, settings) -> list[dict]:
+    """Use native text per page and OCR only image-only/scan pages."""
+    native_pages = _read_pdf_pages(file_path)
+    required_pages = {
+        page["page_number"]
+        for page in native_pages
+        if page["has_images"]
+        and len(page["text"].strip()) < settings.OCR_NATIVE_TEXT_MIN_CHARS
+    }
 
-    except ImportError:
-        logger.warning("llama-parse chưa được cài. Dùng: pip install llama-parse")
-        return []
+    if not required_pages:
+        return _content_pages(native_pages)
+
+    provider_pages = await _parse_with_llamaparse(
+        file_path,
+        settings.LLAMA_CLOUD_API_KEY,
+        timeout_seconds=settings.OCR_TIMEOUT_SECONDS,
+        language=settings.OCR_LANGUAGE,
+    )
+    provider_by_page = {
+        page["page_number"]: page["text"].strip()
+        for page in provider_pages
+        if page.get("page_number") is not None
+    }
+
+    combined = []
+    for page in native_pages:
+        page_number = page["page_number"]
+        if page_number in required_pages:
+            ocr_text = provider_by_page.get(page_number, "")
+            if not ocr_text:
+                raise OCRProcessingError(
+                    f"OCR returned no usable text for required page {page_number}."
+                )
+            combined.append({"page_number": page_number, "text": ocr_text})
+        elif page["text"].strip():
+            combined.append({"page_number": page_number, "text": page["text"].strip()})
+    return combined
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -133,27 +181,62 @@ async def _parse_with_llamaparse(file_path: str, api_key: str) -> list[dict]:
 
 def _parse_pdf_fallback(file_path: str) -> list[dict]:
     """Đọc PDF bằng pypdf (fallback khi không có LlamaParse)."""
+    return _content_pages(_read_pdf_pages(file_path, inspect_images=False))
+
+
+def _read_pdf_pages(file_path: str, *, inspect_images: bool = True) -> list[dict]:
+    """Read every physical PDF page, preserving blank/image-only page positions."""
     try:
         # pyrefly: ignore [missing-import]
         from pypdf import PdfReader
 
         reader = PdfReader(file_path)
-        pages = []
-
-        for page_num, page in enumerate(reader.pages, start=1):
-            text = page.extract_text() or ""
-            text = text.strip()
-            if text:
-                pages.append({
-                    "page_number": page_num,
-                    "text": text,
-                })
-
-        return pages
-
-    except Exception as e:
-        logger.error("Lỗi khi đọc PDF '%s': %s", file_path, str(e))
+        return [
+            {
+                "page_number": page_number,
+                "text": (page.extract_text() or "").strip(),
+                "has_images": _pdf_page_has_images(page) if inspect_images else False,
+            }
+            for page_number, page in enumerate(reader.pages, start=1)
+        ]
+    except OCRProcessingError:
         raise
+    except Exception as error:
+        logger.error("PDF parse failed: error_type=%s", type(error).__name__)
+        raise ValueError("PDF could not be parsed.") from error
+
+
+def _content_pages(pages: list[dict]) -> list[dict]:
+    return [
+        {"page_number": page["page_number"], "text": page["text"].strip()}
+        for page in pages
+        if page["text"].strip()
+    ]
+
+
+def _pdf_page_has_images(page) -> bool:
+    """Detect image XObjects without treating a genuinely blank page as OCR failure."""
+    try:
+        return bool(list(page.images))
+    except (AttributeError, TypeError):
+        pass
+    except Exception as error:
+        raise OCRProcessingError("PDF page image inspection failed.") from error
+
+    try:
+        resources = page.get("/Resources")
+        if not resources:
+            return False
+        resources = resources.get_object()
+        xobjects = resources.get("/XObject")
+        if not xobjects:
+            return False
+        for candidate in xobjects.get_object().values():
+            if candidate.get_object().get("/Subtype") == "/Image":
+                return True
+        return False
+    except Exception as error:
+        raise OCRProcessingError("PDF page image inspection failed.") from error
 
 
 def _parse_docx_fallback(file_path: str) -> list[dict]:
@@ -168,25 +251,20 @@ def _parse_docx_fallback(file_path: str) -> list[dict]:
             if para.text.strip():
                 full_text.append(para.text)
 
-        # DOCX không có page concept rõ ràng → gộp thành 1 "page"
-        # Chia giả lập: mỗi ~3000 ký tự = 1 page
+        # DOCX không có page concept rõ ràng → trả về None cho page_number
         combined = "\n".join(full_text)
         pages = []
-        page_size = 3000
-
-        for i in range(0, len(combined), page_size):
-            chunk = combined[i:i + page_size].strip()
-            if chunk:
-                pages.append({
-                    "page_number": i // page_size + 1,
-                    "text": chunk,
-                })
+        if combined.strip():
+            pages.append({
+                "page_number": None,
+                "text": combined.strip(),
+            })
 
         return pages
 
-    except Exception as e:
-        logger.error("Lỗi khi đọc DOCX '%s': %s", file_path, str(e))
-        raise
+    except Exception as error:
+        logger.error("DOCX parse failed: error_type=%s", type(error).__name__)
+        raise ValueError("DOCX could not be parsed.") from error
 
 
 def _parse_txt(file_path: str) -> list[dict]:
@@ -198,23 +276,19 @@ def _parse_txt(file_path: str) -> list[dict]:
         if not content.strip():
             return []
 
-        # Chia thành pages giả lập (~3000 ký tự)
+        # TXT không có physical page → trả về None cho page_number
         pages = []
-        page_size = 3000
-
-        for i in range(0, len(content), page_size):
-            chunk = content[i:i + page_size].strip()
-            if chunk:
-                pages.append({
-                    "page_number": i // page_size + 1,
-                    "text": chunk,
-                })
+        if content.strip():
+            pages.append({
+                "page_number": None,
+                "text": content.strip(),
+            })
 
         return pages
 
-    except Exception as e:
-        logger.error("Lỗi khi đọc TXT '%s': %s", file_path, str(e))
-        raise
+    except Exception as error:
+        logger.error("TXT parse failed: error_type=%s", type(error).__name__)
+        raise ValueError("TXT could not be parsed as UTF-8.") from error
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -316,7 +390,10 @@ def _normalize_vietnamese(text: str) -> str:
     if HAS_UNDERTHESEA:
         try:
             return word_tokenize(text, format="text")
-        except Exception as e:
-            logger.warning("Underthesea lỗi, dùng text gốc: %s", str(e))
+        except Exception as error:
+            logger.warning(
+                "Vietnamese normalization failed: error_type=%s",
+                type(error).__name__,
+            )
             return text
     return text

@@ -13,6 +13,7 @@ const {
   inspectCorpus,
   inspectPublishSource,
   inspectReadOnlyPublishSource,
+  localReleaseState,
   parseCommandLine,
   publishCorpus,
   restoreOriginals,
@@ -203,6 +204,17 @@ function reconciledFixture() {
 }
 
 async function main() {
+  assert.doesNotThrow(() => corpusRuntime.assertPointLifecycle(
+    { payload: { is_active: true, is_hidden: false } },
+    { vectorNodeId: 'active-point', visibilityStatus: 'VISIBLE' }
+  ));
+  assert.throws(
+    () => corpusRuntime.assertPointLifecycle(
+      { payload: { is_hidden: false } },
+      { vectorNodeId: 'legacy-point', visibilityStatus: 'VISIBLE' }
+    ),
+    (error) => error.code === 'CORPUS_QDRANT_LIFECYCLE_INCOMPATIBLE'
+  );
   const validPasswordHash = `$2b$12$${'a'.repeat(53)}`;
   const accountPolicy = corpusRuntime.validatePrivateAccountRows([
     {
@@ -857,13 +869,22 @@ async function main() {
   let inspectCalls = 0;
   const restored = await restoreCorpus({
     downloadRelease: async () => ({
-      manifest: valid, files: new Map(), temporary: restoreTemporary, ownsTemporary: true
+      manifest: valid, pointer, files: new Map(), temporary: restoreTemporary, ownsTemporary: true
     }),
     ensureDataServices: async () => {},
-    inspectLocal: async () => ({ state: inspectCalls++ === 0 ? 'EMPTY' : 'COMPATIBLE' }),
+    inspectUploads: async () => ({ empty: true, fileCount: 0, releaseState: null }),
+    inspectLocal: async () => (inspectCalls++ === 0
+      ? { state: 'EMPTY' }
+      : { state: 'COMPATIBLE', reconciled: reconciledFixture() }),
+    inspectOriginals: async () => ({
+      state: inspectCalls < 2 ? 'EMPTY' : 'COMPATIBLE', present: inspectCalls < 2 ? 0 : 1
+    }),
     restoreStructured: async () => { structuredCalls += 1; },
-    reconcileRuntime: async () => reconciledFixture(),
-    restoreOriginals: async () => { originalCalls += 1; return { restored: 1, skipped: 0, targetVolume: 'test_uploads' }; }
+    restoreOriginals: async () => {
+      originalCalls += 1;
+      return { restored: 1, skipped: 0, targetVolume: 'test_uploads', rollbackOriginals: async () => {} };
+    },
+    writeReleaseState: async () => {}
   });
   assert.equal(restored.status, 'CORPUS_RESTORE_OK');
   assert.equal(structuredCalls, 1);
@@ -874,13 +895,14 @@ async function main() {
   structuredCalls = 0;
   const compatible = await restoreCorpus({
     downloadRelease: async () => ({
-      manifest: valid, files: new Map(), temporary: compatibleTemporary, ownsTemporary: true
+      manifest: valid, pointer, files: new Map(), temporary: compatibleTemporary, ownsTemporary: true
     }),
     ensureDataServices: async () => {},
-    inspectLocal: async () => ({ state: 'COMPATIBLE' }),
+    inspectUploads: async () => ({ empty: false, fileCount: 1, releaseState: null }),
+    inspectLocal: async () => ({ state: 'COMPATIBLE', reconciled: reconciledFixture() }),
+    inspectOriginals: async () => ({ state: 'COMPATIBLE', present: 1 }),
     restoreStructured: async () => { structuredCalls += 1; },
-    reconcileRuntime: async () => reconciledFixture(),
-    restoreOriginals: async () => ({ restored: 0, skipped: 1, targetVolume: 'test_uploads' })
+    writeReleaseState: async () => {}
   });
   assert.equal(compatible.status, 'CORPUS_ALREADY_RESTORED');
   assert.equal(structuredCalls, 0);
@@ -888,18 +910,30 @@ async function main() {
 
   const rollbackTemporary = await fsp.mkdtemp(path.join(os.tmpdir(), 'edurag-release-test-rollback-'));
   let structuredRollbacks = 0;
+  let rollbackInspectCalls = 0;
   let writerResumesAfterRestore = 0;
   await assert.rejects(
     () => restoreCorpus({
       downloadRelease: async () => ({
-        manifest: valid, files: new Map(), temporary: rollbackTemporary, ownsTemporary: true
+        manifest: valid, pointer, files: new Map(), temporary: rollbackTemporary, ownsTemporary: true
       }),
       ensureDataServices: async () => {},
-      inspectLocal: async () => ({ state: 'EMPTY' }),
+      inspectUploads: async () => ({ empty: true, fileCount: 0, releaseState: null }),
+      inspectLocal: async () => {
+        if (structuredRollbacks === 0) {
+          if (rollbackInspectCalls++ === 0) return { state: 'EMPTY' };
+          throw releaseError('CORPUS_RESTORE_VERIFY_FAILED', 'forced');
+        }
+        return { state: 'EMPTY' };
+      },
+      inspectOriginals: async () => ({ state: 'EMPTY', present: 0 }),
       restoreStructured: async () => ({
         rollbackRestore: async () => { structuredRollbacks += 1; }
       }),
-      reconcileRuntime: async () => { throw releaseError('CORPUS_RESTORE_VERIFY_FAILED', 'forced'); },
+      restoreOriginals: async () => ({
+        restored: 1, skipped: 0, targetVolume: 'test_uploads', rollbackOriginals: async () => {}
+      }),
+      writeReleaseState: async () => {},
       manageWriterLifecycle: true,
       freezeWriters: () => ['app'],
       resumeWriters: () => { writerResumesAfterRestore += 1; }
@@ -946,6 +980,7 @@ async function main() {
         manifest: valid, files: new Map(), temporary: incompatibleTemporary, ownsTemporary: true
       }),
       ensureDataServices: async () => {},
+      inspectUploads: async () => ({ empty: false, fileCount: 1, releaseState: null }),
       inspectLocal: async () => { throw releaseError('CORPUS_EXISTING_STATE_MISMATCH', 'different'); }
     }),
     (error) => error.code === 'CORPUS_EXISTING_STATE_MISMATCH'
@@ -998,29 +1033,129 @@ async function main() {
     'PRESENT'
   );
 
+  const cloudEnvironment = {
+    GCS_PROJECT_ID: 'test-project', GCS_BUCKET: 'test-bucket',
+    GCS_OBJECT_PREFIX: 'portable-corpus/v1', GCS_CREDENTIALS_FILE: 'secrets/not-read.json'
+  };
+
   const autoRestored = await bootstrapCorpus({
     mode: 'auto',
+    environment: cloudEnvironment,
+    rootDirectory: credentialRoot,
     inspectBootstrap: async () => ({ state: 'EMPTY', activeJobs: 0 }),
     restore: async () => { restoreCalls += 1; return { status: 'CORPUS_RESTORE_OK' }; }
   });
   assert.equal(autoRestored.status, 'CORPUS_RESTORE_OK');
   assert.equal(restoreCalls, 1);
 
+  const selectedState = localReleaseState(valid, pointer);
   const localRetained = await bootstrapCorpus({
     mode: 'auto',
-    inspectBootstrap: async () => ({ state: 'PRESENT', activeJobs: 0, partial: false, stores: {} }),
-    restore: async () => { restoreCalls += 1; throw new Error('must not restore over local state'); }
+    pointer,
+    inspectBootstrap: async () => ({
+      state: 'PRESENT', activeJobs: 0, partial: false, stores: {}, releaseState: selectedState
+    }),
+    verifyMarkedLocalRelease: async () => ({
+      structured: { state: 'COMPATIBLE', reconciled: reconciledFixture() },
+      originals: { state: 'COMPATIBLE', present: valid.artifacts.documents.length }
+    }),
+    restore: async () => { restoreCalls += 1; throw new Error('must not restore over verified local state'); }
   });
-  assert.equal(localRetained.status, 'CORPUS_RESTORE_SKIPPED_LOCAL_PRESENT');
-  assert.equal(localRetained.divergence, 'ALLOWED');
+  assert.equal(localRetained.status, 'CORPUS_ALREADY_RESTORED');
+  assert.equal(localRetained.releaseState, 'VERIFIED');
   assert.equal(restoreCalls, 1, 'Auto attempted to restore over existing local data.');
 
-  const inProgressRetained = await bootstrapCorpus({
+  const differentSelectedPointer = {
+    ...pointer,
+    releaseId: `v1-${'a'.repeat(24)}`,
+    manifestSha256: 'b'.repeat(64)
+  };
+  let retainedManifest;
+  const validDifferentLocal = await bootstrapCorpus({
     mode: 'auto',
-    inspectBootstrap: async () => ({ state: 'PRESENT', activeJobs: 1, partial: true, stores: {} }),
-    restore: async () => { throw new Error('in-progress local state must be retained'); }
+    pointer: differentSelectedPointer,
+    inspectBootstrap: async () => ({
+      state: 'PRESENT', activeJobs: 0, partial: false, stores: {}, releaseState: selectedState
+    }),
+    verifyMarkedLocalRelease: async (manifest) => {
+      retainedManifest = manifest;
+      return {
+        structured: { state: 'COMPATIBLE', reconciled: reconciledFixture() },
+        originals: { state: 'COMPATIBLE', present: valid.artifacts.documents.length }
+      };
+    },
+    restore: async () => { throw new Error('auto must retain a verified different local release'); }
   });
-  assert.equal(inProgressRetained.status, 'CORPUS_RESTORE_SKIPPED_LOCAL_PRESENT');
+  assert.equal(validDifferentLocal.status, 'CORPUS_LOCAL_RELEASE_RETAINED');
+  assert.equal(validDifferentLocal.releaseId, selectedState.releaseId);
+  assert.equal(validDifferentLocal.selectedReleaseId, differentSelectedPointer.releaseId);
+  assert.equal(retainedManifest.releaseId, selectedState.releaseId);
+
+  await assert.rejects(
+    () => bootstrapCorpus({
+      mode: 'required',
+      restore: async () => {
+        throw releaseError('CORPUS_EXISTING_STATE_MISMATCH', 'required exact-release mismatch');
+      }
+    }),
+    (error) => error.code === 'CORPUS_EXISTING_STATE_MISMATCH'
+  );
+
+  await assert.rejects(
+    () => bootstrapCorpus({
+      mode: 'auto',
+      pointer,
+      inspectBootstrap: async () => ({
+        state: 'PRESENT', activeJobs: 0, partial: false, stores: {},
+        releaseState: { ...selectedState, manifestSha256: 'f'.repeat(64) }
+      })
+    }),
+    (error) => error.code === 'CORPUS_EXISTING_STATE_MISMATCH'
+  );
+  await assert.rejects(
+    () => bootstrapCorpus({
+      mode: 'auto',
+      inspectBootstrap: async () => ({
+        state: 'EMPTY', activeJobs: 0, partial: false, stores: {}, releaseState: selectedState
+      })
+    }),
+    (error) => error.code === 'CORPUS_RELEASE_STATE_STALE'
+  );
+  await assert.rejects(
+    () => bootstrapCorpus({
+      mode: 'auto', environment: cloudEnvironment, rootDirectory: credentialRoot,
+      inspectBootstrap: async () => ({
+        state: 'PRESENT', activeJobs: 0, partial: false, stores: {}, releaseState: null
+      }),
+      restore: async () => {
+        throw markCorpusFailure(releaseError('GCS_REMOTE_UNAVAILABLE', 'offline'), {
+          phase: 'REMOTE_READ', localMutationStarted: false, rollbackConfirmed: false
+        });
+      }
+    }),
+    (error) => error.code === 'GCS_REMOTE_UNAVAILABLE'
+  );
+
+  await assert.rejects(
+    () => bootstrapCorpus({
+      mode: 'auto',
+      inspectBootstrap: async () => ({
+        state: 'PRESENT', activeJobs: 1, inProgress: true, partial: false, stores: {}
+      }),
+      restore: async () => { throw new Error('must not restore busy local state'); }
+    }),
+    (error) => error.code === 'CORPUS_LOCAL_STATE_BUSY'
+  );
+  await assert.rejects(
+    () => bootstrapCorpus({
+      mode: 'auto',
+      inspectBootstrap: async () => ({
+        state: 'PRESENT', activeJobs: 0, partial: true, stores: {}
+      }),
+      restore: async () => { throw new Error('must not restore partial local state'); }
+    }),
+    (error) => error.code === 'CORPUS_PARTIAL_STATE'
+  );
 
   await assert.rejects(
     () => bootstrapCorpus({
@@ -1097,10 +1232,6 @@ async function main() {
   assert.equal(invalidAutoConfig.status, 'DEGRADED');
   assert.equal(invalidAutoConfig.reason, 'GCS_CONFIG_INVALID');
 
-  const cloudEnvironment = {
-    GCS_PROJECT_ID: 'test-project', GCS_BUCKET: 'test-bucket',
-    GCS_OBJECT_PREFIX: 'portable-corpus/v1', GCS_CREDENTIALS_FILE: 'secrets/not-read.json'
-  };
   const invalidCredentialEnvironment = {
     GCS_PROJECT_ID: 'test-project', GCS_BUCKET: 'test-bucket',
     GCS_OBJECT_PREFIX: 'portable-corpus/v1', GCS_CREDENTIALS_FILE: 'secrets/gcs.json'
@@ -1227,16 +1358,24 @@ async function main() {
   }
 
   let postApplyRollback = 0;
+  let postApplyInspect = 0;
   await assert.rejects(
     () => bootstrapCorpus({
       mode: 'auto', environment: cloudEnvironment,
       inspectBootstrap: async () => ({ state: 'EMPTY', activeJobs: 0 }),
-      downloadRelease: async () => ({ manifest: valid, files: new Map(), ownsTemporary: false }),
+      downloadRelease: async () => ({ manifest: valid, pointer, files: new Map(), ownsTemporary: false }),
       ensureDataServices: async () => {},
-      inspectLocal: async () => ({ state: 'EMPTY' }),
+      inspectUploads: async () => ({ empty: true, fileCount: 0, releaseState: null }),
+      inspectLocal: async () => {
+        if (postApplyInspect++ === 0) return { state: 'EMPTY' };
+        throw releaseError('GCS_REMOTE_UNAVAILABLE', 'forced after apply');
+      },
+      inspectOriginals: async () => ({ state: 'EMPTY', present: 0 }),
       restoreStructured: async () => ({ rollbackRestore: async () => { postApplyRollback += 1; } }),
-      reconcileRuntime: async () => { throw releaseError('GCS_REMOTE_UNAVAILABLE', 'forced after apply'); },
-      restoreOriginals: async () => ({ restored: 0, skipped: 0, targetVolume: 'test' })
+      restoreOriginals: async () => ({
+        restored: 0, skipped: 0, targetVolume: 'test', rollbackOriginals: async () => {}
+      }),
+      writeReleaseState: async () => {}
     }),
     (error) => error.code === 'GCS_REMOTE_UNAVAILABLE'
       && error.localMutationStarted === true && error.rollbackConfirmed === true
@@ -1247,13 +1386,24 @@ async function main() {
     () => bootstrapCorpus({
       mode: 'auto', environment: cloudEnvironment,
       inspectBootstrap: async () => ({ state: 'EMPTY', activeJobs: 0 }),
-      downloadRelease: async () => ({ manifest: valid, files: new Map(), ownsTemporary: false }),
+      downloadRelease: async () => ({ manifest: valid, pointer, files: new Map(), ownsTemporary: false }),
       ensureDataServices: async () => {},
-      inspectLocal: async () => ({ state: 'EMPTY' }),
+      inspectUploads: async () => ({ empty: true, fileCount: 0, releaseState: null }),
+      inspectLocal: (() => {
+        let calls = 0;
+        return async () => {
+          if (calls++ === 0) return { state: 'EMPTY' };
+          throw releaseError('CORPUS_RESTORE_VERIFY_FAILED', 'forced');
+        };
+      })(),
+      inspectOriginals: async () => ({ state: 'EMPTY', present: 0 }),
       restoreStructured: async () => ({
         rollbackRestore: async () => { throw new Error('forced rollback failure'); }
       }),
-      reconcileRuntime: async () => { throw releaseError('CORPUS_RESTORE_VERIFY_FAILED', 'forced'); }
+      restoreOriginals: async () => ({
+        restored: 0, skipped: 0, targetVolume: 'test', rollbackOriginals: async () => {}
+      }),
+      writeReleaseState: async () => {}
     }),
     (error) => error.code === 'CORPUS_RESTORE_ROLLBACK_FAILED'
   );
