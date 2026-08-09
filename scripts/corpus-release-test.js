@@ -1108,6 +1108,35 @@ async function main() {
     GCS_OBJECT_PREFIX: 'portable-corpus/v1', GCS_CREDENTIALS_FILE: 'secrets/not-read.json'
   };
 
+  const freshBootstrapOrder = [];
+  const firstInvocation = await bootstrapCorpus({
+    mode: 'auto',
+    environment: cloudEnvironment,
+    rootDirectory: credentialRoot,
+    ensureDataServices: async () => { freshBootstrapOrder.push('ensure-data-services'); },
+    databaseStats: async () => {
+      freshBootstrapOrder.push('inspect-mysql');
+      assert.equal(freshBootstrapOrder[0], 'ensure-data-services');
+      return emptyStats;
+    },
+    qdrantInfo: async () => {
+      freshBootstrapOrder.push('inspect-qdrant');
+      return emptyQdrant;
+    },
+    inspectUploads: async () => {
+      freshBootstrapOrder.push('inspect-uploads');
+      return { empty: true, fileCount: 0, releaseState: null };
+    },
+    restore: async () => {
+      freshBootstrapOrder.push('restore');
+      return { status: 'CORPUS_RESTORE_OK' };
+    }
+  });
+  assert.equal(firstInvocation.status, 'CORPUS_RESTORE_OK');
+  assert.deepEqual(freshBootstrapOrder, [
+    'ensure-data-services', 'inspect-mysql', 'inspect-qdrant', 'inspect-uploads', 'restore'
+  ]);
+
   const autoRestored = await bootstrapCorpus({
     mode: 'auto',
     environment: cloudEnvironment,

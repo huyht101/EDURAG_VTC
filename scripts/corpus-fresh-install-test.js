@@ -278,6 +278,8 @@ async function main() {
     compose(['create', 'app']);
     const volumeStore = new DockerUploadVolume();
     const downloaded = await makeDownloadedFixture(temporary);
+    compose(['down', '-v', '--remove-orphans']);
+    assert.equal(projectResources().length, 0, 'Fresh bootstrap must begin without local Docker resources.');
     const environment = {
       GCS_PROJECT_ID: 'offline-test-project',
       GCS_BUCKET: 'offline-private-bucket',
@@ -285,6 +287,7 @@ async function main() {
       GCS_CREDENTIALS_FILE: 'secrets/offline-not-read.json'
     };
     let downloads = 0;
+    let dataServiceBootstraps = 0;
     const options = {
       mode: 'auto',
       environment,
@@ -296,6 +299,7 @@ async function main() {
         return { rollbackRestore: clearStructuredFixture };
       },
       ensureDataServices: async () => {
+        dataServiceBootstraps += 1;
         compose(['up', '-d', '--wait', 'db', 'qdrant']);
         await waitForSchema();
       },
@@ -307,6 +311,7 @@ async function main() {
     assert.equal(restored.releaseId, downloaded.manifest.releaseId);
     assert.equal(restored.releaseState, 'VERIFIED');
     assert.equal(downloads, 1);
+    assert(dataServiceBootstraps >= 1, 'Fresh bootstrap did not create missing local data services.');
     const verified = await reconcileWithRetry();
     assert.equal(verified.stats.documents, 1);
     assert.equal(verified.points.length, 1);
@@ -367,7 +372,7 @@ async function main() {
     assert.equal((await reconcileWithRetry()).points[0].payload.is_active, true);
     console.log(
       `CORPUS_FRESH_INSTALL_TEST_OK release=${downloaded.manifest.releaseId} `
-      + 'fresh_restore=true marker=true exact_noop=true consistency=true remote_calls=1 '
+      + 'fresh_resources_bootstrapped=true fresh_restore=true marker=true exact_noop=true consistency=true remote_calls=1 '
       + 'one_command_reset=true reset_rerun=true full_stack=true'
     );
   } finally {

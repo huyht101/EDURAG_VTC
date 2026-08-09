@@ -1387,6 +1387,9 @@ async function bootstrapCorpus(options = {}) {
   }
   let initialLocal = null;
   if (mode === 'auto') {
+    if (!options.inspectBootstrap) {
+      await (options.ensureDataServices || runtime.ensureDataServices)();
+    }
     let local;
     try {
       local = await inspectBootstrapStateWithRetry(options);
