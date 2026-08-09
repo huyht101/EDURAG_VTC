@@ -172,12 +172,16 @@ Luồng FE khi người dùng mở citation:
 2. Đọc `documentId`, `documentTitle`, `pageNumber` (1-based khi có), `sourceText`, nullable `sourceLocator` và dynamic `previewUrl`/`originalFileUrl`.
 3. Fetch `previewUrl` bằng Bearer để mở đúng canonical PDF mà Python đã ingest. Chỉ fetch `originalFileUrl` khi khác null; Student không nhận original URL cho PDF/DOCX.
 4. Dùng `fetch` nhận `Blob`/`ArrayBuffer`; không gắn URL source được bảo vệ trực tiếp vào viewer nếu viewer không gửi `Authorization`.
-5. Với PDF, tạo object URL từ Blob, mở best-effort tại `pageNumber`, rồi `URL.revokeObjectURL()` khi đóng viewer hoặc thay file.
+5. Với PDF, tạo object URL từ Blob. Chỉ điều hướng tới `pageNumber` khi physical-page
+   identity đã đáng tin cậy; nếu chưa, vẫn có thể mở PDF và hiển thị citation snapshot.
+   Gọi `URL.revokeObjectURL()` khi đóng viewer hoặc thay file.
 
 Fallback và lỗi:
 
-- Không có locator từ Python: mở đúng page nếu có và hiển thị/search `sourceText`;
-  precise highlight là **OPTIONAL/LATER / NOT VERIFIED**, không phải baseline blocker.
+- Không có locator từ Python: vẫn hiển thị/search `sourceText` từ immutable citation
+  snapshot. Chỉ điều hướng tới physical PDF page khi `pageNumber` có trustworthy
+  canonical physical-page identity. Geometry không phải điều kiện để page identity đúng;
+  precise highlight vẫn là **OPTIONAL/LATER / NOT VERIFIED**.
 - `originalAvailable=false`, `409 ORIGINAL_SOURCE_UNAVAILABLE`, hoặc original bị thiếu: vẫn hiển thị immutable citation snapshot.
 - Document `HIDDEN`/`DELETED`: Library detail/source trả `404`; không nới scope và không retry qua `/api/documents` hay management source.
 - `401`: xử lý session/login; `403`: hiển thị lỗi quyền, không đổi sang management API.
@@ -185,7 +189,8 @@ Fallback và lỗi:
 - `sourceLocator` là null hoặc `{boxes:[{x,y,width,height}, ...]}`. Box theo thứ tự dòng,
   normalized 0–1, top-left trên canonical PDF page; FE không tự tạo box khi null. Node
   bình thường reject locator invalid; nếu client gặp dữ liệu malformed/legacy thì bỏ
-  overlay và giữ fallback `pageNumber + sourceText`.
+  overlay và giữ `sourceText`; chỉ dùng `pageNumber` để điều hướng khi page identity đã
+  được xác minh.
 
 Node tạo PDF preview bất đồng bộ cho DOCX bằng durable preview job. Không có generated HTML; TXT không convert. Citation source endpoint vẫn trả immutable JSON snapshot để FE fallback, độc lập với current file availability.
 
@@ -215,10 +220,10 @@ Download/preview dùng filesystem stream và có `Content-Length`, nhưng chưa 
 - Node chỉ chấp nhận `pageNumber >= 1` khi field tồn tại.
 - Python PDF fallback dùng trang vật lý 1-based.
 - Upload DOCX mới được Node convert trước ingest; Python nhận đúng canonical PDF nên `pageNumber`/locator hợp lệ phải quy chiếu PDF đó. DOCX legacy chưa được re-ingest không được mặc định là page-aligned. TXT vẫn có thể dùng synthetic segment nội bộ.
-- LlamaParse primary đánh số theo thứ tự document fragment trả về; không có contract đảm bảo đó là physical page cho mọi format.
+- LlamaParse primary đánh số theo thứ tự document fragment trả về; không có contract đảm bảo đó là physical page cho mọi format. Physical-page alignment của path này hiện **UNVERIFIED**; chưa có metadata field, page convention hoặc heuristic production mapping nào được chọn.
 - `pageCount` là document preview metadata do Node sở hữu, không phải citation `pageNumber`; chưa có public paragraph index, character range hoặc chunk index.
 
-Node hiện validate/lưu/trả `sourceLocator` là null hoặc ordered `boxes[]` normalized 0–1, top-left, nằm trọn trong trang. Node không sinh/clamp/fuzzy-search geometry. Python snapshot hiện chưa có runtime path sinh locator đúng occurrence, nên FE chỉ highlight khi field khác null; fallback vẫn là `sourceText` và `pageNumber`. Precise highlight không chặn citation baseline MVP. Theo dõi acceptance phía Python tại [Python/Data-RAG handoff](../architecture/python-rag-handoff.md).
+Node hiện validate/lưu/trả `sourceLocator` là null hoặc ordered `boxes[]` normalized 0–1, top-left, nằm trọn trong trang. Node không sinh/clamp/fuzzy-search geometry. Python snapshot hiện chưa có runtime path sinh locator đúng occurrence, nên FE chỉ highlight khi field khác null. `sourceText` vẫn hiển thị được từ citation snapshot; điều hướng bằng `pageNumber` chỉ đáng tin cậy khi canonical physical-page identity đã được xác minh. Geometry không sửa hoặc thay thế page identity. Precise geometry/highlight là **OPTIONAL/LATER**; physical-page correctness là baseline riêng. Theo dõi acceptance phía Python tại [Python/Data-RAG handoff](../architecture/python-rag-handoff.md).
 
 Public citation object hiện là:
 
@@ -264,8 +269,9 @@ Requirement `@student.edu.vn` không có BA document canonical trong repository 
 | **Có thể triển khai ngay** | Request mới synchronous; duplicate có thể trả current `PENDING` | Loading đến khi HTTP xong; chỉ poll history cho duplicate-pending | Không streaming token/status endpoint riêng |
 | **Có thể triển khai ngay** | History trả `messages` theo `messageOrder` | Render `senderType`, status và embedded citations | Usage không nằm trong history |
 | **Có thể triển khai ngay** | Original là attachment; canonical preview/download dùng protected routes | Fetch Blob với Bearer; use URL only when non-null; revoke object URL | Không byte Range; cross-origin JS chưa đọc được `Content-Disposition` |
-| **Có thể triển khai ngay** | New DOCX preview/download/pageNumber cùng canonical derived PDF | Viewer mở PDF và page best-effort | Legacy DOCX trước canonical flow không được mặc định page-aligned |
-| **Fallback sẵn sàng** | Locator thường `null`; shape/unit đã fixed ở Node contract | Mở `pageNumber`, hiển thị/search `sourceText`; không overlay khi null/invalid | Python geometry và visual acceptance chưa có |
-| **Phải chờ Python runtime (OPTIONAL UI)** | OCR/locator quality chưa verified | Chỉ chờ nếu sản phẩm chọn precise highlight/OCR; citation baseline vẫn dùng fallback | Cần fixture và isolated cross-runtime evidence |
+| **Có thể triển khai ngay** | New DOCX preview/download dùng cùng canonical derived PDF | Viewer mở PDF; chỉ điều hướng page khi identity đáng tin cậy | Legacy DOCX trước canonical flow không được mặc định page-aligned |
+| **Citation snapshot sẵn sàng** | Locator thường `null`; shape/unit đã fixed ở Node contract | Hiển thị/search `sourceText`; không overlay khi locator null/invalid | Page navigation còn phụ thuộc trustworthy physical-page identity |
+| **Baseline provenance chưa verified** | LlamaParse physical-page alignment hiện **UNVERIFIED** | Không mô tả `pageNumber` navigation là production-ready cho path chưa xác minh | Không chọn metadata, page convention hoặc heuristic mapping ở FE |
+| **OPTIONAL/LATER UI** | Precise geometry/highlight chưa verified | Chỉ chờ geometry nếu sản phẩm chọn precise highlight | Geometry không phải điều kiện để page identity đúng |
 | **Decision required** | Image chat chưa có | Chỉ gửi JSON text | Vision/image upload cần joint Node/Python/product contract |
 | **Decision required** | Email domain chỉ format chung | Normalize UI và chỉ hiển thị BA warning nếu cần | Server enforcement cần BA/owner decision |

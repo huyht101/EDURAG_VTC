@@ -8,3 +8,9 @@
 - Do not delete or replace the whole snapshot unless explicitly requested. Never copy a nested `.git`, `.env`, secret, venv, cache, Qdrant data or source ZIP into Git.
 - Do not change the database schema, Node public API or ownership rules to accommodate a Python mismatch.
 - Python must not write MySQL. NodeJS must not access Qdrant.
+- Before continuity work or cross-runtime changes, read the root `PROJECT_HANDOFF.md`,
+  then follow its link to the specialized authority for the relevant domain.
+- This file controls working constraints. The handoff does not replace runtime OpenAPI,
+  `src/database/schema.sql` or `docs/api/internal-rag-contract.md`; a newer explicit
+  Owner task takes precedence for intended scope.
+- Report intended-versus-implemented gaps instead of silently reconciling them.

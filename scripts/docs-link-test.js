@@ -79,7 +79,7 @@ function main() {
       const appendix = content.indexOf(heading);
       const remote = content.indexOf('npm run docker:remote:dev');
       const firstMockCommand = content.indexOf('npm run docker:mock:');
-      if (appendix < 0 || !content.slice(0, appendix).endsWith('---\n\n')
+      if (appendix < 0 || !/---\r?\n\r?\n$/.test(content.slice(0, appendix))
         || firstMockCommand < appendix
         || content.slice(appendix + heading.length).includes('\n## ')
         || remote < 0 || remote > appendix) {

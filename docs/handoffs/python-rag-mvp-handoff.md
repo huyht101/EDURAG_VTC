@@ -1,5 +1,15 @@
 # HANDOFF triển khai Python/Data-RAG cho EDURAG MVP
 
+> **HISTORICAL / SUPERSEDED.** Tài liệu này giữ checklist và quyết định triển khai tại
+> checkpoint 2026-08-03 để truy vết. Current project state nằm tại
+> [root project handoff](../../PROJECT_HANDOFF.md); Python delivery, Owner-run
+> integration, exact-attempt/stale-visibility invariants, acceptance checklist và
+> out-of-scope hiện hành nằm tại
+> [Python/Data-RAG handoff](../architecture/python-rag-handoff.md). Khi có khác biệt,
+> hai tài liệu hiện hành đó và exact wire contract được ưu tiên.
+> Shorthand “hidden upsert” bên dưới có nghĩa retrieval-disabled `is_active=false`
+> trước ACK, không phải document visibility `is_hidden=true`.
+
 Cập nhật: 2026-08-03
 
 ## 1. Mục tiêu và vai trò tài liệu

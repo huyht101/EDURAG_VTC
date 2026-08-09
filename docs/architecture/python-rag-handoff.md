@@ -1,6 +1,6 @@
 # Python/Data-RAG handoff
 
-Updated: 2026-08-03.
+Updated: 2026-08-09.
 
 This is the canonical implementation and acceptance handoff for the Python/Data-RAG upstream team. [`python-service/`](../../python-service/) is only the tracked integration snapshot. Changes must be implemented, tested and accepted in the Python-owned repository, then refreshed deliberately into the integration snapshot.
 
@@ -18,6 +18,8 @@ The baseline for the canonical handoff is the repository revision containing:
 * the tracked `python-service/` snapshot.
 
 The Python team must report the exact upstream branch and commit used for implementation and acceptance.
+The branch and commit corresponding to the current tracked snapshot remain `Unknown`;
+do not infer them from Node repository merge history.
 
 A delivery copy sent outside the repository must pin the exact Node and Python revisions. If a delivery copy conflicts with the repository at its pinned revision, the repository version is authoritative.
 
@@ -36,14 +38,27 @@ A delivery copy sent outside the repository must pin the exact Node and Python r
 
 | ID            | Classification                                                  | Required outcome                                                                           |
 | ------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `PY-MD-001`   | P0 — **IMPLEMENTED + OFFLINE TESTED IN SNAPSHOT**                | Markdown-aware citation resolution; upstream delivery still required                        |
-| `RAG-REC-001` | P0 — **MVP IMPLEMENTED + OFFLINE TESTED IN SNAPSHOT**            | Bounded activation retry, residual log, consistency check and exact manual recovery         |
-| `INT-E2E-001` | P0 — **INTEGRATION VERIFICATION**                               | Run isolated live Node → Python → Qdrant/provider acceptance on pinned revisions           |
-| `PY-OCR-001`  | P1 MVP — **IMPLEMENTED + OFFLINE TESTED IN SNAPSHOT**             | Explicit `OFF|AUTO`, safe key handling and deterministic digital/scanned/mixed-page OCR     |
-| `PY-EVAL-001` | P1 — **IMPLEMENTED + OFFLINE TESTED IN SNAPSHOT**                | Disposable-only evaluator guard and behavioral tests                                       |
+| `PY-PAGE-001` | CURRENT — **INVESTIGATION ONLY / UNVERIFIED**                    | Establish whether provider output exposes trustworthy canonical physical-page identity; no parser repair or heuristic mapping is authorized |
+| `PY-MD-001`   | P0 — **IMPLEMENTED; OFFLINE PASS RECORDED, NOT RERUN**            | Markdown-aware citation resolution; upstream delivery still required                        |
+| `RAG-REC-001` | DEFERRED — **IMPLEMENTED; OFFLINE PASS RECORDED; OPERATIONAL ACCEPTANCE/OWNERSHIP UNRESOLVED** | Preserve bounded exact-attempt behavior without declaring the acceptance gate or owner closed |
+| `INT-E2E-001` | DEFERRED — **RECORDED ISOLATED EVIDENCE AT `23afbec`; NOT A CURRENT RERUN** | Preserve pinned evidence scope; current external/provider state remains unverified           |
+| `PY-OCR-001`  | P1 MVP — **IMPLEMENTED; OFFLINE PASS RECORDED, NOT RERUN**         | Explicit `OFF|AUTO`, safe key handling and deterministic digital/scanned/mixed-page OCR     |
+| `PY-EVAL-001` | P1 — **IMPLEMENTED; OFFLINE PASS RECORDED, NOT RERUN**            | Disposable-only evaluator guard and behavioral tests                                       |
 | `PY-LOC-001`  | P2 — **OPTIONAL/LATER**                                         | Implement trustworthy page-bounded geometry only if precise highlighting is promoted       |
 
-The recovery proposal must not block `PY-MD-001`, safe current integration verification or other independently assigned work.
+The unresolved recovery decision must not be used to broaden `PY-PAGE-001` or silently
+start independently deferred delivery/integration work.
+
+### Delivery and acceptance boundaries
+
+- **Python delivery** requires an exact upstream branch/commit, changed files and offline
+  evidence. The current upstream revision is `Unknown`.
+- **Owner-run integration** may record an isolated cross-runtime run on pinned revisions.
+  Commit `23afbec` contains such recorded evidence; it was not rerun for the current
+  checkpoint.
+- **Operational acceptance** additionally requires the unresolved recovery ownership,
+  reconciliation gate and stale visibility ordering to be addressed or explicitly
+  accepted. An isolated run does not close those items.
 
 ## Ownership and artifact mapping
 
@@ -122,11 +137,14 @@ The required success flow is:
 parse/OCR
 → page-bounded chunk when canonical pages are available
 → embed
-→ hidden upsert
+→ retrieval-disabled upsert (`is_active=false`)
 → complete-manifest callback
 → Node transaction and machine ACK
 → activate exact-attempt vectors
 ```
+
+This pre-ACK state is not `is_hidden=true`; `is_hidden` is the separate document
+visibility flag.
 
 ### Verified and observed behavior
 
@@ -134,7 +152,7 @@ parse/OCR
 
   * deterministic UUID5 point identities include document/job/attempt/chunk information;
   * point payloads include attempt identity;
-  * initial upsert is hidden;
+  * initial upsert is retrieval-disabled with `is_active=false`;
   * callback code parses the machine ACK;
   * exact-attempt cleanup exists.
 * **NODE VERIFIED**:
@@ -174,7 +192,12 @@ A Node dispatch timeout is an unknown transport outcome. It does not by itself a
 
 ## `RAG-REC-001`: bounded MVP recovery
 
-FastAPI `BackgroundTasks` is not a durable execution mechanism. The current snapshot keeps the wire contract unchanged and implements the approved MVP subset: idempotent exact-attempt activation, bounded retry after valid ACK, machine-readable residual logging, READY-versus-active consistency inspection and explicit exact-attempt manual recovery. A durable queue/reconciler remains later work.
+FastAPI `BackgroundTasks` is not a durable execution mechanism. The current snapshot keeps the wire contract unchanged and implements the approved MVP subset: idempotent exact-attempt activation, bounded retry after valid ACK, machine-readable residual logging, READY-versus-active consistency inspection and explicit exact-attempt manual recovery. No durable queue/reconciler is implemented; whether one is required is unresolved and outside the current task.
+
+This implementation evidence does not settle who owns recovery operations or whether
+bounded reconciliation is sufficient for operational acceptance. Those remain
+**UNRESOLVED** and are deferred from the current parser investigation; durable
+queue/scheduler policy has not been selected.
 
 ### Required invariants
 
@@ -190,11 +213,20 @@ The proposal must preserve all of the following:
 * Retry and reconciliation are bounded.
 * A `RUNNING` attempt must not remain unresolved indefinitely.
 * No Node database schema, public API or terminal-state transition changes without joint approval.
-* Queue or infrastructure vendor selection remains OPTIONAL/LATER unless separately approved.
+* No queue, scheduler or infrastructure vendor is selected without separate approval.
 
 ### Operational limits and later work
 
-The recovery CLI never reads MySQL and therefore requires an operator to verify that the supplied `document_id + job_id + attempt_count` is the exact current Node `READY` attempt. It refuses missing points, partially active points and any other-attempt points for that document. Restart before callback/ACK is still not automatically resumed; a durable queue or scheduler remains OPTIONAL/LATER and would require joint design. New endpoints, callback shapes or state transitions remain prohibited without approval.
+The recovery CLI never reads MySQL and therefore requires an operator to verify that the supplied `document_id + job_id + attempt_count` is the exact current Node `READY` attempt. It refuses missing points, partially active points and any other-attempt points for that document. Restart before callback/ACK is still not automatically resumed; whether a durable queue or scheduler is required remains an unresolved joint decision. New endpoints, callback shapes or state transitions remain prohibited without approval.
+
+### Stale visibility ordering — unresolved
+
+Node prevents a second non-delete document operation while one job is active and rejects
+stale callbacks. The tracked Python snapshot nevertheless applies hide/unhide Qdrant
+payload changes to every point matching `doc_id`. A late operation may therefore mutate
+Qdrant before Node rejects its stale callback. No wire/versioning change, ordering policy
+or owner has been selected. This is deferred from `PY-PAGE-001` and remains unresolved
+before operational acceptance.
 
 ## Complete manifest and source provenance
 
@@ -236,6 +268,27 @@ Python must:
 7. send `source_locator=null` when geometry is absent or untrusted.
 
 These source correctness requirements are part of the baseline citation behavior. They are separate from precise bounding-box occurrence mapping.
+
+### `PY-PAGE-001`: current physical-page investigation
+
+Trustworthy physical-page identity is a baseline requirement whenever Python claims a
+`page_number`; it is not the same as optional geometry.
+
+The repository currently pins `llama-parse==0.6.4`. The previously reported
+`llama-cloud-services==0.6.94` is **PREVIOUS_REPORT_ONLY** because this repository does
+not pin or lock it sufficiently to confirm that runtime version. The adapter configures
+`split_by_page=True`, then assigns page numbers by enumerating provider documents in
+output order. It does not read a canonical physical-page identity from metadata.
+
+The mixed-PDF test mocks `_parse_with_llamaparse()` directly and therefore does not test
+the adapter conversion when provider output is sparse or omits blank/skipped pages. The
+test file defines 10 test functions; the reported PASS result is previous-report evidence,
+not a current rerun. Whether the SDK/provider exposes a trustworthy physical-page
+identity remains **UNVERIFIED**.
+
+The current task authorizes investigation only. Do not select or invent a metadata field,
+use positional/heuristic production mapping, change the parser, re-ingest data, call a
+live provider or change the shared contract under this task.
 
 ### Geometry contract
 
@@ -291,12 +344,15 @@ Precise occurrence-to-box mapping, Qdrant locator preservation and visual highli
 
 The presence of a provider/API key must not silently change the parser or enable a premium mode. OCR behavior is an MVP requirement; live provider acceptance remains a separate gate because offline tests must not use real credentials.
 
-**Current repair candidate `PY-OCR-001` (uncommitted):**
+**Tracked snapshot checkpoint `PY-OCR-001`:**
 
 * `core/config.py` validates explicit `OCR_MODE=OFF|AUTO`; key presence alone leaves `OFF` unchanged;
 * `services/parser.py` uses native text for digital pages and calls the OCR provider only for image pages below the configured native-text threshold;
 * required OCR timeout, provider failure or empty output raises `OCRProcessingError` and fails the whole ingest;
 * `tests/test_parser_ocr.py` provides offline deterministic coverage. Live provider behavior remains **NOT VERIFIED**.
+
+Commit `23afbec` records an isolated scanned provider run, but it is not a current rerun
+and does not establish sparse physical-page alignment.
 
 ### P1 MVP requirement
 
@@ -422,7 +478,7 @@ Before the evaluator is accepted, it must:
 
 ## Acceptance scope
 
-### Required now: `PY-MD-001`
+### Deferred Python delivery: `PY-MD-001`
 
 Acceptance requires:
 
@@ -432,16 +488,23 @@ Acceptance requires:
 * no Node schema, public API or wire-contract change;
 * exact Python upstream commit reported.
 
-### MVP acceptance: `RAG-REC-001`
+### Deferred operational acceptance: `RAG-REC-001`
 
 Acceptance requires bounded exact-attempt activation retry, stable failure logging,
 fail-closed consistency inspection, explicit manual recovery confirmation and tests that
 prove stale/conflicting attempts are never activated. The current snapshot satisfies
-this offline; upstreaming and live operational acceptance remain.
+this offline; upstream provenance, recovery ownership and operational acceptance remain
+unresolved.
 
 ### Integration verification: `INT-E2E-001`
 
-Run isolated Node, Python, Qdrant and MySQL runtimes using pinned revisions and disposable test data.
+Commit `23afbec` records isolated digital/scanned provider E2E on the revisions used by
+that run. This is historical recorded evidence, not a current rerun or proof of current
+provider/runtime state. A future rerun is separate Owner-run integration work and is not
+part of `PY-PAGE-001`.
+
+When separately authorized, run isolated Node, Python, Qdrant and MySQL runtimes using
+pinned revisions and disposable test data.
 
 The acceptance flow must prove:
 
@@ -487,7 +550,7 @@ Record:
 
 Mock RAG, offline fixtures and historical E2E results must be labelled separately and do not satisfy this live gate.
 
-### Required OCR acceptance and conditional geometry acceptance
+### Deferred OCR acceptance and conditional geometry acceptance
 
 **OCR (required MVP, provider mocked for default tests):**
 
@@ -530,12 +593,18 @@ For every completed or proposed action, return:
 
 Do not present snapshot inspection, mock tests or historical results as current upstream/live acceptance.
 
-## Action order
+## Current and deferred action order
 
-1. **P0 delivery:** upstream the verified `PY-MD-001` and `RAG-REC-001` snapshot changes.
-2. **P0 integration:** run `INT-E2E-001` on exact pinned revisions with the real Node app/provider after the offline repair is accepted.
-3. **P1 MVP:** upstream `PY-OCR-001`; keep live-provider evidence separate.
-4. **P1 Python tooling:** upstream `PY-EVAL-001` and retain the canonical-target refusal test.
-5. **P2 OPTIONAL/LATER:** implement `PY-LOC-001` only if the Owner promotes precise highlighting.
+1. **CURRENT investigation:** complete `PY-PAGE-001` without parser repair, provider
+   calls, invented metadata or heuristic mapping.
+2. **DEFERRED Python delivery:** upstream `PY-MD-001`, `RAG-REC-001`, `PY-OCR-001` and
+   `PY-EVAL-001` only under a separately confirmed scope and report the exact upstream
+   revision.
+3. **DEFERRED Owner-run integration:** rerun `INT-E2E-001` only when explicitly required;
+   keep the recorded `23afbec` evidence separate from any future result.
+4. **UNRESOLVED operational acceptance:** settle recovery/reconciliation ownership and
+   stale visibility ordering without silently changing the wire contract.
+5. **P2 OPTIONAL/LATER:** implement `PY-LOC-001` only if the Owner promotes precise
+   highlighting. This does not make physical-page correctness optional.
 
 The earlier [OCR/Markdown handoff](python-rag-ocr-markdown-handoff.md) remains a supporting findings record. Where it differs from this canonical action register, this document takes precedence.

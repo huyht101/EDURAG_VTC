@@ -1,10 +1,25 @@
 # Source locator status and integration notes
 
-Status: Node boundary **IMPLEMENTED + CONTRACT/LOCAL TESTED**; Python geometry and
-precise FE highlight **OPTIONAL/LATER + NOT VERIFIED**. Baseline MVP citation remains
-document name, `pageNumber` and `sourceText`. This is a supporting explanation. The
-wire shape is canonical in [internal RAG contract](../api/internal-rag-contract.md), and
-the implementation backlog is canonical in [Python/Data-RAG handoff](python-rag-handoff.md).
+Status: Node geometry boundary **IMPLEMENTED + CONTRACT/LOCAL TESTED**; canonical
+physical-page alignment is **CURRENT INVESTIGATION / UNVERIFIED**; Python geometry and
+precise FE highlight are **OPTIONAL/LATER + NOT VERIFIED**. This is a supporting
+explanation. The wire shape is canonical in
+[internal RAG contract](../api/internal-rag-contract.md), current state is in the
+[project handoff](../../PROJECT_HANDOFF.md), and Python actions are in the
+[Python/Data-RAG handoff](python-rag-handoff.md).
+
+## Canonical physical-page identity — baseline requirement
+
+A citation may claim a 1-based `pageNumber` only when it can be mapped to the physical
+page of the canonical PDF artifact. This requirement applies even when
+`sourceLocator=null`; absence of geometry does not resolve page-alignment uncertainty.
+
+The current adapter uses LlamaParse `split_by_page=True` and numbers provider documents
+by output position. It does not use a canonical physical-page identity from metadata.
+Whether the SDK/provider supplies a trustworthy identity for sparse, blank or skipped
+output remains **UNVERIFIED**. No metadata field, page convention or production mapping
+has been selected. Positional/heuristic mapping must not be adopted as a repair merely to
+make documentation or tests agree.
 
 ## Contract already fixed at the Node boundary
 
@@ -21,7 +36,13 @@ Node evidence: `src/utils/source-locator.js`, `src/clients/rag-contract.js`,
 `src/validators/processing-callback.js`, chunk/citation repositories, and the RAG
 contract/node-consolidation tests.
 
-## Data path required only for precise highlight
+## Optional precise geometry and highlight
+
+Geometry is nullable and optional for baseline citation display. If provided, it must be
+trustworthy for the already-established canonical physical page; geometry cannot repair
+or substitute for uncertain page identity.
+
+### Data path required only for precise highlight
 
 ```text
 canonical PDF parser/word geometry
@@ -33,10 +54,11 @@ canonical PDF parser/word geometry
 ```
 
 The tracked Python snapshot currently does not generate `source_locator`. Therefore
-`sourceLocator=null` is expected and does not mean highlight is implemented. This does
-not block baseline MVP citation fallback. If Owner prioritizes precise highlight, Python
-must derive boxes from the same word/span occurrence used to build the chunk; post-hoc
-fuzzy search, full-page boxes, or one shared box for repeated chunks is not acceptable.
+`sourceLocator=null` is expected and does not mean highlight is implemented. It permits
+the page/source-text fallback only when the page itself is trustworthy. If Owner
+prioritizes precise highlight, Python must derive boxes from the same word/span
+occurrence used to build the chunk; post-hoc fuzzy search, fabricated full-page boxes,
+or one shared box for repeated chunks is not acceptable.
 
 ## Fixtures required only if precise highlight is prioritized
 
