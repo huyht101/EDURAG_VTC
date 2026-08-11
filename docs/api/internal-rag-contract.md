@@ -117,7 +117,7 @@ Mỗi chunk bắt buộc:
 - full `chunk_text`;
 - SHA-256 `content_hash` khớp chính xác `chunk_text`.
 
-Optional: `token_count`, `page_number`, `section_title`, `chapter`, `section`, `source_locator`. `page_number` là 1-based khi có. `source_locator` là `null` hoặc `{boxes:[{x,y,width,height}, ...]}` với finite normalized 0–1 coordinates, top-left origin, positive size và box nằm trọn trong trang; Node reject locator sai thay vì sửa. Với DOCX upload mới, Python nhận canonical PDF do Node publish nên page/locator phải theo PDF đó. TXT có thể giữ synthetic segment nội bộ; `page_number <= 0` được normalize thành `null`.
+Optional: `token_count`, `page_number`, `section_title`, `chapter`, `section`, `source_locator`. `page_number` là 1-based khi có và phải quy chiếu trustworthy canonical physical PDF page; nếu identity không đáng tin thì phải để null, không suy từ output ordinal. `source_locator` là `null` hoặc `{boxes:[{x,y,width,height}, ...]}` với finite normalized 0–1 coordinates, top-left origin, positive size và box nằm trọn trong trang; Node reject locator sai thay vì sửa. Với DOCX upload mới, Python nhận canonical PDF do Node publish nên page/locator phải theo PDF đó. TXT có thể giữ synthetic segment nội bộ; `page_number <= 0` được normalize thành `null`.
 
 NodeJS không nhận `text_preview` thay full text, không tự hash preview và không sinh fake vector ID.
 
@@ -168,8 +168,10 @@ Current snapshot citation có `vector_node_id=str(result.id)`, `doc_id`, relevan
 `snippet`, optional 1-based PDF `page_number`, `chapter`, `section`. NodeJS nhận
 `snippet` làm source fragment alias, resolve ID qua `document_chunks`, không suy đoán
 vector ID. Node boundary cho nullable `source_locator` đã implement, nhưng snapshot chưa
-sinh geometry. Current Python marker parser còn lỗi với numeric brackets trong code/index
-syntax; xem [Python handoff](../architecture/python-rag-handoff.md).
+sinh geometry. Snapshot marker parser hiện loại marker trong inline/fenced code và array
+index khỏi citation parsing, giữ mixed valid markers và chỉ resolve citable results. Đây
+là behavior quan sát trong snapshot; upstream revision vẫn `Unknown` và live rich-output
+generation chưa được xác minh. Xem [Python handoff](../architecture/python-rag-handoff.md).
 
 `no_answer=true` là success; NodeJS không tạo citation dù response có citation data.
 

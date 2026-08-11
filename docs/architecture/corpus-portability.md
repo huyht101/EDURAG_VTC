@@ -67,6 +67,27 @@ read-only. This is tracked as `CORPUS-EQ-001` in the
 | `required` | Acceptance mode: selected release/credential/artifacts phải hợp lệ và local non-empty phải khớp exact release. Mismatch fail closed. |
 | `off` | Không đọc/restore/so sánh cloud release. Local startup tiếp tục độc lập. |
 
+### Fresh-state ordering and Qdrant diagnostics
+
+**CURRENT_VERIFIED in repository code/local regression scope:** default `auto` bootstrap
+now runs the data-service bootstrap before inspecting MySQL/Qdrant. This is the ordering
+fix committed at `8abff73`: a genuinely fresh local state no longer has to fail once only
+because the resources that inspection needs have not been created. It does not weaken
+the empty/partial/mismatch guards, and rerun still follows the exact-release/dynamic-state
+rules above. Docker-backed fresh/partial/reset suites remain separate evidence and must
+not be called current PASS unless rerun.
+
+Commit `f269334` preserves Qdrant failure context at the request boundary: operation
+phase, HTTP method, sanitized target path, HTTP status/first response line when present,
+and the underlying transport cause. Query strings are removed from the diagnostic target
+and response/cause text passes through redaction. HTTP authentication/configuration and
+other 4xx errors are not converted into blind retries.
+
+Local loopback regression covers an unavailable endpoint and a non-success HTTP response.
+It proves diagnostic behavior, not the root cause of the earlier member report of
+`CORPUS_QDRANT_REQUEST_FAILED`. The original command/log/environment were not available,
+so that incident remains **PLAUSIBLE/UNVERIFIED** rather than reproduced or closed.
+
 Bootstrap theo dõi phase `REMOTE_READ`, `STAGE`, `VERIFY`, `APPLY`, `ROLLBACK`, `FINALIZE` cùng cờ local mutation/rollback. `auto` không degrade integrity/incompatible-manifest, local service/filesystem error, unknown programming error, post-apply failure hoặc rollback failure. Raw `TypeError("fetch failed")`, abort/timeout/network, HTTP availability, permission và missing-object được chuẩn hóa tại remote boundary; log chỉ dùng stable code/sanitized reason. Job/document đang xử lý và partial local stores là `PRESENT`, không bị gọi nhầm là cloud fingerprint corruption và không bị overwrite. `required` luôn fail closed với remote failure và unknown/partial/mismatch.
 
 Sau restore thành công, upload volume ghi `.edurag-corpus-release-state.json` gồm release ID, manifest checksum, compatibility và expected inventory (không chứa credential). Marker chỉ được ghi sau khi MySQL, Qdrant và originals đều verify. Lần `auto` sau dùng marker + dynamic fingerprint để no-op; marker thiếu/không khớp không được coi là bằng chứng local hợp lệ. `required` vẫn download/verify selected release để acceptance strict.

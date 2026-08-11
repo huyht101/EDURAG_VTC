@@ -15,4 +15,4 @@
 
 Public reprocess, batching, durable scheduling and parallel generations remain outside MVP.
 
-Visibility uses `action=hide|unhide`; delete uses methods/paths verified against the current snapshot. Release evidence and remaining upstream debt are tracked in the Week 3 readiness document.
+Visibility uses `action=hide|unhide`; delete uses methods/paths verified against the current snapshot. Stale document-wide visibility ordering remains unresolved even though Node rejects stale callbacks. Current status and upstream debt are tracked in the [project handoff](../../../PROJECT_HANDOFF.md) and [Python/Data-RAG handoff](../../architecture/python-rag-handoff.md); Week 3 readiness is historical only.

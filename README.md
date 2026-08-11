@@ -17,7 +17,9 @@ npm ci
 Copy-Item .env.example .env
 ```
 
-Điền các biến bắt buộc trong root `.env`; không commit `.env` hoặc credential trong `secrets/`.
+Điền các biến bắt buộc trong root `.env`; không commit `.env` hoặc credential mới/plaintext.
+Hai archive mã hóa đang track là exception theo explicit Owner decision tại
+[`secrets/README.md`](secrets/README.md), không phải mẫu cho credential mới.
 
 Database hiện hữu chạy `npm run db:migrate`; page/preview cũ kiểm tra trước bằng `npm run documents:backfill -- --dry-run`. Chi tiết và recovery nằm tại [Documents](docs/modules/documents.md).
 
@@ -57,7 +59,8 @@ npm run corpus:reset -- --yes
 
 Demo Admin local: `admin@example.com` / `123456`. Sau login, lấy `[DEV-ONLY ADMIN OTP]` từ app log rồi gọi `POST /api/auth/admin/verify-otp`.
 
-Xem [documentation index](docs/README.md), [project handoff](PROJECT_HANDOFF.md),
+Xem [tổng quan kỹ thuật phục vụ báo cáo](docs/report/technical-overview.vi.md),
+[documentation index](docs/README.md), [project handoff](PROJECT_HANDOFF.md),
 [Remote Docker RAG](docs/setup/remote-rag-e2e.md) và
 [MVP gap matrix](docs/status/mvp-gap-matrix.md). Các file Week 3/4 là bằng chứng lịch
 sử, không phải readiness hiện hành. Project ở mức integration/demo, chưa

@@ -1,5 +1,10 @@
 # Week 4 Python RAG Test Plan
 
+> **HISTORICAL — NOT CURRENT AUTHORITY.** Checklist này phản ánh snapshot Week 4 và có
+> tên test/expected behavior đã cũ. Authority hiện hành là
+> [Python/Data-RAG handoff](../architecture/python-rag-handoff.md); không chạy hoặc nâng
+> trạng thái theo file này trong final report.
+
 ## Mục đích
 
 Checklist kiểm thử đầy đủ cho Python RAG Service sau các thay đổi tuần 4.

@@ -1,6 +1,10 @@
-# Week 5 RAG evaluation note — HISTORICAL / INVALID AS QUALITY EVIDENCE
+# Week 5 RAG evaluation note
 
-The values previously recorded in this file were randomly simulated without a real
+> **HISTORICAL — NOT CURRENT AUTHORITY.** The simulated values are invalid as retrieval
+> quality evidence. The unreferenced companion `evaluation_summary.csv` was removed in
+> the final data cleanup so it cannot be mistaken for measured results.
+
+The values previously recorded for this Week 5 activity were randomly simulated without a real
 retrieval/provider run. They must not be interpreted as hit rate, no-answer accuracy,
 latency evidence, or as justification for `TOP_K`/threshold configuration.
 

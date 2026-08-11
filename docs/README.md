@@ -4,6 +4,7 @@ Tài liệu hiện hành của NodeJS/Core. Khi có khác biệt, ưu tiên runt
 
 | Mục đích | Tài liệu canonical |
 |---|---|
+| Bắt đầu viết báo cáo / tổng quan kỹ thuật tiếng Việt | [Technical overview](report/technical-overview.vi.md) |
 | Trạng thái/handoff hiện hành | [Project handoff](../PROJECT_HANDOFF.md) |
 | Coverage và remaining work | [MVP gap matrix](status/mvp-gap-matrix.md) |
 | Defect/contract gap/quality debt | [Issue and quality register](status/issue-quality-register.md) |
@@ -17,7 +18,6 @@ Tài liệu hiện hành của NodeJS/Core. Khi có khác biệt, ưu tiên runt
 | Tích hợp NodeJS–Python | [Internal RAG contract](api/internal-rag-contract.md) |
 | Bàn giao implementation phía Python | [Python/Data-RAG handoff](architecture/python-rag-handoff.md) |
 | Tra database | [Database index](database/README.md) |
-| Kiểm thử remote độc lập | [Week 3 test plan](testing/week3-remote-test-plan.md) |
 | Phase 2 live acceptance (Owner-run) | [Phase 2 runbook](testing/phase2-live-acceptance-runbook.md) |
 | Refresh Python snapshot | [Python snapshot](architecture/python-rag.md) và [refresh guide](setup/python-snapshot-refresh.md) |
 
@@ -37,7 +37,9 @@ Nguồn chi tiết duy nhất:
 - **Canonical:** các mục trong bảng trên, runtime OpenAPI và database DDL.
 - **Supporting:** `architecture/nodejs-core.md`, `architecture/rag-boundary.md`, module,
   flow notes, setup và `architecture/source-locator-handoff.md`.
-- **Historical:** `status/week3-*`, `status/week4-*` và các test report ghi rõ
-  historical/simulation. Chúng không được dùng để nâng trạng thái hiện hành.
+- **Historical:** `status/week3-*`, `status/week4-*`, `testing/week3-*`,
+  `testing/week4-*`, Week 5 evaluation note, legacy MVP handoff và OCR/Markdown audit
+  record đều ghi `HISTORICAL — NOT CURRENT AUTHORITY`. Chúng không được dùng để nâng
+  trạng thái hiện hành.
 - **Python snapshot-local:** README/docs dưới `python-service/` chỉ phản ánh bản copy tại
   thời điểm refresh và có thể bị upstream thay thế.

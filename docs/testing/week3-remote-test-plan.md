@@ -1,5 +1,10 @@
 # Week 3 independent test plan
 
+> **HISTORICAL — NOT CURRENT AUTHORITY.** Giữ lại để truy vết checklist Week 3. Dùng
+> [Remote Docker RAG](../setup/remote-rag-e2e.md) và
+> [Phase 2 runbook](phase2-live-acceptance-runbook.md) cho quy trình hiện hành; không suy
+> trạng thái PASS/current từ file này.
+
 Checklist cho tester fresh-clone. Không sửa schema/Python runtime và không ghi credential vào evidence.
 
 ## 1. Setup

@@ -42,4 +42,5 @@ sequenceDiagram
   end
 
   Note over Node,DB: A failed terminal callback retains previous visibility, and the MVP does not retry automatically
+  Note over Node,RAG: Stale callback rejection does not prove a late document-wide Qdrant mutation was ordered safely; RAG-VIS-001 remains unresolved
   Note over DB: HIDDEN retains vectors, while DELETED retains the original file and MySQL history

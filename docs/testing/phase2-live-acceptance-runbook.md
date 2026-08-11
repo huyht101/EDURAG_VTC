@@ -44,7 +44,8 @@ authorizes IAM changes or deletion/overwrite of an immutable cloud release.
    mismatch.
 
 3. Run the repository remote acceptance against live approved providers. Cover upload
-   through hidden upsert, callback/ACK/activate, query/citation/usage and hide/unhide/delete
+   through retrieval-disabled upsert (`is_active=false`, not `is_hidden=true`),
+   callback/ACK/activate, query/citation/usage and hide/unhide/delete
    for digital, scanned, mixed and blank PDFs. Inject pre-ACK failure, post-ACK activation
    failure and an uncertain ACK; verify no false READY/wrong-attempt activation and that
    exact manual recovery is idempotent.

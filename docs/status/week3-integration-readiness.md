@@ -1,6 +1,6 @@
 # Week 3 integration readiness
 
-> **HISTORICAL / SUPERSEDED.** This file records the Week 3 gate and must not be used as
+> **HISTORICAL — NOT CURRENT AUTHORITY.** This file records the Week 3 gate and must not be used as
 > current readiness or data-approval status. Use the
 > [project handoff](../../PROJECT_HANDOFF.md), [MVP gap matrix](mvp-gap-matrix.md) and
 > [issue register](issue-quality-register.md).
@@ -41,7 +41,10 @@ Full syntax/OpenAPI/docs/audit/Compose verification phải được ghi theo k�
 
 ## Open handoff and limitations
 
-- Tracked Python snapshot hiện có UUID5 deterministic, hidden upsert và activate sau machine-readable Node ACK; offline tests đi kèm không thay thế upstream acceptance hoặc live NodeJS → Python → Qdrant verification.
+- Tracked Python snapshot hiện có UUID5 deterministic, retrieval-disabled upsert
+  (`is_active=false`, không phải `is_hidden=true`) và activate sau machine-readable Node
+  ACK; offline tests đi kèm không thay thế upstream acceptance hoặc live NodeJS → Python
+  → Qdrant verification.
 - Các thay đổi snapshot nhỏ ở `services/ingestion.py`, `services/rag_engine.py` và test vẫn phải upstream trước snapshot refresh; snapshot không phải nguồn sở hữu Python.
 - Tracked snapshot đã khai báo ordered `usage_calls[]` cho router/answer; tính đúng đắn với provider/runtime thật vẫn là open integration evidence.
 - FastAPI `BackgroundTasks` không phải durable queue. Stale processing `RUNNING` chưa được Node tự retry để tránh duplicate points/cost.

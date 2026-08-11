@@ -1,6 +1,6 @@
 # Python/Data-RAG handoff
 
-Updated: 2026-08-09.
+Updated: 2026-08-11.
 
 This is the canonical implementation and acceptance handoff for the Python/Data-RAG upstream team. [`python-service/`](../../python-service/) is only the tracked integration snapshot. Changes must be implemented, tested and accepted in the Python-owned repository, then refreshed deliberately into the integration snapshot.
 
@@ -38,16 +38,16 @@ A delivery copy sent outside the repository must pin the exact Node and Python r
 
 | ID            | Classification                                                  | Required outcome                                                                           |
 | ------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `PY-PAGE-001` | CURRENT — **INVESTIGATION ONLY / UNVERIFIED**                    | Establish whether provider output exposes trustworthy canonical physical-page identity; no parser repair or heuristic mapping is authorized |
+| `PY-PAGE-001` | **INVESTIGATION COMPLETE — FIXTURE DID NOT REPRODUCE / RESIDUAL RISK** | Preserve the bounded probe evidence; the legacy result path exposes no explicit canonical page identity, so no parser repair or heuristic mapping is justified |
 | `PY-MD-001`   | P0 — **IMPLEMENTED; OFFLINE PASS RECORDED, NOT RERUN**            | Markdown-aware citation resolution; upstream delivery still required                        |
 | `RAG-REC-001` | DEFERRED — **IMPLEMENTED; OFFLINE PASS RECORDED; OPERATIONAL ACCEPTANCE/OWNERSHIP UNRESOLVED** | Preserve bounded exact-attempt behavior without declaring the acceptance gate or owner closed |
 | `INT-E2E-001` | DEFERRED — **RECORDED ISOLATED EVIDENCE AT `23afbec`; NOT A CURRENT RERUN** | Preserve pinned evidence scope; current external/provider state remains unverified           |
-| `PY-OCR-001`  | P1 MVP — **IMPLEMENTED; OFFLINE PASS RECORDED, NOT RERUN**         | Explicit `OFF|AUTO`, safe key handling and deterministic digital/scanned/mixed-page OCR     |
+| `PY-OCR-001`  | P1 MVP — **IMPLEMENTED; OFFLINE PASS RECORDED; BOUNDED LIVE PAGE OBSERVATION** | Explicit `OFF|AUTO`, safe key handling and deterministic digital/scanned/mixed-page OCR; full provider acceptance remains unverified |
 | `PY-EVAL-001` | P1 — **IMPLEMENTED; OFFLINE PASS RECORDED, NOT RERUN**            | Disposable-only evaluator guard and behavioral tests                                       |
 | `PY-LOC-001`  | P2 — **OPTIONAL/LATER**                                         | Implement trustworthy page-bounded geometry only if precise highlighting is promoted       |
 
-The unresolved recovery decision must not be used to broaden `PY-PAGE-001` or silently
-start independently deferred delivery/integration work.
+The unresolved recovery decision and the bounded page result must not be used to start
+independently deferred delivery/integration work.
 
 ### Delivery and acceptance boundaries
 
@@ -192,7 +192,7 @@ A Node dispatch timeout is an unknown transport outcome. It does not by itself a
 
 ## `RAG-REC-001`: bounded MVP recovery
 
-FastAPI `BackgroundTasks` is not a durable execution mechanism. The current snapshot keeps the wire contract unchanged and implements the approved MVP subset: idempotent exact-attempt activation, bounded retry after valid ACK, machine-readable residual logging, READY-versus-active consistency inspection and explicit exact-attempt manual recovery. No durable queue/reconciler is implemented; whether one is required is unresolved and outside the current task.
+FastAPI `BackgroundTasks` is not a durable execution mechanism. The current snapshot keeps the wire contract unchanged and implements the approved MVP subset: idempotent exact-attempt activation, bounded retry after valid ACK, machine-readable residual logging, READY-versus-active consistency inspection and explicit exact-attempt manual recovery. No durable queue/reconciler is implemented; whether one is required is unresolved and outside the report-phase cleanup.
 
 This implementation evidence does not settle who owns recovery operations or whether
 bounded reconciliation is sufficient for operational acceptance. Those remain
@@ -269,26 +269,36 @@ Python must:
 
 These source correctness requirements are part of the baseline citation behavior. They are separate from precise bounding-box occurrence mapping.
 
-### `PY-PAGE-001`: current physical-page investigation
+### `PY-PAGE-001`: bounded physical-page investigation result
 
 Trustworthy physical-page identity is a baseline requirement whenever Python claims a
 `page_number`; it is not the same as optional geometry.
 
-The repository currently pins `llama-parse==0.6.4`. The previously reported
-`llama-cloud-services==0.6.94` is **PREVIOUS_REPORT_ONLY** because this repository does
-not pin or lock it sufficiently to confirm that runtime version. The adapter configures
+The repository pins `llama-parse==0.6.4`. The 2026-08-11 probe environment had transitive
+`llama-cloud-services==0.6.94` and `pypdf==5.6.0`; this records the probe environment but
+does not turn those transitive packages into repository pins. The adapter configures
 `split_by_page=True`, then assigns page numbers by enumerating provider documents in
 output order. It does not read a canonical physical-page identity from metadata.
 
 The mixed-PDF test mocks `_parse_with_llamaparse()` directly and therefore does not test
 the adapter conversion when provider output is sparse or omits blank/skipped pages. The
-test file defines 10 test functions; the reported PASS result is previous-report evidence,
-not a current rerun. Whether the SDK/provider exposes a trustworthy physical-page
-identity remains **UNVERIFIED**.
+test file defines 10 test functions; its reported PASS remains
+**PREVIOUS_REPORT_ONLY**, not a rerun in the final cleanup.
 
-The current task authorizes investigation only. Do not select or invent a metadata field,
-use positional/heuristic production mapping, change the parser, re-ingest data, call a
-live provider or change the shared contract under this task.
+The bounded live probe used one four-page synthetic PDF twice with identical bytes
+(SHA-256 `26c48289921665384e8455ca5435c634f403a9f0465ecb04cc1528ef38e174bc`),
+versions, method and options. Both successful jobs returned four ordered legacy
+documents: page-1 marker, blank-page `NO_CONTENT_HERE` sentinel, OCR'd image-only page-3
+marker, and page-4 marker. Every `Document.metadata` was `{}` and no `page`,
+`page_number`, `pageNumber` or equivalent field was exposed. The supported legacy call
+did not provide a same-job structured-result handle.
+
+This is **CURRENT_VERIFIED** repeatability for that fixture only. Since the fixture kept
+all four outputs, it did not exercise omitted/merged output and cannot prove ordinal
+mapping as a general provider contract. Result:
+**FIXTURE DID NOT REPRODUCE — RESIDUAL RISK DOCUMENTED**. No parser change, metadata
+convention, heuristic, geometry or re-ingest resulted. Full evidence is maintained in
+the [source-locator authority](source-locator-handoff.md).
 
 ### Geometry contract
 
@@ -349,10 +359,12 @@ The presence of a provider/API key must not silently change the parser or enable
 * `core/config.py` validates explicit `OCR_MODE=OFF|AUTO`; key presence alone leaves `OFF` unchanged;
 * `services/parser.py` uses native text for digital pages and calls the OCR provider only for image pages below the configured native-text threshold;
 * required OCR timeout, provider failure or empty output raises `OCRProcessingError` and fails the whole ingest;
-* `tests/test_parser_ocr.py` provides offline deterministic coverage. Live provider behavior remains **NOT VERIFIED**.
+* `tests/test_parser_ocr.py` provides offline deterministic coverage. The bounded live
+  probe observed one blank sentinel and one image-only OCR page twice, but is not general
+  OCR/provider acceptance.
 
-Commit `23afbec` records an isolated scanned provider run, but it is not a current rerun
-and does not establish sparse physical-page alignment.
+Commit `23afbec` separately records an isolated scanned provider E2E, but it is
+**PREVIOUS_REPORT_ONLY** and does not establish sparse physical-page alignment.
 
 ### P1 MVP requirement
 
@@ -573,7 +585,9 @@ Mock RAG, offline fixtures and historical E2E results must be labelled separatel
 * locator-null fallback;
 * visual overlay verification against the canonical PDF.
 
-Geometry fixtures remain conditional because precise highlighting is OPTIONAL/LATER. OCR fixtures are required; a live provider run may remain `NOT RUN` until an approved credential/quota environment exists.
+Geometry fixtures remain conditional because precise highlighting is OPTIONAL/LATER.
+OCR fixtures are required. The bounded page probe is not a replacement for future
+end-to-end OCR/provider acceptance on exact approved revisions.
 
 ## Expected return from the Python team
 
@@ -593,10 +607,11 @@ For every completed or proposed action, return:
 
 Do not present snapshot inspection, mock tests or historical results as current upstream/live acceptance.
 
-## Current and deferred action order
+## Report-phase and deferred action order
 
-1. **CURRENT investigation:** complete `PY-PAGE-001` without parser repair, provider
-   calls, invented metadata or heuristic mapping.
+1. **REPORT PHASE:** retain `PY-PAGE-001` as
+   **FIXTURE DID NOT REPRODUCE — RESIDUAL RISK DOCUMENTED**; do not convert ordinal output
+   into a provider guarantee or start parser repair/re-ingest.
 2. **DEFERRED Python delivery:** upstream `PY-MD-001`, `RAG-REC-001`, `PY-OCR-001` and
    `PY-EVAL-001` only under a separately confirmed scope and report the exact upstream
    revision.

@@ -1,6 +1,6 @@
 # Week 4 Integration Readiness — Python RAG Service
 
-> **HISTORICAL / SUPERSEDED.** This report reflects the Week 4 snapshot and offline test
+> **HISTORICAL — NOT CURRENT AUTHORITY.** This report reflects the Week 4 snapshot and offline test
 > claims. It does not describe the current Python geometry/OCR/citation-parser state.
 > Use the [Python/Data-RAG handoff](../architecture/python-rag-handoff.md) and
 > [project handoff](../../PROJECT_HANDOFF.md).

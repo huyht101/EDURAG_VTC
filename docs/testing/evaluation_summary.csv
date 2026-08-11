@@ -1,4 +1,0 @@
-Config,Avg Latency (s),Hit Rate,No-Answer Accuracy
-"{'TOP_K': 3, 'SIMILARITY_THRESHOLD': 0.3}",1.86,66.7%,70.0%
-"{'TOP_K': 5, 'SIMILARITY_THRESHOLD': 0.3}",2.73,100.0%,90.0%
-"{'TOP_K': 5, 'SIMILARITY_THRESHOLD': 0.5}",2.47,77.8%,80.0%

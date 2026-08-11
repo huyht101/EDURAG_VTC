@@ -20,6 +20,37 @@ Một user có đúng một role qua `users.role_id`. Không có `user_roles`, r
 
 User/profile token FK dùng CASCADE khi hard-delete user, nhưng MVP không hard-delete user. Document/job/chunk/message dùng RESTRICT để tránh mất lịch sử. Citation references tới document/chunk và usage references tới user/message dùng SET NULL; snapshot/usage vẫn tồn tại.
 
+### ERD quan hệ canonical
+
+Sơ đồ này chỉ biểu diễn relationship của DDL hiện hành; column, key, null/default và
+constraint chi tiết nằm trong [data dictionary](data-dictionary.md) và
+[`schema.sql`](../../src/database/schema.sql). `schema_migrations` là ledger độc lập nên
+không có business FK trong ERD.
+
+```mermaid
+erDiagram
+    roles ||--o{ users : assigns
+    users ||--o| student_profiles : has
+    users ||--o| teacher_profiles : has
+    users ||--o{ auth_tokens : owns
+    users ||--o{ documents : uploads
+    documents ||--o{ document_processing_jobs : processes
+    documents ||--o{ document_chunks : contains
+    document_processing_jobs ||--o{ document_chunks : produces
+    users ||--o{ chat_sessions : owns
+    chat_sessions ||--o{ chat_messages : contains
+    chat_messages ||--o{ citations : cites
+    documents |o--o{ citations : referenced_by
+    document_chunks |o--o{ citations : parent_of
+    users |o--o{ llm_usage_logs : incurs
+    chat_messages |o--o{ llm_usage_logs : consumes
+```
+
+`citations.document_id`, `citations.chunk_id`, `llm_usage_logs.user_id` và
+`llm_usage_logs.message_id` nullable với `ON DELETE SET NULL`; các snapshot/log vẫn giữ
+được khi reference không còn. Các quan hệ profile là 0..1 và role/profile consistency do
+Node transaction giữ, không phải trigger.
+
 ## Document và job lifecycle
 
 - Upload: document `UPLOADED`, job `INGEST/QUEUED`; dispatch chuyển job `RUNNING`, document `PROCESSING`.

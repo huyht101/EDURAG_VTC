@@ -1,6 +1,6 @@
 # HANDOFF triển khai Python/Data-RAG cho EDURAG MVP
 
-> **HISTORICAL / SUPERSEDED.** Tài liệu này giữ checklist và quyết định triển khai tại
+> **HISTORICAL — NOT CURRENT AUTHORITY.** Tài liệu này giữ checklist và quyết định triển khai tại
 > checkpoint 2026-08-03 để truy vết. Current project state nằm tại
 > [root project handoff](../../PROJECT_HANDOFF.md); Python delivery, Owner-run
 > integration, exact-attempt/stale-visibility invariants, acceptance checklist và

@@ -38,4 +38,4 @@ sequenceDiagram
   end
 
   Note over Node,Store: If the database storage_key exists but the physical file is missing, the file endpoint returns 404 while the citation snapshot remains available
-  Note over RAG,Client: Current Python emits no source_locator or boxes; FE highlight falls back to sourceText search
+  Note over RAG,Client: Current Python emits no source_locator or boxes; sourceText snapshot remains displayable, but physical-page navigation requires trustworthy page identity

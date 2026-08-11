@@ -1,6 +1,6 @@
 # EDURAG project handoff
 
-Updated: 2026-08-09. This document is the canonical current-state handoff for the
+Updated: 2026-08-11. This document is the canonical current-state handoff for the
 NodeJS/Core repository. It summarizes evidence and remaining ownership; it does not
 replace the runtime OpenAPI, database DDL, or the internal Node–Python contract.
 
@@ -8,18 +8,28 @@ Explicit Owner tasks newer than this file control intended scope. `AGENTS.md` co
 working constraints. When an intended decision differs from implementation, record the
 gap; do not silently change either side to make the documentation agree.
 
-## Repository checkpoint
+## Repository baseline
 
 - Branch: `main`.
-- HEAD: `11c19aa45f59ea73b93641a401c6aaf6b3b441dc`.
-- Parent/pre-patch checkpoint: `5f5eb9a290ba148c4eca312523a69c23d562db17`.
-- Continuity audit: clean tracked/untracked worktree; local branch ahead of the locally
-  known `origin/main` by one commit and behind by zero. No fetch was performed.
-- HEAD changes only `package-lock.json` to resolve `js-yaml` 4.3.1. It does not change
-  parser, Python dependencies or Python tests.
+- Code/data baseline reviewed for this handoff:
+  `f2693346246114895f3c0371aeb2fca3062d2dd3` (`Sửa corpus Qdrant defect/failure`).
+- History includes `8abff73` (fresh corpus bootstrap creates/starts missing local data
+  services before inspection) and `f269334` (sanitized Qdrant request diagnostics).
+- `python-service/` remains a frozen integration snapshot. Its upstream branch and commit
+  are `Unknown`; no Python runtime, dependency, configuration, test or fixture change is
+  part of the final documentation/data cleanup.
 
 ## Evidence vocabulary
 
+- **DECISION**: an Owner-approved scope, invariant or operating rule.
+- **CURRENT_VERIFIED**: verified against current repository code or by evidence explicitly
+  captured for this baseline. The named boundary still applies.
+- **PREVIOUS_REPORT_ONLY**: recorded at a pinned earlier revision; not rerun here and not
+  evidence of current external state.
+- **UNKNOWN**: repository evidence cannot establish the fact.
+- **UNVERIFIED**: a claim or implementation exists but has not been verified at the needed
+  boundary.
+- **OPTIONAL-LATER**: outside the MVP or explicitly postponed.
 - **IMPLEMENTED + CONTRACT/LOCAL TESTED**: implementation exists and the named
   static/unit/contract/local test passed; this does not imply Docker/runtime conversion
   or live cross-runtime evidence.
@@ -31,11 +41,8 @@ gap; do not silently change either side to make the documentation agree.
 - **REQUIRED FROM PYTHON**: Node boundary is ready; the Python-owned behavior is not.
 - **CONTRACT AGREED, NOT VERIFIED**: both sides have an agreed boundary but current
   cross-runtime evidence is missing.
-- **CURRENT TASK** is the only work authorized by the latest Owner scope.
-- **DEFERRED FROM CURRENT TASK** remains open and is not completed, cancelled or
-  automatically `OPTIONAL/LATER`.
 - **UNRESOLVED** records a decision, ownership or evidence gap without choosing a side.
-- **DECISION REQUIRED**, **BLOCKED**, **OPTIONAL/LATER**, **REJECTED/CANCELLED**, and
+- **DECISION REQUIRED**, **BLOCKED**, **REJECTED/CANCELLED**, and
   **LEGACY LIMITATION** have their literal meanings. No status in this file means
   production-ready.
 
@@ -48,6 +55,7 @@ gap; do not silently change either side to make the documentation agree.
 | Node–Python JSON/file boundary | [Internal RAG contract v0.1](docs/api/internal-rag-contract.md) |
 | Python actions and acceptance | [Python/Data-RAG handoff](docs/architecture/python-rag-handoff.md) |
 | Web/Mobile consumption | [Frontend integration](docs/api/frontend-integration.md) |
+| Report-writing overview | [Technical overview (Vietnamese)](docs/report/technical-overview.vi.md) |
 | Current requirement coverage | [MVP gap matrix](docs/status/mvp-gap-matrix.md) |
 | Defects and quality debt | [Issue/quality register](docs/status/issue-quality-register.md) |
 | Portable private corpus | [Corpus portability](docs/architecture/corpus-portability.md) and [`bootstrap/corpus-release.json`](bootstrap/corpus-release.json) |
@@ -60,39 +68,48 @@ persistence boundary.
 
 | State | Items at this checkpoint |
 |---|---|
-| **COMPLETED / IMPLEMENTED EVIDENCE** | The `js-yaml` 4.3.1 lockfile patch is committed. Node wire validation/persistence and the tracked Python exact-attempt implementation exist at the checkpoint, subject to the evidence boundaries below. |
-| **CURRENT TASK — INVESTIGATION ONLY** | Determine whether the installed LlamaParse/adapter surface provides trustworthy physical-page identity for canonical PDF pages, including sparse, blank or skipped provider output. |
-| **DEFERRED FROM CURRENT TASK** | Stale hide/unhide ordering, bounded recovery/reconciliation, recovery ownership, Python upstream delivery, corpus exact-key guard, GCS/archive-key review and broader source provenance work. These items remain open. |
+| **CURRENT PHASE — REPORT PREPARATION / CODE FROZEN** | Documentation, data references and evidence labels are being consolidated. No feature, parser, schema, API or contract work is in scope. |
+| **COMPLETED / IMPLEMENTED EVIDENCE** | Node business/API boundaries and the tracked Python exact-attempt implementation exist, subject to the evidence boundaries below. Fresh corpus bootstrap ordering is corrected at `8abff73`; Qdrant diagnostics are corrected at `f269334`. |
+| **CURRENT_VERIFIED — BOUNDED PAGE PROBE** | Two successful LlamaParse jobs used the same four-page synthetic PDF, versions, method and options. The fixture kept all four outputs, so it did not reproduce misalignment; no explicit page field was returned. |
 | **UNRESOLVED BEFORE OPERATIONAL ACCEPTANCE** | Visibility operation ordering, bounded recovery/reconciliation gate and ownership, exact Python upstream provenance, and any corpus/GCS review not backed by current evidence. |
-| **OPTIONAL/LATER** | Precise geometry/PDF highlight and the product features explicitly listed below. Physical-page correctness is not optional when a page number is claimed. |
-| **REJECTED/CANCELLED** | No current Owner-rejected or cancelled item is recorded. Exclusion from the current task is not rejection or cancellation. |
+| **UNVERIFIED / RESIDUAL RISK** | General LlamaParse physical-page identity when provider output is omitted, merged or sparse; current remote provider/corpus state; live FE/Mobile integration. |
+| **OPTIONAL-LATER** | Precise geometry/PDF highlight and the product features explicitly listed below. Physical-page correctness is not optional when a page number is claimed. |
+| **REJECTED/CANCELLED** | No current Owner-rejected or cancelled item is recorded. Exclusion from a workstream is not rejection or cancellation. |
 
-## Current task — investigation only
+## Bounded LlamaParse physical-page probe
 
-The current task is to verify whether the LlamaParse version and adapter in use expose a
-trustworthy physical-page identity that can map provider output back to canonical PDF
-pages, especially when provider output is sparse or omits blank/skipped pages. This is an
-investigation checkpoint, not a parser repair in progress.
+**CURRENT_VERIFIED for this fixture only:** two live submissions on 2026-08-11 used the
+same synthetic PDF bytes (SHA-256
+`26c48289921665384e8455ca5435c634f403a9f0465ecb04cc1528ef38e174bc`). The four
+physical pages were selectable marker `PHYSICAL_PAGE_1`, blank, image-only marker
+`PHYSICAL_PAGE_3`, and selectable marker `PHYSICAL_PAGE_4`.
 
-The current task does **not** authorize parser changes, corpus re-ingest, selection or
-invention of a metadata field, positional/heuristic production mapping, API/service
-contract changes, geometry/highlight implementation, or a live-provider call.
+- Repository pin: `llama-parse==0.6.4`.
+- Probe environment: `llama-parse==0.6.4`, transitive
+  `llama-cloud-services==0.6.94`, `pypdf==5.6.0`. The transitive version is probe
+  environment evidence, not a repository lock guarantee.
+- Exact repository path: `LlamaParse.aload_data(file_path)` with
+  `split_by_page=True`, Markdown output, Vietnamese language, premium mode, errors not
+  ignored, no progress display and the existing 120-second bounds.
+- Both jobs returned four ordered items: page-1 marker, `NO_CONTENT_HERE` sentinel for
+  the blank page, OCR text for the image-only page, then page-4 marker.
+- Every legacy `Document.metadata` object was empty. No `page`, `page_number`,
+  `pageNumber` or equivalent explicit physical-page identity was available through this
+  supported legacy result path.
+- The adapter still numbers returned documents with `enumerate(..., start=1)`. The
+  fixture did not exercise a missing/merged output, so the observed ordinal agreement is
+  not a provider contract for sparse output.
 
-### Actual parser checkpoint
+The two matching runs prove observed repeatability for this fixture/options only. They do
+not prove a documented provider guarantee. Status:
+**FIXTURE DID NOT REPRODUCE — RESIDUAL RISK DOCUMENTED**. No parser change, metadata
+convention, heuristic, re-ingest or geometry implementation resulted. Full evidence and
+the citation rule are in the
+[source-locator authority](docs/architecture/source-locator-handoff.md).
 
-- The repository pins `llama-parse==0.6.4`.
-- `llama-cloud-services==0.6.94` is **PREVIOUS_REPORT_ONLY**; the repository does not
-  pin or lock it sufficiently to confirm that runtime version.
-- `python-service/services/parser.py::_parse_with_llamaparse()` configures
-  `split_by_page=True`, then
-  numbers returned documents sequentially with `enumerate(..., start=1)`.
-- The adapter does not currently read a canonical physical-page identity from provider
-  metadata. Whether the SDK/provider offers one is **UNVERIFIED**.
-- `python-service/tests/test_parser_ocr.py` mocks `_parse_with_llamaparse()` directly in
-  the mixed-PDF case, so it does not verify adapter conversion when provider output is
-  sparse.
-- The file defines 10 test functions. A previous report said those tests passed; that
-  result is **PREVIOUS_REPORT_ONLY**, not a current rerun.
+The mixed-PDF unit test still mocks `_parse_with_llamaparse()` directly and therefore does
+not verify provider behavior or sparse-output conversion. Its 10 test functions and their
+reported PASS remain **PREVIOUS_REPORT_ONLY** unless separately rerun.
 
 ## Current MVP state
 
@@ -105,9 +122,10 @@ contract changes, geometry/highlight implementation, or a live-provider call.
 | Whole-document ingest boundary | **IMPLEMENTED + PRODUCTION OFFLINE TESTED; RECORDED ISOLATED LIVE EVIDENCE** | The repository contains production offline lifecycle coverage. Commit `23afbec` records isolated digital/scanned provider E2E through exact-attempt activation, query/citation and hide/unhide/delete. It is not a current rerun, canonical-corpus acceptance or proof that operational gaps are resolved. |
 | Chat, rich Markdown persistence, idempotency and usage | **IMPLEMENTED + CONTRACT/LOCAL TESTED; RECORDED ISOLATED EVIDENCE** | Node preserves answer strings and citation/usage transactions. Commit `23afbec` records basic live answers with structured citations; rich formatting was not specifically asserted and current provider state was not rechecked. |
 | Citation snapshot and dynamic file URLs | **IMPLEMENTED + CONTRACT/LOCAL TESTED** on Node | Snapshot data is immutable; URLs are computed from current actor/state. Citation history authorization is separate from Library visibility. |
-| `sourceLocator` Node boundary | **IMPLEMENTED + CONTRACT/LOCAL TESTED** on Node | Node validates/persists/maps nullable ordered normalized boxes; Python does not produce geometry. Precise highlight is **OPTIONAL/LATER**, but trustworthy physical-page provenance is a separate baseline requirement and is currently under investigation. |
-| OCR/parser selection | **IMPLEMENTED + OFFLINE TESTED; RECORDED ISOLATED LIVE EVIDENCE; PAGE ALIGNMENT UNRESOLVED** | Python uses explicit `OFF|AUTO`. Commit `23afbec` records a scanned LlamaParse path, not a current rerun. Mixed/blank remain offline-only, and provider-output-to-physical-page alignment is not established by that run. |
+| `sourceLocator` Node boundary | **IMPLEMENTED + CONTRACT/LOCAL TESTED** on Node | Node validates/persists/maps nullable ordered normalized boxes; Python does not produce geometry. Precise highlight is **OPTIONAL-LATER**. The bounded probe did not reproduce a page shift, but general physical-page identity remains a separate residual risk. |
+| OCR/parser selection | **IMPLEMENTED + OFFLINE TESTED; CURRENT_VERIFIED BOUNDED PROBE; GENERAL ALIGNMENT UNVERIFIED** | Python uses explicit `OFF|AUTO`. The two-run fixture kept a blank sentinel and OCR'd the image-only page, but the legacy result exposed no canonical page field. Commit `23afbec` remains separate recorded isolated E2E evidence. |
 | Private corpus release/equivalence | **RECORDED ACCEPTANCE AT `23afbec`; CURRENT REMOTE STATE NOT RE-VERIFIED** | The commit records create-only publish, read-back, clean restore and local reset for `v1-d07f526e059e53751402a4f3`. The pointer remains selected, but repository metadata alone does not prove current remote availability or close separate exact-key/GCS/archive-key reviews. |
+| Corpus local bootstrap and Qdrant diagnostics | **IMPLEMENTED + LOCAL REGRESSION COVERED** | `8abff73` moves default data-service bootstrap before local inspection so a fresh state can complete in one invocation. `f269334` retains sanitized phase/method/target/status/cause details. The historical member incident itself was not reproduced and is not declared closed. |
 
 ## Artifact and authorization contract
 
@@ -151,8 +169,9 @@ See the [Python handoff](docs/architecture/python-rag-handoff.md).
   locator does not make an unverified page mapping trustworthy.
 - Parser/OCR mode is explicit and defaults `OFF`; a provider key alone must not change it.
   OCR is required for MVP, with deterministic offline coverage for digital, scanned and
-  mixed PDFs. Commit `23afbec` records an isolated provider run; current provider state,
-  privacy/quota acceptance and physical-page alignment are still **NOT RE-VERIFIED**.
+  mixed PDFs. The bounded 2026-08-11 probe observed repeatable blank/image handling but
+  no explicit page identity. Broader provider state, privacy/quota acceptance and sparse
+  physical-page alignment remain **UNVERIFIED**.
 - Existing vectors remain query-compatible. Re-ingest is optional to gain future OCR or
   geometry; old citation snapshots must not be rewritten or given synthetic boxes.
 - PPTX, subject/course/class scope, byte Range, public reprocess, image chat, object
@@ -160,36 +179,37 @@ See the [Python handoff](docs/architecture/python-rag-handoff.md).
 - Legacy DOCX ingested before the canonical-PDF flow must not be claimed page-aligned
   without a controlled reprocess.
 
-## Safe next actions
+## Report-phase operating posture
 
-1. Inspect the installed LlamaParse/adapter API and sanitized local evidence to determine
-   whether a canonical physical-page identity exists for sparse/blank/skipped output.
-2. Record the exact SDK surface and evidence without selecting a metadata convention or
-   production mapping.
-3. If no trustworthy identity can be established, return the gap for Owner/Python/Node
-   decision. Do not begin parser repair, heuristic mapping, re-ingest or live-provider use
-   under the current task.
+1. Use the [Vietnamese technical overview](docs/report/technical-overview.vi.md) as the
+   report-writing entry point and follow links to canonical contracts rather than copying
+   them.
+2. Describe the page probe as fixture-bounded repeatability, not a provider guarantee;
+   keep citation page accuracy as a residual risk.
+3. Keep operational gaps open until a separately authorized implementation or acceptance
+   task provides evidence. Do not infer closure from documentation, pointer metadata or
+   historical reports.
 
 ## Unresolved and deferred register
 
 | Item | State | Boundary |
 |---|---|---|
-| LlamaParse physical-page alignment | **CURRENT INVESTIGATION / UNRESOLVED** | No metadata field or page convention has been selected. |
-| Stale hide/unhide ordering | **DEFERRED / UNRESOLVED** | Node prevents concurrent active jobs and rejects stale callbacks, while Python currently mutates Qdrant visibility document-wide; no wire/versioning repair is selected. |
-| Bounded recovery/reconciliation | **DEFERRED / UNRESOLVED BEFORE OPERATIONAL ACCEPTANCE** | Offline exact-attempt retry, inspection and manual recovery exist; the acceptance gate remains open. |
-| Recovery ownership | **DEFERRED / OWNER DECISION REQUIRED** | Do not assign Owner, Node, Python or operator ownership implicitly. |
-| Python upstream provenance | **DEFERRED / UNVERIFIED** | Upstream branch and commit corresponding to the tracked snapshot are `Unknown`. |
-| Corpus exact-key guard | **DEFERRED / UNRESOLVED** | Outside the parser task; no completion claim is made here. |
-| GCS/archive-key review | **DEFERRED / UNRESOLVED** | Outside the parser task; recorded release acceptance does not close it automatically. |
-| Source page provenance | **UNRESOLVED BASELINE REQUIREMENT** | A claimed physical page must be trustworthy even when geometry is null. |
+| LlamaParse physical-page alignment | **FIXTURE DID NOT REPRODUCE / RESIDUAL RISK** | Two matching jobs returned all four fixture pages but no explicit page field. General sparse/omitted-output identity remains unverified; no mapping convention is selected. |
+| Stale hide/unhide ordering | **UNRESOLVED** | Node prevents concurrent active jobs and rejects stale callbacks, while Python currently mutates Qdrant visibility document-wide; no wire/versioning repair is selected. |
+| Bounded recovery/reconciliation | **UNRESOLVED BEFORE OPERATIONAL ACCEPTANCE** | Offline exact-attempt retry, inspection and manual recovery exist; the acceptance gate remains open. |
+| Recovery ownership | **OWNER DECISION REQUIRED** | Do not assign Owner, Node, Python or operator ownership implicitly. |
+| Python upstream provenance | **UNKNOWN** | Upstream branch and commit corresponding to the tracked snapshot are `Unknown`. |
+| Corpus exact-key guard | **UNRESOLVED** | No completion claim is supported by the current repository evidence. |
+| GCS/archive-key review | **UNRESOLVED** | Recorded selected-release acceptance does not close it automatically. |
+| Historical `v1-7463...` relationship | **UNRESOLVED (`CORPUS-EQ-001`)** | Repository evidence does not establish predecessor/equivalence/different-state semantics relative to the selected release. |
+| Source page provenance | **UNVERIFIED FOR GENERAL LLAMAPARSE OUTPUT** | A claimed physical page must be trustworthy even when geometry is null. |
 | Precise geometry/highlight | **OPTIONAL/LATER** | Only trustworthy occurrence-specific boxes are allowed; fabricated/full-page boxes remain prohibited. |
 
-## Current-task exclusions
+## Final-phase guardrails
 
-Do not change parser/runtime code, re-ingest a corpus, call a live provider, modify the
-wire/public API/schema, implement geometry/highlighting, choose page metadata, repair
-visibility ordering, assign recovery ownership, upstream Python, or perform corpus/GCS
-operations in the current investigation.
+Documentation cleanup/report preparation does not authorize parser/runtime changes,
+re-ingest, provider or GCS calls, public/wire API or schema changes, geometry/highlight,
+page heuristics, visibility repair, implicit recovery ownership or Python upstream work.
 
 ## Remaining Owner or cross-team decisions
 
@@ -197,13 +217,15 @@ operations in the current investigation.
 - Who owns bounded recovery/reconciliation and whether it gates operational acceptance.
 - Which exact Python upstream revision is accepted.
 - Whether corpus exact-key and GCS/archive-key reviews are complete.
-- Any future page identity convention, but only after investigation produces evidence.
+- Whether a future provider/client migration is justified to obtain explicit canonical
+  page identity; the current legacy result path does not expose it.
 
 ## Historical verification recorded at `23afbec`
 
-The following results were recorded in repository documentation at commit `23afbec`.
-They were not rerun for HEAD `11c19aa`, do not describe current external/provider state,
-and do not prove that all operational gaps are resolved.
+The following table reproduces results recorded in repository documentation at commit
+`23afbec`. A subset of offline checks may be rerun for final documentation validation,
+but that does not update the live/provider/corpus-operation rows below. The recorded
+results do not describe current external state or prove that operational gaps are resolved.
 
 | Command | Result | Evidence class |
 |---|---|---|
@@ -234,8 +256,9 @@ and do not prove that all operational gaps are resolved.
 
 The recorded Phase 2 run called approved live providers only in disposable projects. Release
 `v1-d07f526e059e53751402a4f3` was published create-only after lifecycle repair, verified by
-remote read-back and clean restore, then selected and restored to local-current. The prior
-immutable release was not overwritten or deleted. Provider usage rows recorded two calls
+remote read-back and clean restore, then selected and restored to local-current. The
+create-only workflow did not overwrite or delete pre-existing immutable objects; this
+does not establish the relationship/equivalence of historical `v1-7463...`. Provider usage rows recorded two calls
 per live query, while the SDK in that recorded run did not expose token counts (persisted values were
 zero), so cost was not computed.
 
@@ -247,8 +270,8 @@ source and must not override this handoff or the canonical contracts above.
 1. Recheck branch, HEAD and worktree before continuing.
 2. Read `AGENTS.md`, this handoff, then the specialized authority for the affected domain.
 3. Treat newer explicit Owner scope as authoritative for intended work.
-4. Preserve `CURRENT`, `DEFERRED`, `UNRESOLVED`, `OPTIONAL/LATER` and
-   `REJECTED/CANCELLED` as distinct states.
-5. Label report-only test/provider/corpus evidence with its recorded revision and scope.
+4. Preserve `CURRENT_VERIFIED`, `PREVIOUS_REPORT_ONLY`, `UNKNOWN`, `UNVERIFIED`,
+   `UNRESOLVED`, `OPTIONAL/LATER` and `REJECTED/CANCELLED` as distinct states.
+5. Pin historical test/provider/corpus evidence to its revision and scope.
 6. Do not turn an implementation gap into a policy or contract decision without the
    required Owner/cross-team decision.

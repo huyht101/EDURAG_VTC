@@ -1,4 +1,8 @@
-# Python/RAG OCR and Markdown audit record — SUPERSEDED
+# Python/RAG OCR and Markdown audit record
+
+> **HISTORICAL — NOT CURRENT AUTHORITY.** This supporting findings record is superseded
+> by the [Python/Data-RAG handoff](python-rag-handoff.md). It must not override current
+> status, evidence labels or action order.
 
 This file preserves the finding IDs from the focused OCR/Markdown review. It is not a
 second contract or backlog. Use:
