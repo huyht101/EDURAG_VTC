@@ -1,20 +1,22 @@
-# Refresh the Python integration snapshot
+# Làm mới snapshot tích hợp Python
 
-`python-service/` is a tracked integration snapshot. The Python/Data-RAG team's separate upstream repository is the Python source of truth.
+`python-service/` là tracked integration snapshot. Repository upstream riêng của nhóm
+Python/Data-RAG mới là Python source of truth.
 
-## Refresh workflow
+## Quy trình
 
-1. Agree with the Python team on the upstream repository and exact commit/tag to import.
-2. Obtain that source without its `.git` directory.
-3. Replace the contents under stable folder `python-service/`; flatten a single archive wrapper if necessary.
-4. Do not import `.env`, secrets, venvs, caches, Qdrant data, downloaded models, uploads or the source ZIP.
-5. Preserve/import upstream source, tests, requirements, Dockerfile, Compose and service docs as snapshot evidence.
-6. Review the Git diff and distinguish:
-   - upstream snapshot changes;
-   - any Node compatibility overlay already present.
-7. Assume every local Python patch can be overwritten. Upstream necessary fixes before the next refresh.
-8. Re-audit routes, Pydantic schemas, processing attempt, callback manifest, citation IDs, usage and internal auth.
-9. Run available checks:
+1. Thống nhất upstream repository và exact commit/tag với nhóm Python.
+2. Lấy source không kèm `.git` và không nhập `.env`, secret, venv, cache, Qdrant data,
+   downloaded model, uploads hoặc source archive.
+3. Thay nội dung dưới stable folder `python-service/`; chỉ flatten một archive wrapper nếu
+   cần.
+4. Giữ upstream source, tests, requirements, Dockerfile, Compose và service docs làm
+   snapshot evidence.
+5. Review diff và tách upstream changes khỏi Node compatibility overlay có sẵn. Mọi local
+   Python patch có thể bị overwrite, nên fix cần thiết phải upstream trước refresh kế tiếp.
+6. Audit lại routes, Pydantic schemas, processing attempt, callback manifest, citation
+   identity, usage và internal auth.
+7. Chạy checks có sẵn, không cài large dependency hoặc gọi provider chỉ để refresh:
 
    ```powershell
    python -m compileall python-service
@@ -23,14 +25,12 @@
    npm run check
    ```
 
-   Do not install large dependencies or call live Gemini/Qdrant merely to refresh the snapshot.
+8. Cập nhật [snapshot metadata](../architecture/python-rag.md),
+   [Python handoff](../architecture/python-rag-handoff.md),
+   [project handoff](../../PROJECT_HANDOFF.md), [MVP matrix](../status/mvp-gap-matrix.md)
+   và [internal contract](../api/internal-rag-contract.md) nếu observed capability đổi.
+9. Kiểm tra Markdown links, ignored artifacts, nested `.git` và `git diff --check`.
+10. Khi có thể, commit snapshot refresh tách khỏi Node feature và ghi imported upstream
+    SHA trong commit/status.
 
-10. Update [Python snapshot metadata](../architecture/python-rag.md), the canonical
-    [Python handoff](../architecture/python-rag-handoff.md),
-    [project handoff](../../PROJECT_HANDOFF.md), [MVP gap matrix](../status/mvp-gap-matrix.md)
-    and [internal contract](../api/internal-rag-contract.md) when observed capability
-    changes. Week 3/4 readiness files are historical and must not be rewritten as current.
-11. Check Markdown links, ignored artifacts, nested `.git` and `git diff --check`.
-12. When possible, commit a snapshot refresh separately from Node feature changes and record the imported upstream commit in the commit message/status document.
-
-Never modify Node database schema or public API to hide a snapshot mismatch.
+Không thay Node database schema hoặc public API để che snapshot mismatch.

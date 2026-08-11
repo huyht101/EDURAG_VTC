@@ -1,50 +1,39 @@
-%% 02 Processing callback | Detailed NodeJS/Core flow, complete manifest only
+%% 02 Callback xử lý và machine ACK
 sequenceDiagram
   participant RAG as Python RAG Service
   participant Node as NodeJS Internal API
   participant DB as MySQL
 
-  RAG->>Node: POST callback with internal Bearer and snake_case payload
-  Node->>Node: Verify token, normalize job_id/doc_id/attempt_count/event_type, validate
-  alt Token or payload is invalid
-    Node-->>RAG: 401 or 400
-  else Valid callback
-    Node->>DB: BEGIN and lock job and document rows
-    Node->>DB: Compare document, status and attempt_count
-    alt Stale attempt or job is not RUNNING
-      Note over Node,DB: Commit without business-state changes
-      Node-->>RAG: 200 ACK ignored
-    else Same terminal callback was already applied
-      Note over Node,DB: Commit without duplicate writes
-      Node-->>RAG: 200 ACK duplicate
-    else PROGRESS event
-      Node->>DB: Update current_stage and callback timestamp
+  RAG->>Node: Callback internal Bearer + snake_case payload
+  Node->>Node: Xác thực, normalize và validate identity/event
+  alt Token hoặc payload sai
+    Node-->>RAG: 401 hoặc 400
+  else Hợp lệ
+    Node->>DB: BEGIN; khóa job và document
+    Node->>DB: So document, job, status và attempt_count
+    alt Stale/conflict/terminal mismatch
+      Node->>DB: COMMIT không đổi business state
+      Node-->>RAG: ACK IGNORED/REJECTED; canActivate=false
+    else Exact replay đã persist cùng manifest
+      Node->>DB: COMMIT không ghi lặp
+      Node-->>RAG: ACK IDEMPOTENT_REPLAY; canActivate=true
+    else PROGRESS
+      Node->>DB: Cập nhật stage và callback timestamp
       Node->>DB: COMMIT
-      Node-->>RAG: 200 ACK
-    else SUCCEEDED event
-      alt Job type is INGEST or REPROCESS
-        Node->>Node: Normalize chunk_manifest or chunks, require full text/hash and UUID
-        opt Job type is REPROCESS
-          Node->>DB: Delete old chunks for the document
-        end
-        Node->>DB: Insert the complete manifest and verify persisted count
-        Node->>DB: Mark job SUCCEEDED and document READY
-      else Job type is SET_RETRIEVAL or DELETE_VECTORS
-        Node->>DB: Validate job_config target visibility
-        Node->>DB: Mark job SUCCEEDED and apply VISIBLE, HIDDEN or DELETED
-      end
+      Node-->>RAG: ACK ACCEPTED; canActivate=false
+    else SUCCEEDED cho INGEST/REPROCESS
+      Node->>Node: Yêu cầu complete manifest với UUID, full text và hash
+      Node->>DB: Persist manifest; mark job SUCCEEDED và document READY
       Node->>DB: COMMIT
-      Node-->>RAG: 200 ACK terminal
-    else FAILED or CANCELLED event
-      Node->>DB: Persist job status, error and terminal timestamps
-      opt Job type is INGEST or REPROCESS
-        Node->>DB: Set document FAILED or CANCELLED
-      end
-      Note over Node,DB: A failed visibility operation keeps the previous visibility state
-      Node->>DB: COMMIT
-      Node-->>RAG: 200 ACK terminal
+      Node-->>RAG: ACK ACCEPTED; canActivate=true
+    else SUCCEEDED cho visibility/delete
+      Node->>DB: Apply target VISIBLE, HIDDEN hoặc DELETED; COMMIT
+      Node-->>RAG: ACK ACCEPTED; canActivate=false
+    else FAILED/CANCELLED
+      Node->>DB: Persist exact terminal state/error; COMMIT
+      Node-->>RAG: ACK terminal; canActivate=false
     end
   end
 
-  Note over RAG,DB: attempt_count is the processing attempt, never HTTP delivery retry
-  Note over RAG,DB: Python never writes MySQL, vector_node_id maps a source chunk to its Qdrant point
+  Note over RAG,DB: Python chỉ activate exact attempt khi machine ACK explicit cho phép
+  Note over RAG,DB: Python không ghi MySQL; Node không truy cập Qdrant

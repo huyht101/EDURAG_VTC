@@ -1,32 +1,33 @@
-%% 03 Document and job states | Implemented MVP transitions
+%% 03 Vòng đời document và processing job
 flowchart TB
   subgraph DOC[documents.processing_status]
     direction LR
-    DU[UPLOADED] -->|Start INGEST| DP[PROCESSING]
-    DP -->|Successful callback| DR[READY]
-    DP -->|Dispatch or callback failure| DF[FAILED]
-    DP -->|Cancellation| DC[CANCELLED]
+    DU[UPLOADED] -->|Bắt đầu INGEST| DP[PROCESSING]
+    DP -->|Callback thành công| DR[READY]
+    DP -->|Lỗi xác định| DF[FAILED]
+    DP -->|Hủy| DC[CANCELLED]
   end
 
   subgraph VIS[documents.visibility_status]
     direction LR
-    VV[VISIBLE] -->|SET_RETRIEVAL false succeeds| VH[HIDDEN]
-    VH -->|READY and SET_RETRIEVAL true succeeds| VV
-    VV -->|DELETE_VECTORS succeeds| VD[DELETED]
-    VH -->|DELETE_VECTORS succeeds| VD
+    VV[VISIBLE] -->|SET_RETRIEVAL false thành công| VH[HIDDEN]
+    VH -->|READY và unhide thành công| VV
+    VV -->|DELETE_VECTORS thành công| VD[DELETED]
+    VH -->|DELETE_VECTORS thành công| VD
   end
 
   subgraph JOB[document_processing_jobs.status]
     direction LR
-    JQ[QUEUED] -->|Dispatch and increment attempt_count| JR[RUNNING]
-    JQ -->|Superseded by delete| JC[CANCELLED]
-    JR -->|Successful callback| JS[SUCCEEDED]
-    JR -->|Dispatch or callback failure| JF[FAILED]
-    JR -->|Cancellation or document delete| JC
+    JQ[QUEUED] -->|Dispatch, tăng attempt_count| JR[RUNNING]
+    JQ -->|Bị delete supersede| JC[CANCELLED]
+    JR -->|Callback thành công| JS[SUCCEEDED]
+    JR -->|Lỗi xác định| JF[FAILED]
+    JR -->|Hủy/delete| JC
   end
 
-  STALE[Stale callback attempt] -.-> IGNORED[ACK ignored, no state change]
-  RESERVED[REPROCESS and max_attempts exist in the schema, but the MVP has no public reprocess endpoint or automatic retry]
+  STALE[Callback stale] -.-> IGNORED[ACK ignored; không đổi state]
+  UNKNOWN[Dispatch timeout] -.-> JR
+  RESERVED[REPROCESS/max_attempts có trong schema; không có public reprocess hoặc auto retry]
 
   DR ~~~ VV
   VD ~~~ JQ

@@ -1,45 +1,37 @@
-%% 06 Chat RAG | Detailed NodeJS/Core flow
+%% 06 Chat RAG
 sequenceDiagram
-  participant Client as Web or Mobile Client
+  participant Client as Web hoặc Mobile
   participant Node as NodeJS Public API
   participant DB as MySQL
   participant RAG as Python RAG Service
 
-  Client->>Node: Send question with user JWT; clientRequestId optional
-  Node->>Node: Require ACTIVE account, validate question, generate UUID when blank
-  Node->>DB: Check session ownership and client_request_id
-  alt clientRequestId already exists in the same session
-    DB-->>Node: Existing USER and ASSISTANT pair
-    Node-->>Client: Return current PENDING, COMPLETED or FAILED state
-  else New request
-    Node->>DB: BEGIN and lock chat session
-    Node->>DB: Allocate next message_order values
-    Node->>DB: Insert USER COMPLETED with client_request_id
-    Node->>DB: Insert ASSISTANT PENDING with null content
-    Node->>DB: COMMIT
-    Node->>DB: Load bounded completed history by message_order
-    Node->>RAG: POST /api/query with internal Bearer and snake_case request
-    Note over Node,RAG: Retrieval uses the shared READY and VISIBLE corpus, with no subject or document selection
-    Note over Node,RAG: MySQL owns durable history, while Python receives only the current history window
-    alt RAG timeout or transport failure
-      Node->>DB: Set ASSISTANT FAILED and persist error_code
-      Node-->>Client: 502 or 503, clientRequestId remains idempotent
-    else Valid no-answer result
-      RAG-->>Node: no_answer=true, string answer, confidence=low, usage may be null
-      Node->>DB: Transaction: complete ASSISTANT, persist usage and touch session
-      Node-->>Client: 200 without fabricated citations
-    else Structured answer must include sources
-      RAG-->>Node: answer, confidence string, citations with vector_node_id, and usage
-      Node->>DB: Resolve vector_node_id to READY and VISIBLE chunks and documents
-      Node->>Node: Validate source snapshots and usage metadata
-      alt Citation missing or source or usage validation fails
-        Node->>DB: Set ASSISTANT FAILED
+  Client->>Node: Gửi question; clientRequestId optional
+  Node->>Node: Kiểm tra ACTIVE, session owner và input; sinh UUID nếu thiếu
+  Node->>DB: Tìm client_request_id
+  alt Duplicate cùng session
+    DB-->>Node: USER/ASSISTANT pair hiện có
+    Node-->>Client: Trả PENDING/COMPLETED/FAILED hiện tại
+  else Request mới
+    Node->>DB: Lock session; insert USER COMPLETED + ASSISTANT PENDING; COMMIT
+    Node->>DB: Tải bounded completed history
+    Node->>RAG: POST /api/query bằng internal Bearer
+    alt Timeout/transport/provider failure
+      Node->>DB: Chuyển ASSISTANT FAILED
+      Node-->>Client: 502 hoặc 503
+    else no_answer=true hợp lệ
+      Node->>DB: Transaction complete assistant + usage + session timestamp
+      Node-->>Client: 200, không tạo citation giả
+    else Normal answer
+      RAG-->>Node: Answer + structured citations + usage_calls
+      Node->>DB: Resolve vector_node_id tới chunk/document READY + VISIBLE
+      alt Source/usage không hợp lệ
+        Node->>DB: Chuyển ASSISTANT FAILED
         Node-->>Client: 502 unverifiable RAG result
-      else Result is valid
-        Node->>DB: One transaction: complete ASSISTANT, insert citations and usage, touch session
-        Node-->>Client: 200 with answer and citation DTOs
+      else Hợp lệ
+        Node->>DB: Transaction complete assistant + citations + usage
+        Node-->>Client: 200
       end
     end
   end
 
-  Note over Client,RAG: The client never calls Python directly, and user JWT is separate from the internal token
+  Note over Client,RAG: Client không gọi Python; MySQL là durable chat history

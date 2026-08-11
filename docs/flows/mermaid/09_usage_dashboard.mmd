@@ -1,23 +1,17 @@
-%% 09 Usage and dashboard | Detailed NodeJS/Core flow
+%% 09 Usage và Admin dashboard
 flowchart TB
-  A[Admin dashboard request with user JWT] --> B[Require ACTIVE ADMIN]
-  B --> C[Validate optional UTC range, from before to]
-  C --> D[Count documents by processing and visibility status]
-  C --> E[Count chat sessions and messages]
-  C --> F[Count citations]
-  C --> G[Aggregate llm_usage_logs]
+  A[Dashboard request bằng user JWT] --> B[Kiểm tra ACTIVE ADMIN]
+  B --> C[Validate optional UTC range]
+  C --> D[Đếm document theo processing/visibility]
+  C --> E[Đếm session/message/citation]
+  C --> F[Aggregate llm_usage_logs]
+  F --> G[Group provider/model/status/currency]
+  G --> H[Đếm call và cộng token/cost không null]
+  D --> I[Compose dashboard DTO]
+  E --> I
+  H --> I
+  I --> J[usage.scope = LLM_CALLS_ONLY]
+  J --> K[200]
 
-  G --> H[Group by provider, model, status and currency]
-  H --> I[Count calls and sum token values]
-  I --> J[Sum estimated_cost while excluding NULL]
-
-  D --> K[Compose dashboard DTO]
-  E --> K
-  F --> K
-  J --> K
-  K --> L[Set usage.scope to LLM_CALLS_ONLY]
-  L --> M[200 dashboard data]
-
-  N1[request_id and call_index prevent duplicate usage rows]
-  N2[The schema does not record embedding, OCR or reranking costs]
-  N3[The dashboard exposes aggregate summary data only]
+  N1[(request_id, call_index) chống duplicate usage row]
+  N2[Schema không ghi embedding/OCR/rerank cost]

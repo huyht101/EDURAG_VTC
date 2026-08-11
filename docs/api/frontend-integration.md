@@ -1,4 +1,4 @@
-# Frontend integration contract
+# Hướng dẫn tích hợp Frontend/Mobile
 
 Tài liệu này là nguồn canonical cho Web/Mobile khi tích hợp chat, citation và source viewer. Endpoint-level schema vẫn nằm ở Swagger `/api-docs`; khi có khác biệt, runtime NodeJS/Core là nguồn ưu tiên.
 
@@ -9,7 +9,7 @@ contract/local tests, chưa có Web/Mobile integration evidence.
 
 ## Chat
 
-### Gửi message
+### Gửi message chat
 
 `POST /api/chat/sessions/{id}/messages` nhận `application/json`:
 
@@ -57,7 +57,7 @@ Với logical request mới, đây là synchronous HTTP: Node tạo USER và ASS
 }
 ```
 
-### Rich Markdown answer
+### Câu trả lời Markdown
 
 `assistantMessage.content` và history `message.content` vẫn là string. Với assistant
 `COMPLETED`, string có thể chứa Markdown subset/GFM-compatible: đoạn văn, heading nhẹ,
@@ -72,7 +72,7 @@ chart library.
 
 Trạng thái assistant trong MySQL là `PENDING`, `COMPLETED` hoặc `FAILED`; `COMPLETED` và `FAILED` là terminal. FE không poll cho response `duplicate=false` thành công. Nếu duplicate trả `PENDING`, poll `GET /api/chat/sessions/{id}/messages` và match `assistantMessage.id`; sau timeout có thể retry cùng request ID để stale recovery chuyển row cũ sang `FAILED`. Timeout/upstream/contract failure của request mới trả HTTP error và best-effort chuyển row sang `FAILED`. Nếu process crash đúng khoảng này, row có thể còn `PENDING`. Không có SSE/WebSocket hoặc assistant-status endpoint riêng.
 
-### Chat history
+### Lịch sử chat
 
 Route đầy đủ:
 
@@ -148,21 +148,21 @@ GET /api/chat/sessions/{id}/messages?offset=0&limit=50
 
 Citation snapshots được nhúng vào assistant message khi có; usage rows không được nhúng. Field là `senderType`, không phải `role`.
 
-## Chat image status
+## Trạng thái gửi ảnh trong chat
 
 `NOT IMPLEMENTED`: supported contract của chat route là JSON `content` và optional `clientRequestId`; route không có multipart parser. Không có image field, image storage, image metadata hoặc truyền ảnh sang Python/model. `content` luôn bắt buộc và không rỗng. Document upload `POST /api/documents` không phải chat-image API.
 
 Vì server chưa có image contract, hiện không có MIME/extension/magic-byte, số lượng hoặc dung lượng ảnh được cam kết. Nếu UC 11 được ưu tiên, BA/owner cần chốt multi-image, text-only/image-only semantics, retention/authorization và model vision trước khi Node/Python cùng triển khai.
 
-## Avatar profile
+## Avatar hồ sơ
 
 `POST /api/profile/avatar` nhận multipart field `avatar`; `GET /api/profile/avatar` stream ảnh của chính user; `DELETE /api/profile/avatar` xóa reference theo kiểu idempotent. Cả ba route bắt buộc Bearer token và không có URL public cho avatar người khác. Profile trả `avatarAvailable`, `avatarMimeType` và `avatarUrl` là relative endpoint `/api/profile/avatar`, không trả storage key.
 
 FE fetch `avatarUrl` với `Authorization`, nhận Blob, tạo object URL và revoke URL khi ảnh đổi hoặc component unmount. Không gắn URL trực tiếp nếu image loader không gửi Authorization; không suy ra `/uploads/...` vì Node không mount storage thành static route. Upload chỉ nên gửi JPEG/PNG/WebP một frame tối đa 5 MiB; server vẫn xác minh bằng nội dung thực, không tin filename/MIME client và từ chối ảnh động/multi-page.
 
-## Source viewer và original file
+## Trình xem nguồn và file gốc
 
-### Library/citation navigation
+### Điều hướng Library/citation
 
 `STUDENT`, `TEACHER` và `ADMIN` dùng `/api/library` để đọc public document. `/api/documents` chỉ là management API; Student không được chuyển sang management source khi Library từ chối.
 
@@ -215,7 +215,7 @@ List UI/Mobile nên gửi `page` (mặc định 1), `limit` (mặc định 20, t
 
 Download/preview dùng filesystem stream và có `Content-Length`, nhưng chưa implement byte `Range`, `206`, `Accept-Ranges` hoặc cache policy riêng. FE phải `fetch` Blob/ArrayBuffer với Bearer, tạo object URL cho PDF viewer và revoke khi đóng/thay file; không gắn protected URL trực tiếp nếu viewer không gửi Authorization. DOCX preview/Library download là derived PDF khi READY; original DOCX chỉ qua original-authorized route, còn TXT giữ uploaded TXT.
 
-## Page và highlight
+## Nguồn gốc trang và highlight
 
 - Node chỉ chấp nhận `pageNumber >= 1` khi field tồn tại.
 - Python PDF fallback dùng trang vật lý 1-based.
@@ -246,7 +246,7 @@ Public citation object hiện là:
 
 `vectorNodeId` là internal mapping key và không được public serializer trả về.
 
-## CORS và authentication
+## CORS và xác thực
 
 - Cross-origin browser phải dùng exact origin trong `CORS_ALLOWED_ORIGINS`; runtime default khi không cấu hình là empty allowlist.
 - Local `.env.example` gợi ý `http://localhost:3000,http://localhost:5173`.
@@ -256,15 +256,15 @@ Public citation object hiện là:
 
 Nếu FE cần lấy filename trực tiếp từ `Content-Disposition`, Node cần một thay đổi nhỏ để expose header. Cho tới lúc đó dùng metadata đã biết hoặc filename fallback phía client.
 
-## Student email domain
+## Miền email của Student
 
 Runtime chỉ enforce cú pháp email chung. Service trim và lowercase email trước khi lưu/login; rule áp dụng giống nhau cho STUDENT và TEACHER. Không có server rule cho `@student.edu.vn`, và TEACHER không có domain riêng.
 
 Requirement `@student.edu.vn` không có BA document canonical trong repository hiện tại. FE có thể cảnh báo theo UX nếu BA đã yêu cầu, nhưng không nên coi đó là server guarantee. Owner/BA cần chốt domain, subdomain/alias, case và migration cho account hiện hữu trước khi Node thêm enforcement.
 
-## FE action matrix
+## Ma trận hành động FE/Mobile
 
-| Nhóm | Current behavior | FE action | Limitation / dependency |
+| Nhóm | Behavior hiện hành | Hành động FE/Mobile | Giới hạn/phụ thuộc |
 |---|---|---|---|
 | **Có thể triển khai ngay** | Request mới synchronous; duplicate có thể trả current `PENDING` | Loading đến khi HTTP xong; chỉ poll history cho duplicate-pending | Không streaming token/status endpoint riêng |
 | **Có thể triển khai ngay** | History trả `messages` theo `messageOrder` | Render `senderType`, status và embedded citations | Usage không nằm trong history |

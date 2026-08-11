@@ -1,6 +1,6 @@
-# Documents
+# Tài liệu và xử lý tài liệu
 
-## Actors và API
+## Actor và API
 
 ADMIN quản lý toàn bộ document; TEACHER chỉ document mình upload; STUDENT không dùng management API. Route nằm dưới `/api/documents`, chi tiết trong OpenAPI.
 
@@ -26,4 +26,4 @@ Migration append-only: `npm run db:migrate`. Backfill không chạy khi app star
 
 Mock mode vẫn giữ upload ở `PROCESSING` cho tới callback, nhưng hoàn tất hide/unhide/delete synchronously để test orchestration. Mock/isolated regression không phải bằng chứng live Python/provider hoặc production readiness; trạng thái live phải được báo theo lần chạy thực tế.
 
-Flows: [document flow notes](../flows/notes/document-flows.md).
+Sơ đồ liên quan: [flow index](../flows/README.md).

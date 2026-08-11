@@ -1,103 +1,66 @@
-# Source locator status and integration notes
+# Nguồn gốc trang và source locator
 
-Status: Node geometry boundary **IMPLEMENTED + CONTRACT/LOCAL TESTED**; the bounded
-LlamaParse probe result is **FIXTURE DID NOT REPRODUCE — RESIDUAL RISK DOCUMENTED**;
-Python geometry and precise FE highlight are **OPTIONAL/LATER + NOT VERIFIED**. This is a supporting
-explanation. The wire shape is canonical in
-[internal RAG contract](../api/internal-rag-contract.md), current state is in the
-[project handoff](../../PROJECT_HANDOFF.md), and Python actions are in the
-[Python/Data-RAG handoff](python-rag-handoff.md).
+Đây là authority diễn giải physical-page identity và geometry. Exact wire shape thuộc
+[internal RAG contract](../api/internal-rag-contract.md).
 
-## Canonical physical-page identity — baseline requirement
+## Trạng thái
 
-A citation may claim a 1-based `pageNumber` only when it can be mapped to the physical
-page of the canonical PDF artifact. This requirement applies even when
-`sourceLocator=null`; absence of geometry does not resolve page-alignment uncertainty.
+- Node geometry boundary: đã triển khai và có contract/local tests.
+- LlamaParse page identity: **FIXTURE DID NOT REPRODUCE — RESIDUAL RISK DOCUMENTED**.
+- Python occurrence geometry và precise FE highlight: `OPTIONAL-LATER`, chưa verified.
 
-The current adapter uses LlamaParse `split_by_page=True` and numbers provider documents
-by output position. It does not use a canonical physical-page identity from metadata.
-No metadata field, page convention or production mapping has been selected.
-Positional/heuristic mapping must not be adopted as a repair merely to make documentation
-or tests agree.
+## Baseline định danh trang vật lý
 
-### Bounded live probe — 2026-08-11
+Citation chỉ được claim 1-based `pageNumber` khi map được tới physical page của canonical
+PDF artifact. `sourceLocator=null` không làm page uncertainty biến mất.
 
-**CURRENT_VERIFIED for this fixture/options only:** two successful parse submissions used
-identical PDF bytes (SHA-256
+Adapter hiện dùng `LlamaParse.aload_data(file_path)` với `split_by_page=True`, sau đó đánh
+số theo output ordinal. Supported legacy result không cung cấp explicit canonical page
+metadata. Không có metadata field, page convention hoặc production heuristic nào được
+chọn; không dùng output position, text matching hay geometry làm repair.
+
+## Probe có giới hạn ngày 2026-08-11
+
+Hai successful submissions dùng cùng PDF bốn trang, cùng bytes (SHA-256
 `26c48289921665384e8455ca5435c634f403a9f0465ecb04cc1528ef38e174bc`),
-`llama-parse==0.6.4`, the probe environment's transitive
-`llama-cloud-services==0.6.94`, `pypdf==5.6.0`, and the repository call
-`LlamaParse.aload_data(file_path)` with `split_by_page=True`. The transitive package
-version is environment evidence, not a repository pin.
+`llama-parse==0.6.4`, cùng method/options. Probe environment có transitive
+`llama-cloud-services==0.6.94` và `pypdf==5.6.0`; đây không phải repository pin.
 
-| Physical page | Synthetic content | Output ordinal in both runs | Legacy metadata in both runs | Observation |
-|---:|---|---:|---|---|
-| 1 | Selectable `PHYSICAL_PAGE_1` | 1 | `{}` | Marker returned |
-| 2 | Completely blank | 2 | `{}` | Provider returned `NO_CONTENT_HERE` sentinel |
-| 3 | Raster-only `PHYSICAL_PAGE_3`, no text layer | 3 | `{}` | Marker returned by OCR |
-| 4 | Selectable `PHYSICAL_PAGE_4` | 4 | `{}` | Marker returned |
+| Physical page | Fixture | Output ở cả hai run | Legacy metadata |
+|---:|---|---|---|
+| 1 | Selectable `PHYSICAL_PAGE_1` | Marker tại ordinal 1 | `{}` |
+| 2 | Blank | `NO_CONTENT_HERE` tại ordinal 2 | `{}` |
+| 3 | Raster-only `PHYSICAL_PAGE_3` | OCR marker tại ordinal 3 | `{}` |
+| 4 | Selectable `PHYSICAL_PAGE_4` | Marker tại ordinal 4 | `{}` |
 
-Both runs returned four items in the same order. No item exposed `page`, `page_number`,
-`pageNumber` or an equivalent explicit identity through this supported legacy result
-path. The call also exposed no public same-job handle through which the adapter could
-retrieve a structured page model without changing workflow/client path.
+Cả hai run trả đủ bốn item theo cùng thứ tự; không có `page`, `page_number`, `pageNumber`
+hoặc equivalent field. Legacy call cũng không expose same-job structured-result handle.
 
-The matching runs establish observed repeatability and blank/image handling for this
-one fixture. Because no output was omitted or merged, they do not establish that output
-ordinal remains the canonical physical page for sparse/skipped provider output, and they
-do not create a documented provider guarantee. The parser was not changed and no data
-was re-ingested. General provider-output-to-physical-page identity therefore remains
-**UNVERIFIED** whenever output cardinality/order differs from the canonical PDF.
+Evidence chứng minh repeatability và blank/image handling cho fixture này. Vì không có
+output bị omit/merge, nó không chứng minh ordinal luôn là physical page cho sparse output
+và không tạo provider guarantee. Parser không sửa; không re-ingest.
 
-## Contract already fixed at the Node boundary
+## Contract Node hiện hành
 
-- Public `pageNumber` is 1-based.
-- `sourceLocator` is `null` or `{boxes:[{x,y,width,height}, ...]}`.
-- `boxes` is ordered and non-empty. Coordinates are finite, normalized 0–1, top-left;
-  width/height are positive and every box is contained in the page.
-- Internal Python JSON may use `source_locator`; public Node JSON uses `sourceLocator`.
-- Node rejects invalid geometry and does not clamp, fuzzy-search, create or backfill it.
-- Locator data is part of immutable chunk/citation source data. Role-dependent URLs are
-  generated separately and are not stored in the snapshot.
+- Public `pageNumber` là 1-based khi có.
+- `sourceLocator` là `null` hoặc `{boxes:[{x,y,width,height}, ...]}`.
+- Boxes ordered, finite, normalized 0–1, top-left, positive và nằm trong page.
+- Node reject geometry sai; không clamp, fuzzy-search, tạo hoặc backfill box.
+- Locator là immutable source snapshot; role-dependent file URLs được sinh động riêng.
 
-Node evidence: `src/utils/source-locator.js`, `src/clients/rag-contract.js`,
-`src/validators/processing-callback.js`, chunk/citation repositories, and the RAG
-contract/node-consolidation tests.
+Node evidence nằm tại source-locator utility, RAG contract adapter, callback validator,
+chunk/citation repositories và contract/node consolidation tests.
 
-## Optional precise geometry and highlight
+## Geometry và trình xem nguồn
 
-Geometry is nullable and optional for baseline citation display. If provided, it must be
-trustworthy for the already-established canonical physical page; geometry cannot repair
-or substitute for uncertain page identity.
+Geometry nullable và không phải điều kiện để page identity đúng. Python snapshot hiện
+không sinh `source_locator`, nên `null` là expected behavior, không phải precise highlight
+implementation.
 
-### Data path required only for precise highlight
+Source text vẫn hiển thị được như citation snapshot. Chỉ điều hướng tới physical PDF page
+khi page identity đáng tin. Nếu precise highlight được promote, Python phải lấy box từ
+chính word/span occurrence dùng tạo chunk; không dùng full-page placeholder, post-hoc
+fuzzy match hoặc một box chung cho repeated text.
 
-```text
-canonical PDF parser/word geometry
-→ page-bounded, occurrence-aware chunking
-→ Qdrant payload + complete manifest
-→ retrieval citation response
-→ Node immutable snapshot
-→ FE authenticated viewer overlay
-```
-
-The tracked Python snapshot currently does not generate `source_locator`. Therefore
-`sourceLocator=null` is expected and does not mean highlight is implemented. Source text
-can still be displayed as an immutable citation snapshot; physical-page navigation is
-permitted only when the page itself is trustworthy. If Owner
-prioritizes precise highlight, Python must derive boxes from the same word/span
-occurrence used to build the chunk; post-hoc fuzzy search, fabricated full-page boxes,
-or one shared box for repeated chunks is not acceptable.
-
-## Fixtures required only if precise highlight is prioritized
-
-- Native-text PDF with an independently verified overlay.
-- Repeated text on one page and the selected occurrence.
-- Multi-line citation with multiple ordered boxes.
-- Rotation and CropBox/MediaBox normalization.
-- OCR text with trustworthy geometry and OCR text without geometry (`null`).
-- Citation with no locator; FE uses `pageNumber + sourceText` fallback.
-
-Legacy DOCX citations are not automatically page-aligned. New DOCX uploads use the
-persistent Node-derived canonical PDF, so any future Python page/box must refer to that
-exact artifact. Existing snapshots must not be rewritten or assigned fabricated boxes.
+DOCX mới quy chiếu persistent Node-derived PDF; legacy DOCX không tự được coi page-aligned.
+TXT không có physical-PDF page/geometry semantics.

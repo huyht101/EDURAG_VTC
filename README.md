@@ -1,76 +1,75 @@
 # EDURAG NodeJS/Core
 
-Backend MVP cho trợ lý học tập RAG. Repository root là NodeJS/Core; [`python-service/`](python-service/) chỉ là integration snapshot từ repository riêng của team Python.
+Backend MVP cho trợ lý học tập dùng Retrieval-Augmented Generation (RAG). Repository
+gốc chứa NodeJS/Core; `python-service/` là snapshot tích hợp từ repository riêng của
+nhóm Python/Data-RAG, không phải nguồn upstream chính thức.
 
-## Kiến trúc ngắn
+## Kiến trúc
 
-- NodeJS/Express sở hữu public API, authorization, document/job lifecycle, chat, citation, usage và MySQL transaction.
-- Python sở hữu parsing, embedding, retrieval/generation và Qdrant.
-- MySQL, Qdrant và upload volume chạy local trong Docker. Private GCS chỉ phân phối immutable portable corpus release; runtime Node/Python không đọc GCS.
+- NodeJS/Express sở hữu public API, xác thực/phân quyền, vòng đời tài liệu và job, chat,
+  citation, usage và giao dịch MySQL.
+- Python sở hữu parse/OCR, chunk, embedding, retrieval/generation và Qdrant.
+- Node không truy cập Qdrant; Python không ghi MySQL.
+- GCS chỉ được host-side corpus tooling dùng để phân phối immutable release; runtime
+  Node/Python không dùng GCS làm storage trực tiếp.
 
-## Bắt đầu
+Chi tiết: [tổng quan kiến trúc](docs/architecture/system-overview.md) và
+[ranh giới Node–Python](docs/api/internal-rag-contract.md).
 
-Yêu cầu Node.js 20+, Docker Desktop và Docker Compose. Docker image đã gồm LibreOffice cho DOCX PDF preview; chạy Node trực tiếp trên host cần `soffice` trong `PATH` hoặc cấu hình `LIBREOFFICE_COMMAND`.
+## Chạy project
+
+Yêu cầu Node.js 20+, Docker Desktop và Docker Compose.
 
 ```powershell
 npm ci
 Copy-Item .env.example .env
-```
-
-Điền các biến bắt buộc trong root `.env`; không commit `.env` hoặc credential mới/plaintext.
-Hai archive mã hóa đang track là exception theo explicit Owner decision tại
-[`secrets/README.md`](secrets/README.md), không phải mẫu cho credential mới.
-
-Database hiện hữu chạy `npm run db:migrate`; page/preview cũ kiểm tra trước bằng `npm run documents:backfill -- --dry-run`. Chi tiết và recovery nằm tại [Documents](docs/modules/documents.md).
-
-Remote Python là integration path chính. Full remote stack và optional selected-release bootstrap dùng đúng một command canonical:
-
-```powershell
 npm run docker:remote:dev
 ```
 
-Remote MySQL dành loopback `REMOTE_MYSQL_HOST_PORT` (mặc định `13306`) cho
-host-side E2E tooling; containers luôn dùng `db:3306`, nên dịch vụ khác đang
-giữ host port `3306` không chặn remote startup.
+Điền cấu hình bắt buộc trong root `.env`; không commit environment file hoặc credential.
+Full topology, corpus bootstrap và troubleshooting nằm tại
+[Remote Docker RAG](docs/setup/remote-rag-e2e.md). Node chạy trực tiếp và các kiểm tra
+local nằm tại [phát triển local](docs/setup/local-development.md).
 
-Command này resolve remote Compose override và force-recreate app để áp dụng `RAG_MODE=remote`; không dùng `docker compose restart` khi chuyển mode vì restart giữ nguyên environment của container cũ. `Ctrl+C` dừng containers nhưng giữ named volumes. Fresh volumes cần reader-capable GCS credential để restore release được pointer chọn; pointer không phải bằng chứng source data đã được phê duyệt. `CORPUS_BOOTSTRAP=auto` chỉ tiếp tục ở trạng thái `DEGRADED` khi local đã được xác nhận `EMPTY` và remote read/configuration thất bại trước mọi local mutation; local `UNKNOWN`, integrity/manifest/apply/rollback failure vẫn fail closed. Live corpus acceptance chỉ chạy sau explicit data approval.
-
-`auto` restores only when MySQL/Qdrant/originals are all empty. A dynamically verified
-local release is retained without replacement: exact selected release is a no-op; a valid
-different release returns `CORPUS_LOCAL_RELEASE_RETAINED`. Partial/busy/unknown,
-invalid-marker and cross-store mismatch states fail closed. The immutable target for an empty restore still comes only from
-[`bootstrap/corpus-release.json`](bootstrap/corpus-release.json). Clone/giải nén source mới không xóa Docker volumes cũ; explicit reinstall xem
-[Remote Docker RAG](docs/setup/remote-rag-e2e.md#5-lifecycle).
-
-Explicit local reinstall is one command. It pre-verifies the selected release, shows the
-exact project/volumes/inventory, asks once, resets only those stores, restores and starts
-the stack, then writes READY only after health and consistency pass:
-
-```powershell
-npm run corpus:reset
-# automation/disposable CI only
-npm run corpus:reset -- --yes
-```
+Các URL mặc định:
 
 - Swagger: <http://localhost:5001/api-docs>
 - OpenAPI: <http://localhost:5001/api-docs.json>
-- Health: <http://localhost:5001/health>
-- Readiness (Node + MySQL): <http://localhost:5001/ready>
+- Liveness: <http://localhost:5001/health>
+- Readiness Node + MySQL: <http://localhost:5001/ready>
 
-Demo Admin local: `admin@example.com` / `123456`. Sau login, lấy `[DEV-ONLY ADMIN OTP]` từ app log rồi gọi `POST /api/auth/admin/verify-otp`.
+Demo Admin local: `admin@example.com` / `123456`. Sau login, lấy OTP development từ app
+log rồi gọi `POST /api/auth/admin/verify-otp`.
 
-Xem [tổng quan kỹ thuật phục vụ báo cáo](docs/report/technical-overview.vi.md),
-[documentation index](docs/README.md), [project handoff](PROJECT_HANDOFF.md),
-[Remote Docker RAG](docs/setup/remote-rag-e2e.md) và
-[MVP gap matrix](docs/status/mvp-gap-matrix.md). Các file Week 3/4 là bằng chứng lịch
-sử, không phải readiness hiện hành. Project ở mức integration/demo, chưa
-production-ready.
+Database hiện hữu phải backup rồi chạy `npm run db:migrate`. Backfill preview/page metadata
+được kiểm tra trước bằng `npm run documents:backfill -- --dry-run`; không tự coi dry-run
+hoặc disposable database là production migration evidence.
+
+## Phạm vi và trạng thái
+
+CURRENT/MVP gồm account/auth, Teacher approval, Document Management và Library,
+PDF/DOCX/TXT processing, chat RAG, immutable citation snapshot, usage dashboard, internal
+Node–Python boundary và portable private corpus tooling.
+
+Project đang ở giai đoạn integration/demo và chuẩn bị báo cáo, chưa production-ready.
+Live full-stack hiện hành, FE/Mobile implementation, general LlamaParse physical-page
+identity và current remote corpus state vẫn phải được báo đúng mức evidence. Geometry/
+precise highlight, image chat, subject/course/class, durable queue và các hạng mục mở rộng
+là `OPTIONAL-LATER` hoặc còn quyết định riêng.
+
+Điểm bắt đầu đọc tài liệu:
+
+- [Bản đồ tài liệu](docs/README.md)
+- [Trạng thái project hiện hành](PROJECT_HANDOFF.md)
+- [Tổng quan kỹ thuật phục vụ báo cáo](docs/report/technical-overview.vi.md)
+- [Ma trận phạm vi MVP](docs/status/mvp-gap-matrix.md)
 
 ---
 
 ## Phụ lục — Mock mode (REFERENCE ONLY)
 
-Mock chỉ dành cho regression/quick test; nó không kiểm chứng remote và không phải fallback khi remote lỗi.
+Mock chỉ dành cho regression nhanh; không kiểm chứng Python/Qdrant/provider thật và không
+phải fallback khi remote lỗi.
 
 ```powershell
 npm run docker:mock:up

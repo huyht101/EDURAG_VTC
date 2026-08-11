@@ -1,31 +1,73 @@
-# System overview
+# Tổng quan kiến trúc hệ thống
 
-EDURAG gồm ba ownership boundary:
+Đây là nguồn diễn giải kiến trúc và ownership hiện hành. Exact API, database và
+Node–Python payload vẫn thuộc OpenAPI, executable schema và internal contract.
 
-1. Client gọi public NodeJS API.
-2. NodeJS/Core quản lý identity, authorization, document/job lifecycle, user metadata, authoritative page count/PDF preview, chat, citation snapshots, usage và MySQL transactions.
-3. Python RAG quản lý parsing, embeddings, retrieval/generation và Qdrant.
+## Thành phần và quyền sở hữu
 
-NodeJS là thành phần duy nhất ghi MySQL. Python không giữ durable chat history. NodeJS không truy cập Qdrant.
+```text
+Web/Mobile
+   │ user JWT
+   ▼
+NodeJS/Core ─────────► MySQL + local original/preview files
+   │ internal Bearer + shared read-only file path
+   ▼
+Python RAG ──────────► Qdrant + approved parser/AI providers
+```
 
-Team Python/Data-RAG sở hữu repository Python upstream riêng. `python-service/` trong repository này là tracked integration snapshot phục vụ audit/debug, không phải canonical Python implementation và không bảo đảm luôn là upstream mới nhất.
+- **NodeJS/Core:** public API, auth/authorization, document/job lifecycle, persistent
+  artifact, chat, citation snapshot, usage và MySQL transaction.
+- **Python RAG:** parse/OCR, chunk, embedding, retrieval/generation, Qdrant point/payload
+  và exact-attempt vector operations.
+- **Web/Mobile:** chỉ gọi public Node API; không gọi Python hoặc storage trực tiếp.
+- **Host corpus tooling:** đóng gói/khôi phục immutable release; runtime Node/Python không
+  đọc GCS.
 
-## Data flow
+Node không truy cập Qdrant. Python không ghi MySQL và không giữ durable chat history.
+`python-service/` chỉ là snapshot tích hợp; Python upstream riêng mới là source of truth.
 
-- Upload: Node lưu file, tạo document/job, rồi dispatch Python sau commit.
-- Processing: Python đọc file từ shared volume, cập nhật Qdrant và callback manifest về Node.
-- Chat: Node lưu message/history, gọi Python với bounded history, rồi persist answer/citation/usage.
-- Hide/delete: Node điều phối business job; Python thay đổi retrieval index và callback terminal result.
+## Cấu trúc NodeJS/Core
 
-MySQL và Qdrant không có distributed transaction. Lifecycle dùng fail-closed state, job ID, processing attempt và idempotent callback.
+- `routes`: middleware, validator và controller.
+- `controllers`: chuyển đổi HTTP input/output.
+- `services`: business rule, ownership và transaction boundary.
+- `repositories`: SQL parameterized; pagination number được normalize trước khi nội suy.
+- `clients`: adapter RAG normalized cho `mock` và `remote`.
+- `storage`: local adapter dùng relative generated key; public DTO không lộ storage key.
 
-## Canonical sources
+Public API dùng user JWT. Internal Node–Python callback dùng Bearer secret riêng; hai
+trust domain không dùng lẫn. File I/O và HTTP tới Python không nằm trong MySQL transaction.
 
-- Database: [`src/database/schema.sql`](../../src/database/schema.sql).
-- Public API: runtime OpenAPI `/api-docs.json`.
-- Internal boundary: [`docs/api/internal-rag-contract.md`](../api/internal-rag-contract.md).
-- Current status: [project handoff](../../PROJECT_HANDOFF.md) và
-  [MVP gap matrix](../status/mvp-gap-matrix.md).
-- Python source of truth: repository upstream của team Python; metadata snapshot nằm tại [Python RAG snapshot](python-rag.md).
-- Current audit evidence: periodically refreshed [`python-service/`](../../python-service/) snapshot;
-  Python actions are canonical in the [Python handoff](python-rag-handoff.md).
+## Luồng dữ liệu chính
+
+- **Upload:** Node validate/lưu file, tạo document/job trong MySQL rồi dispatch Python sau
+  commit.
+- **Ingest:** Python parse/chunk/embed, upsert retrieval-disabled, gửi complete manifest;
+  Node persist/ACK rồi Python mới activate exact attempt.
+- **Chat:** Node persist message pair và bounded history, gọi Python, sau đó lưu answer,
+  citation snapshots và usage trong một transaction.
+- **Hide/unhide/delete:** Node tạo business job; Python đổi Qdrant state rồi callback.
+- **Corpus:** host tooling freeze/verify/export hoặc restore scoped MySQL + Qdrant +
+  originals; không phải runtime synchronization.
+
+MySQL và Qdrant không có distributed transaction. Hệ thống dùng exact attempt,
+fail-closed state, idempotent callback và compensating recovery. Recovery ownership và
+stale visibility ordering vẫn là gap được [project handoff](../../PROJECT_HANDOFF.md) giữ.
+
+## Phân quyền cốt lõi
+
+- Admin quản lý mọi document và dashboard.
+- Teacher quản lý document do mình upload.
+- Student không dùng Document Management.
+- Mọi user `ACTIVE` dùng Library read-only cho document `READY + VISIBLE`.
+- Chat/citation thuộc session owner; Admin không có public bypass cho session người khác.
+- CURRENT không có subject/course/class permission hoặc per-document retrieval selection.
+
+## Nguồn xác nhận implementation
+
+- Public behavior: runtime OpenAPI `/api-docs.json`.
+- Database: [`src/database/schema.sql`](../../src/database/schema.sql) và migrations.
+- Node–Python boundary: [internal RAG contract](../api/internal-rag-contract.md).
+- Python provenance/actions: [snapshot metadata](python-rag.md) và
+  [Python handoff](python-rag-handoff.md).
+- Coverage/status: [MVP gap matrix](../status/mvp-gap-matrix.md).

@@ -1,25 +1,25 @@
-# Internal NodeJS–Python RAG contract v0.1
+# Contract nội bộ NodeJS–Python RAG v0.1
 
 Canonical boundary giữa NodeJS/Core và Python RAG. Business persistence vẫn lấy [`src/database/schema.sql`](../../src/database/schema.sql) làm nguồn chuẩn.
 
 Team Python/Data-RAG sở hữu repository Python upstream riêng. [`python-service/`](../../python-service/) chỉ là tracked audit snapshot tại lần refresh gần nhất và có thể không trùng upstream hiện tại.
 
-Status terms:
+Các mức trạng thái:
 
-- **Implemented in NodeJS:** có code/test trong repository này.
-- **Observed in current Python snapshot:** được đọc từ snapshot hiện có, không phải bảo đảm upstream mới nhất.
+- **Đã triển khai ở NodeJS:** có code/test trong repository này.
+- **Quan sát trong Python snapshot:** được đọc từ snapshot hiện có, không bảo đảm upstream mới nhất.
 - **Target contract:** boundary hai team cần đạt trước remote E2E.
-- **Required Python change:** cần chuyển/upstream cho team Python.
-- **Not yet integration-tested:** chưa được chứng minh với hai service thật.
-- **E2E verified:** chỉ dùng sau khi NodeJS, Python và Qdrant thật đã chạy qua flow tương ứng.
+- **Python cần thay đổi:** cần chuyển/upstream cho nhóm Python.
+- **Chưa integration-tested:** chưa được chứng minh với hai service thật.
+- **E2E verified:** chỉ dùng sau khi NodeJS, Python và Qdrant thật chạy qua flow tương ứng.
 
 Trạng thái hiện tại: NodeJS adapter, contract tests, isolated remote Compose và repeatable
 live runner đã triển khai. Live provider E2E ngày 2026-07-17 là **historical evidence**
 cho snapshot/baseline `b348728c55bd42be35ec23c352dd379749adfbe2`; nó không
-chứng minh các thay đổi canonical-DOCX, locator, OCR hoặc citation parser về sau. Current
-cross-runtime status nằm tại [project handoff](../../PROJECT_HANDOFF.md).
+chứng minh các thay đổi canonical-DOCX, locator, OCR hoặc citation parser về sau. Trạng
+thái cross-runtime hiện hành nằm tại [project handoff](../../PROJECT_HANDOFF.md).
 
-## Ownership và authentication
+## Ownership và xác thực
 
 - Client chỉ gọi public NodeJS API bằng user JWT.
 - NodeJS gọi Python bằng `Authorization: Bearer <RAG_INTERNAL_TOKEN>`.
@@ -27,19 +27,22 @@ cross-runtime status nằm tại [project handoff](../../PROJECT_HANDOFF.md).
 - Hai giá trị phải giống nhau và có ít nhất 32 ký tự.
 - NodeJS là thành phần duy nhất ghi MySQL.
 - Python sở hữu parsing, embedding, RAG và Qdrant; NodeJS không gọi Qdrant.
-- Current snapshot callback sender gửi Bearer và `api/dependencies.py::verify_internal_token` bảo vệ ingest/query/visibility/delete bằng explicit secret, `secrets.compare_digest` và thống nhất `401` cho missing/malformed/incorrect Bearer. Health vẫn public. Patch này cần được upstream cho team Python.
+- Snapshot hiện tại gửi callback bằng Bearer; `api/dependencies.py::verify_internal_token`
+  bảo vệ ingest/query/visibility/delete bằng explicit secret, `secrets.compare_digest`
+  và thống nhất `401` cho missing/malformed/incorrect Bearer. Health vẫn public. Patch này
+  cần upstream cho nhóm Python.
 
 Boundary JSON dùng `snake_case`; internal NodeJS code giữ `camelCase`.
 
-## Operations
+## Operations hiện hành
 
-| Operation | Method/path | Observed Python snapshot | NodeJS adapter |
+| Operation | Method/path | Quan sát trong Python snapshot | NodeJS adapter |
 |---|---|---|---|
-| Ingest | `POST /api/ingest` | Implemented | Implemented |
-| Visibility | `PATCH /api/docs/{doc_id}/visibility` | Implemented with `action` | Implemented |
-| Delete vectors | `DELETE /api/ingest/{doc_id}` | Implemented | Implemented |
-| Query | `POST /api/query` | Implemented | Implemented |
-| Processing callback | `POST /api/internal/rag/processing-callback` | Sender implemented | Receiver implemented |
+| Ingest | `POST /api/ingest` | Đã triển khai | Đã triển khai |
+| Visibility | `PATCH /api/docs/{doc_id}/visibility` | Đã triển khai với `action` | Đã triển khai |
+| Delete vectors | `DELETE /api/ingest/{doc_id}` | Đã triển khai | Đã triển khai |
+| Query | `POST /api/query` | Đã triển khai | Đã triển khai |
+| Processing callback | `POST /api/internal/rag/processing-callback` | Sender đã triển khai | Receiver đã triển khai |
 
 Dispatch/operation timeout dùng `RAG_REQUEST_TIMEOUT_MS`; query dùng `RAG_QUERY_TIMEOUT_MS`. `RAG_CALLBACK_BODY_LIMIT` chỉ áp dụng cho internal complete-manifest callback. NodeJS không tự retry network request. Riêng ingest dispatch timeout là kết quả vận chuyển chưa xác định: Node trả `503` nhưng giữ exact attempt `RUNNING` để complete-manifest hợp lệ đến sau vẫn có thể được xử lý; rejection/failure xác định mới chuyển job/document sang `FAILED`.
 
@@ -57,13 +60,17 @@ NodeJS gửi:
 | `callback_url` | required | Node internal callback URL |
 | `teacher_metadata` | optional | NodeJS luôn gửi `{}` |
 
-Current snapshot đưa mọi key trong `teacher_metadata` vào Qdrant payload với prefix `teacher_`. Vì authorization/PII không thuộc vector contract, NodeJS không gửi email, role, user ID hoặc owner metadata.
+Snapshot hiện tại đưa mọi key trong `teacher_metadata` vào Qdrant payload với prefix
+`teacher_`. Vì authorization/PII không thuộc vector contract, NodeJS không gửi email,
+role, user ID hoặc owner metadata.
 
 `file_path` phải nằm trong shared upload root. NodeJS kiểm tra containment trước khi tạo path; không gửi raw filename hoặc host Windows path cố định.
 
-Current snapshot trả `202` với `status`, `job_id`, `message`. NodeJS yêu cầu `job_id`, accepted/rejected status rõ ràng và từ chối response có `job_id` không khớp.
+Snapshot hiện tại trả `202` với `status`, `job_id`, `message`. NodeJS yêu cầu `job_id`,
+accepted/rejected status rõ ràng và từ chối response có `job_id` không khớp.
 
-Current snapshot nhận và bảo toàn `attempt_count` từ ingest request để dùng cho mọi callback của processing attempt đó.
+Snapshot hiện tại nhận và bảo toàn `attempt_count` từ ingest request cho mọi callback của
+processing attempt đó.
 
 ## Visibility
 
@@ -83,9 +90,10 @@ Current snapshot nhận và bảo toàn `attempt_count` từ ingest request đ�
 - `enabled=false` → `hide`;
 - `enabled=true` → `unhide`.
 
-Current snapshot khai báo đủ `job_id`, `attempt_count`, `action`, `callback_url` và callback matching attempt.
+Snapshot hiện tại khai báo đủ `job_id`, `attempt_count`, `action`, `callback_url` và
+callback matching attempt.
 
-## Delete vectors
+## Xóa vector
 
 `DELETE /api/ingest/{doc_id}` với body:
 
@@ -97,9 +105,10 @@ Current snapshot khai báo đủ `job_id`, `attempt_count`, `action`, `callback_
 }
 ```
 
-Current snapshot khai báo đủ `job_id`, `attempt_count`, `callback_url` và callback matching attempt.
+Snapshot hiện tại khai báo đủ `job_id`, `attempt_count`, `callback_url` và callback
+matching attempt.
 
-## Processing callback
+## Callback xử lý
 
 Common fields:
 
@@ -132,7 +141,11 @@ Python chỉ activate Qdrant point khi `jobId/attemptCount` khớp, `status=SUCC
 
 MVP không dùng full two-phase callback. Nếu activation Qdrant thất bại sau ACK, Python cleanup point của attempt và gửi `FAILED` với `ACTIVATION_FAILED`; nếu ACK không thể đọc sau retry, dùng `ACTIVATION_ACK_UNAVAILABLE`. Node chỉ cho phép hai mã compensation này chuyển exact current ingest/reprocess attempt từ `SUCCEEDED` sang `FAILED`; stale attempt và failure code khác không được ghi đè terminal state.
 
-Current snapshot dùng deterministic RFC-4122 UUID5 từ document/job/attempt/chunk index cho cả Qdrant point ID và `chunk_id`, gửi full `chunk_text`, SHA-256 lowercase `content_hash`, optional page/heading và giữ nguyên processing `attempt_count` khi callback HTTP retry. Cùng attempt retry overwrite cùng point; attempt khác có point identity khác. `source_locator` chưa được Python tạo nhưng vẫn optional.
+Snapshot hiện tại dùng deterministic RFC-4122 UUID5 từ document/job/attempt/chunk index
+cho cả Qdrant point ID và `chunk_id`, gửi full `chunk_text`, lowercase SHA-256
+`content_hash`, optional page/heading và giữ nguyên `attempt_count` khi callback HTTP
+retry. Retry cùng attempt overwrite cùng point; attempt khác có point identity khác.
+`source_locator` chưa được Python tạo nhưng vẫn optional.
 
 `page_count`/`pageCount` không đi qua RAG callback: Node tự đếm original PDF hoặc canonical DOCX-derived PDF. Ingest body không đổi: Node gửi `doc_id`, `job_id`, `attempt_count`, `file_path`, `callback_url`; DOCX `file_path` trỏ tới persistent derived `.pdf`, không phải original `.docx`. Complete-manifest/ACK/activate lifecycle không đổi.
 
@@ -148,9 +161,11 @@ NodeJS gửi:
 - `question`;
 - bounded `history[]` với role lowercase `user|assistant`.
 
-Current snapshot khai báo `question`, `conversation_id`, `history`, optional `request_id` và optional `user_id`. Hai field cuối chỉ là correlation context, không cấp authorization cho Python.
+Snapshot hiện tại khai báo `question`, `conversation_id`, `history`, optional `request_id`
+và optional `user_id`. Hai field cuối chỉ là correlation context, không cấp authorization
+cho Python.
 
-Current snapshot response có:
+Response của snapshot hiện tại có:
 
 - `answer`: string, kể cả no-answer. String có thể chứa Markdown subset/GFM-compatible
   (đoạn văn, heading nhẹ, emphasis, list, table và inline/fenced code); Node lưu và
@@ -164,7 +179,7 @@ Current snapshot response có:
 
 Mỗi `usage_calls[]` item bắt buộc có unique contiguous `call_index` 1-based, `operation_type`, provider/model, non-negative token fields, status và nullable machine-readable `error_code`. Node không mặc định operation bị thiếu thành answer generation. `total_tokens` trong MySQL là derived field; legacy aggregate chỉ là compatibility fallback khi `usage_calls` không được gửi.
 
-Current snapshot citation có `vector_node_id=str(result.id)`, `doc_id`, relevant
+Citation của snapshot hiện tại có `vector_node_id=str(result.id)`, `doc_id`, relevant
 `snippet`, optional 1-based PDF `page_number`, `chapter`, `section`. NodeJS nhận
 `snippet` làm source fragment alias, resolve ID qua `document_chunks`, không suy đoán
 vector ID. Node boundary cho nullable `source_locator` đã implement, nhưng snapshot chưa
@@ -177,7 +192,7 @@ generation chưa được xác minh. Xem [Python handoff](../architecture/python
 
 Target bắt buộc: `no_answer=false` phải có ít nhất một citation structured với `vector_node_id` và source fragment hợp lệ. Node resolve mọi citation tới MySQL chunk/document `READY + VISIBLE`; mảng rỗng hoặc source không xác minh được trả `502`, và assistant không được complete. Snapshot overlay hiện đổi CHIT_CHAT và RAG answer không có citation marker thành `no_answer=true`; patch nhỏ này phải upstream về Python repository. Node validation vẫn fail closed để không phụ thuộc vào overlay.
 
-## Errors
+## Lỗi
 
 NodeJS fail closed khi accepted/query response thiếu field bắt buộc và xử lý:
 
@@ -189,22 +204,22 @@ NodeJS fail closed khi accepted/query response thiếu field bắt buộc và x�
 
 NodeJS không expose raw internal token hoặc multiline upstream stack ra public response.
 
-## Compatibility evidence
+## Evidence tương thích
 
 - Node boundary: [`src/clients/rag-contract.js`](../../src/clients/rag-contract.js).
 - HTTP client: [`src/clients/rag-client.js`](../../src/clients/rag-client.js).
-- Callback normalization: [`src/middlewares/rag-callback-normalization-middleware.js`](../../src/middlewares/rag-callback-normalization-middleware.js).
+- Chuẩn hóa callback: [`src/middlewares/rag-callback-normalization-middleware.js`](../../src/middlewares/rag-callback-normalization-middleware.js).
 - Fixtures: [`tests/fixtures/rag-contract/v0.1/`](../../tests/fixtures/rag-contract/v0.1/).
 - Tests: [`scripts/rag-contract-test.js`](../../scripts/rag-contract-test.js).
-- Snapshot upstream reference: [Python RAG snapshot](../architecture/python-rag.md).
-- Current integration status: [project handoff](../../PROJECT_HANDOFF.md) and
-  [MVP gap matrix](../status/mvp-gap-matrix.md). Week 3 status is historical evidence.
+- Metadata snapshot: [Python RAG snapshot](../architecture/python-rag.md).
+- Trạng thái tích hợp hiện hành: [project handoff](../../PROJECT_HANDOFF.md) và
+  [MVP gap matrix](../status/mvp-gap-matrix.md).
 
 Fixtures mô tả target v0.1 hiện đã quan sát được trong snapshot refresh mới. Chúng vẫn là mocked contract evidence, không phải bằng chứng remote E2E.
 
 Remote topology và runner: [`docker-compose.remote.yml`](../../docker-compose.remote.yml), [`scripts/remote-preflight.js`](../../scripts/remote-preflight.js) và [`scripts/remote-e2e-smoke.js`](../../scripts/remote-e2e-smoke.js). Xem [remote setup](../setup/remote-rag-e2e.md). `REMOTE_E2E_SMOKE_OK` là live evidence; preflight hoặc mocked transport riêng lẻ không đủ.
 
-## Out of scope
+## Ngoài phạm vi
 
 OCR provider/policy, PPTX, public reprocess, durable queue/retry worker, object storage,
 production infrastructure và RAG quality tuning không thuộc v0.1. Nếu OCR hoặc geometry

@@ -1,25 +1,22 @@
-%% 08 Chat history | Detailed NodeJS/Core flow
+%% 08 Session và chat history
 flowchart TB
-  A[Chat Session API request with user JWT] --> B[Require ACTIVE account]
+  A[Chat API request bằng user JWT] --> B[Kiểm tra ACTIVE]
   B --> C{Operation}
-  C -->|Create| D[Insert chat session owned by current user]
-  C -->|List| E[Filter by user_id and deleted_at, then paginate]
-  C -->|Detail or history| F[Authorize session owner]
-  C -->|Continue| G[Authorize owner and require session not deleted]
-  C -->|Soft delete| H[Lock session and set deleted_at]
+  C -->|Create| D[Tạo session thuộc current user]
+  C -->|List| E[Filter user_id và deleted_at; paginate]
+  C -->|Detail/history| F[Authorize session owner]
+  C -->|Continue| G[Authorize owner rồi đi flow 06]
+  C -->|Delete| H[Lock session và set deleted_at]
 
-  F --> I{Session exists and is not deleted?}
-  I -->|No| J[404 not found]
-  I -->|Yes| K[Load messages by message_order with ordered citations]
-  G --> L[Continue through flow 06]
-  H --> M[Retain messages, citations and llm_usage_logs]
+  F --> I{Session còn tồn tại?}
+  I -->|Không| J[404]
+  I -->|Có| K[Load messages theo message_order và ordered citations]
+  H --> L[Giữ messages, citations và llm_usage_logs]
 
-  D --> N[201 session]
-  E --> O[200 paginated session list]
-  K --> P[200 paginated history]
-  M --> Q[204, later access behaves as not found]
+  D --> M[201]
+  E --> N[200 paginated list]
+  K --> O[200 paginated history]
+  L --> P[204; request sau trả 404]
 
-  N1[MySQL is the durable chat-history source]
-  N2[Python receives only a bounded history window for the current question]
-  N3[Pagination uses offset and limit, maximum 100]
-  N4[Messages use senderType and include PENDING, COMPLETED and FAILED rows]
+  N1[MySQL là durable history]
+  N2[Python chỉ nhận bounded history của request hiện tại]

@@ -1,37 +1,27 @@
-# NodeJS/Core flow index
+# Bản đồ luồng nghiệp vụ
 
-## Scope and conventions
+Các sơ đồ mô tả behavior NodeJS/Core hiện hành và ranh giới tích hợp. Exact field,
+endpoint, status và constraint vẫn phải đối chiếu OpenAPI, schema và internal contract.
 
-These diagrams describe the implemented NodeJS/Core MVP behavior and its remaining external boundaries.
+Quy ước chung:
 
-- Public client calls use a user JWT Bearer token.
-- NodeJS/Python calls use the separate `RAG_INTERNAL_TOKEN` Bearer token.
-- NodeJS owns MySQL transactions and business/history persistence.
-- Python is a black-box RAG service and owns Qdrant interaction.
-- Remote contract v0.1 is implemented at the NodeJS boundary. A historical isolated run passed on 2026-07-17, but it is not evidence for later ACK/UUID/usage/citation patches; fresh live E2E remains open.
-- Mock stack uses `RAG_MODE=mock`; the integrated stack uses `RAG_MODE=remote`.
+- Public client dùng user JWT; Node–Python dùng internal Bearer riêng.
+- Node sở hữu MySQL transaction và business/history state; Python sở hữu Qdrant.
+- `RAG_MODE=mock` chỉ dành cho regression; integration path dùng `RAG_MODE=remote`.
+- Historical isolated run không thay current full-stack verification.
 
-## Review status
-
-| Diagram | Domain | Current review status |
+| Sơ đồ | Nội dung | Trạng thái diễn giải |
 |---|---|---|
-| [01 Document upload](mermaid/01_document_upload.mmd) | Document | MVP implemented |
-| [02 Processing callback](mermaid/02_processing_callback.mmd) | Document | Complete-manifest callback implemented |
-| [03 Document/job states](mermaid/03_document_job_states.mmd) | Document | MVP transitions implemented |
-| [04 Document management](mermaid/04_document_management.mmd) | Document | MVP implemented |
-| [05 Hide/unhide/delete](mermaid/05_hide_unhide_delete.mmd) | Document | MVP implemented |
-| [06 Chat RAG](mermaid/06_chat_rag.mmd) | Chat/RAG | Mock/remote adapter implemented |
-| [07 Citation/source](mermaid/07_citation_source.mmd) | Chat/RAG | MVP implemented |
-| [08 Chat history](mermaid/08_chat_history.mmd) | Chat/RAG | MVP implemented |
-| [09 Usage/dashboard](mermaid/09_usage_dashboard.mmd) | Usage/Admin | Basic summary implemented |
-| [10 Corpus publish](mermaid/10_corpus_publish.mmd) | Host-side Corpus tooling | Immutable publish and pointer-last guards implemented; signal-time staging cleanup limitation shown |
+| [01](mermaid/01_document_upload.mmd) | Upload, preview và ingest dispatch | Implemented ở Node boundary |
+| [02](mermaid/02_processing_callback.mmd) | Complete manifest, transaction và machine ACK | Implemented ở Node boundary |
+| [03](mermaid/03_document_job_states.mmd) | Document/job lifecycle | Implemented; recovery tự động ngoài scope |
+| [04](mermaid/04_document_management.mmd) | Management và Library ownership | Implemented ở Node boundary |
+| [05](mermaid/05_hide_unhide_delete.mmd) | Hide/unhide/delete | Implemented; stale ordering còn unresolved |
+| [06](mermaid/06_chat_rag.mmd) | Chat, RAG, citation và usage | Contract/local tested; current live E2E unverified |
+| [07](mermaid/07_citation_source.mmd) | Citation snapshot và source viewer | Implemented; page identity còn residual risk |
+| [08](mermaid/08_chat_history.mmd) | Session/history | Implemented ở Node boundary |
+| [09](mermaid/09_usage_dashboard.mmd) | Usage/Admin dashboard | Implemented, scope `LLM_CALLS_ONLY` |
+| [10](mermaid/10_corpus_publish.mmd) | Immutable corpus publish | Tooling implemented; current remote state unverified |
 
-No diagram is deferred. Current limitations are recorded in the open-questions note;
-current status is the [project handoff](../../PROJECT_HANDOFF.md). Week readiness files
-are historical evidence only.
-
-## Notes
-
-- [Document flow decisions](notes/document-flows.md)
-- [Chat/RAG flow decisions](notes/chat-rag-flows.md)
-- [Assumptions and open questions](notes/assumptions-and-open-questions.md)
+Business explanation canonical nằm tại [module docs](../modules/), trạng thái/gap tại
+[project handoff](../../PROJECT_HANDOFF.md), không lặp lại bằng flow notes riêng.

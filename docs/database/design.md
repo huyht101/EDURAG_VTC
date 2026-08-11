@@ -1,10 +1,10 @@
-# Database design 1.0.0
+# Thiết kế database 1.0.0
 
-## Mục tiêu và ownership
+## Mục tiêu và quyền sở hữu
 
 MySQL là nguồn chuẩn cho identity, document metadata/page count/preview job/chunk source, chat, citation snapshot và LLM usage. NodeJS là thành phần duy nhất ghi MySQL. File storage giữ original và generated DOCX PDF preview; public API chỉ trả authenticated relative endpoints, không trả storage key. Python/LlamaIndex ghi Qdrant và callback dữ liệu có cấu trúc về NodeJS; NodeJS không truy cập Qdrant.
 
-## 12 business tables and migration ledger
+## 12 business table và migration ledger
 
 - Identity: `roles`, `users`, `student_profiles`, `teacher_profiles`, `auth_tokens`.
 - Documents: `documents`, `document_processing_jobs`, `document_chunks`.
@@ -20,7 +20,7 @@ Một user có đúng một role qua `users.role_id`. Không có `user_roles`, r
 
 User/profile token FK dùng CASCADE khi hard-delete user, nhưng MVP không hard-delete user. Document/job/chunk/message dùng RESTRICT để tránh mất lịch sử. Citation references tới document/chunk và usage references tới user/message dùng SET NULL; snapshot/usage vẫn tồn tại.
 
-### ERD quan hệ canonical
+### ERD quan hệ hiện hành
 
 Sơ đồ này chỉ biểu diễn relationship của DDL hiện hành; column, key, null/default và
 constraint chi tiết nằm trong [data dictionary](data-dictionary.md) và
@@ -51,17 +51,17 @@ erDiagram
 được khi reference không còn. Các quan hệ profile là 0..1 và role/profile consistency do
 Node transaction giữ, không phải trigger.
 
-## Document và job lifecycle
+## Vòng đời document và job
 
 - Upload: document `UPLOADED`, job `INGEST/QUEUED`; dispatch chuyển job `RUNNING`, document `PROCESSING`.
 - Callback success: persist complete manifest, mark job `SUCCEEDED`, rồi document `READY` trong một transaction.
-- Callback failure/cancel: job và document chuyển terminal state phù hợp.
+- Callback fail/cancel: job và document chuyển terminal state phù hợp.
 - Hide/unhide: `SET_RETRIEVAL`; chỉ đổi MySQL visibility sau RAG ACK.
 - Delete: `DELETE_VECTORS`, rồi soft-delete `DELETED/deleted_at`; giữ file và MySQL history.
 
 Callback mang `jobId + attemptCount`. ACK machine-readable chỉ cho activate current accepted attempt hoặc exact manifest replay; stale/conflict không mutate hoặc activate. Không có distributed transaction MySQL–Qdrant; DOCX preview có DB-backed worker riêng nhưng Python ingest durable recovery vẫn là handoff mở.
 
-## Chunk và Qdrant mapping
+## Mapping chunk và Qdrant
 
 `document_chunks.vector_node_id` là UUID bằng LlamaIndex `node_id` và Qdrant point ID. Python nhận document reference dưới dạng `String(documents.id)`. `chunk_index`, page/section/locator và content hash hỗ trợ reconciliation/citation. Schema và Node boundary đã hỗ trợ locator JSON, nhưng Python snapshot hiện chưa sinh geometry; column tồn tại không phải runtime proof.
 
@@ -75,7 +75,7 @@ MySQL là chat memory duy nhất. `message_order` unique trong session; service 
 
 `llm_usage_logs` có một row mỗi LLM call và unique `(request_id, call_index)`. Dashboard chỉ gọi đây là `LLM_CALLS_ONLY`; schema không tuyên bố embedding/rerank/OCR cost.
 
-## Index strategy
+## Chiến lược index
 
 Index tập trung vào role/status, token state/expiry, document owner/retrieval state, job status/history, session history, citation references và usage time range. JSON locator/config không index trong MVP. Danh sách đầy đủ nằm trong [data dictionary](data-dictionary.md) và DDL.
 

@@ -1,8 +1,8 @@
-# Documents and processing dictionary
+# Từ điển document và processing
 
 ## `documents`
 
-| Column | Type/null/default | Key/index | Meaning |
+| Column | Kiểu/null/default | Khóa/index | Ý nghĩa |
 |---|---|---|---|
 | `id` | BIGINT UNSIGNED, auto | PK | Document ID; Python receives `String(id)` |
 | `uploaded_by` | BIGINT UNSIGNED, required | FK `users.id` RESTRICT; owner index | Teacher/Admin owner |
@@ -30,7 +30,7 @@
 
 ## `document_processing_jobs`
 
-| Column | Type/null/default | Key/index | Meaning |
+| Column | Kiểu/null/default | Khóa/index | Ý nghĩa |
 |---|---|---|---|
 | `id` | BIGINT UNSIGNED, auto | PK | Job ID |
 | `document_id` | BIGINT UNSIGNED, required | FK `documents.id` RESTRICT; history index | Target document |
@@ -54,7 +54,7 @@
 
 ## `document_chunks`
 
-| Column | Type/null/default | Key/index | Meaning |
+| Column | Kiểu/null/default | Khóa/index | Ý nghĩa |
 |---|---|---|---|
 | `id` | BIGINT UNSIGNED, auto | PK | MySQL source chunk ID |
 | `document_id` | BIGINT UNSIGNED, required | FK `documents.id` RESTRICT; UNIQUE with index | Parent document |

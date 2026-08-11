@@ -1,8 +1,8 @@
-# Public API conventions
+# Quy ước public API
 
 Swagger `/api-docs` và OpenAPI `/api-docs.json` là nguồn endpoint/request/response chi tiết. File này chỉ mô tả actor, ownership và workflow. Web/Mobile dùng [Frontend integration contract](frontend-integration.md) cho chat response, source viewer, CORS và các limitation hiện tại.
 
-## Authentication và response
+## Xác thực và response
 
 Protected public routes dùng `Authorization: Bearer <user JWT>`. Middleware verify JWT, đọc lại user/status/role/`auth_version` từ MySQL và chỉ chấp nhận `ACTIVE` user.
 
@@ -18,7 +18,7 @@ Các endpoint register/login/OTP/forgot/reset có per-process in-memory rate lim
 
 `Internal RAG` là service-to-service API dùng internal Bearer riêng. Web/Mobile/Swagger tester thông thường không gọi nhóm này và không dùng `RAG_INTERNAL_TOKEN` thay user JWT.
 
-## Role và ownership
+## Role và quyền sở hữu
 
 | Domain | STUDENT | TEACHER | ADMIN |
 |---|---|---|---|
@@ -34,23 +34,23 @@ ADMIN không tự động đọc chat session của user khác. Document Library
 
 ## Workflow chính
 
-### Authentication
+### Xác thực
 
 Student đăng ký thành `ACTIVE`; Teacher thành `PENDING` và cần Admin review. Admin login đúng password vẫn cần OTP trước khi nhận JWT. Change/reset password, lock account và logout làm JWT cũ mất hiệu lực qua `auth_version`. Logout hiện là logout-all cho mọi token/thiết bị phát trước request; client vẫn xóa token local.
 
-### Avatar và Admin user export
+### Avatar và export user dành cho Admin
 
 Avatar của chính user dùng `POST|GET|DELETE /api/profile/avatar` với Bearer token. Upload field là `avatar`, mặc định tối đa 5 MiB và chỉ JPEG/PNG/WebP một frame sau content decode; SVG và ảnh động/multi-page bị từ chối. `avatarUrl` là authenticated relative endpoint, không phải public storage URL. Không có API đọc avatar user khác trong CURRENT.
 
 Admin CSV dùng `GET /api/admin/users/export` với `search`, `role`, `status`. Endpoint chỉ dành cho ADMIN, xuất toàn bộ hàng khớp filter theo batch thay vì áp dụng page-size của list, có UTF-8 BOM/escaping/formula neutralization và chỉ gồm `id`, `fullName`, `email`, `role`, `status`, `createdAt`. Credential, token, OTP, password hash và `auth_version` không thuộc export.
 
-### Document ingest
+### Ingest tài liệu
 
 `POST /api/documents` nhận `multipart/form-data` với `file` và optional `title`, `description`, `author`; hỗ trợ PDF/DOCX/TXT. Blank title dùng filename bỏ extension. Node sở hữu `pageCount`: original PDF physical pages; DOCX canonical-PDF pages sau conversion; TXT null. DOCX phải là bounded OOXML ZIP có core members, không chỉ mang ZIP magic bytes. Response `202` chỉ xác nhận document/jobs đã được tạo. Với DOCX, INGEST còn `QUEUED`; preview worker phải validate/atomic-publish canonical PDF rồi mới dispatch Python bằng chính artifact mà `/preview` stream.
 
 Client poll `GET /api/documents/jobs/{jobId}`. Chỉ khi job `SUCCEEDED` và document `READY + VISIBLE` thì document mới thuộc retrieval corpus. Hide tắt retrieval nhưng giữ vectors; delete soft-delete và giữ chat/citation history. Original file không immutable-update: thay nội dung bằng upload document mới.
 
-### Document Library
+### Thư viện tài liệu
 
 Student, Teacher và Admin dùng cùng namespace read-only: list/detail, `/{id}/source`, `/{id}/preview` và `/{id}/download`. Ba role nhận cùng public DTO và có thể đọc tài liệu đủ điều kiện của người khác; server luôn khóa scope vào document `READY + VISIBLE`, chưa deleted. Student vẫn bị cấm toàn bộ `/api/documents`; Teacher management theo `uploaded_by`, Admin quản lý toàn bộ. DTO chứa metadata người dùng, page/preview/original availability, `downloadUrl` canonical và authenticated relative URLs, không chứa owner/storage/checksum/lifecycle/job metadata. Original là attachment theo quyền owner/Admin; preview là inline PDF; canonical download là attachment của uploaded PDF, persistent DOCX-derived PDF hoặc uploaded TXT. Record đủ điều kiện nhưng file thiếu/pending/failed trả canonical `409`; hidden/deleted/processing/failed RAG state trả `404`.
 
@@ -75,7 +75,7 @@ Không có breaking public API change: `clientRequestId` được nới từ req
 
 Swagger simple example không cần `clientRequestId`; frontend chỉ nên giữ ID khi cần retry đúng logical request.
 
-### Citation và original file
+### Citation và file gốc
 
 Citation là immutable snapshot từ structured source, không phải parsing ký hiệu `[1]`. Snapshot giữ `pageNumber`, `sourceText` và nullable `sourceLocator`; locator hợp lệ chứa ordered `boxes[]` normalized 0–1, top-left, nằm trọn trong canonical PDF page. Node reject geometry sai và không tự tạo/clamp/backfill. `previewUrl`/`originalFileUrl` được sinh động theo document state và actor, không persist trong snapshot. Student dùng canonical preview cho PDF/DOCX; original PDF/DOCX chỉ owner Teacher/Admin, còn TXT giữ authenticated Library source fallback.
 

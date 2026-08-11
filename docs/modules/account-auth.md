@@ -1,10 +1,10 @@
-# Account and authentication
+# Account và xác thực
 
-## Scope
+## Phạm vi
 
 Student/Teacher registration, login, Admin OTP, password reset, profile, password change và Admin user status workflow.
 
-## Rules
+## Quy tắc
 
 ### Avatar và Admin CSV export
 
@@ -12,7 +12,7 @@ Avatar là resource riêng của user đã xác thực qua `POST|GET|DELETE /api
 
 `GET /api/admin/users/export` chỉ dành cho ADMIN, dùng cùng `search`/`role`/`status` như list nhưng đọc toàn bộ kết quả theo batch. CSV chỉ chứa `id`, `fullName`, `email`, `role`, `status`, `createdAt`; có UTF-8 BOM, CSV escaping và formula-injection neutralization. Password hash, token, OTP và `auth_version` không được xuất.
 
-### Delivery handoff
+### Lưu ý tích hợp
 
 - FE và Mobile dùng Bearer-authenticated Blob cho `avatarUrl`; Mobile không tích hợp Admin CSV. Filename download lấy từ `Content-Disposition`/RFC 5987, không tự dựng storage URL.
 - BA/Tester kiểm tra self-only avatar, JPEG/PNG/WebP một frame, fake/SVG/animated/oversize rejection, CSV ADMIN-only/allowlist/formula neutralization và filename Unicode. Dữ liệu mojibake cũ và citation snapshot bất biến không được tự rewrite.

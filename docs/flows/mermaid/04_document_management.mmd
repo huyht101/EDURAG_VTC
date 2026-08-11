@@ -1,25 +1,22 @@
-%% 04 Document management | Detailed NodeJS/Core flow
+%% 04 Document Management và Library
 flowchart TB
-  A[Web document request with user JWT] --> B[Require ACTIVE account and current authVersion]
-  B --> C{Role and ownership}
-  C -->|ADMIN| D[Manage every document]
-  C -->|TEACHER| E[Manage only documents uploaded by the current user]
-  C -->|STUDENT| F[Document Management API is forbidden]
-  D --> G{Requested operation}
-  E --> G
+  A[Request bằng user JWT] --> B[Kiểm tra ACTIVE và authVersion]
+  B --> C{Namespace và role}
+  C -->|Library; mọi role ACTIVE| D[Server cố định READY + VISIBLE]
+  C -->|Management; ADMIN| E[Quản lý mọi document]
+  C -->|Management; TEACHER| F[Chỉ document uploaded_by chính mình]
+  C -->|Management; STUDENT| G[403]
 
-  G -->|List| H[Search, filter and paginate documents]
-  G -->|Detail| I[Read metadata and latest processing job]
-  G -->|Update metadata| J{Only title changes?}
-  G -->|Open original file| K[Authorize and stream through NodeJS]
-  G -->|Hide, unhide or delete| L[Continue in flow 05]
+  D --> H[List/detail/source/preview/download bằng public allowlist DTO]
+  E --> I{Operation}
+  F --> I
+  I -->|List/detail| J[Search, filter và paginate]
+  I -->|Update metadata| K[Chỉ title/description/author; không re-ingest]
+  I -->|Original/preview| L[Authorize rồi stream qua Node]
+  I -->|Hide/unhide/delete| M[Đi tới flow 05]
+  I -->|Thay file| N[Upload document row mới qua flow 01]
 
-  J -->|Yes| M[Update title without reprocessing]
-  J -->|No, file content changes| N[Upload a new document through flow 01]
-  H --> O[Return public DTO without storage_key]
-  I --> O
-  M --> O
-  K --> P[Resolve storage_key internally and never expose it]
-
-  N1[DELETED documents are excluded from normal lists]
-  N2[Pagination uses normalized offset and limit, maximum 100]
+  H --> O[Không trả owner/storage/job internals]
+  J --> P[Management DTO không lộ storage_key]
+  K --> P
+  L --> P

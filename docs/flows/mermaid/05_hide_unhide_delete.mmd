@@ -1,46 +1,33 @@
-%% 05 Hide, unhide and delete | Detailed NodeJS/Core flow
+%% 05 Hide, unhide và delete
 sequenceDiagram
-  participant Web as Web Document Management
+  participant Client as Web hoặc Mobile
   participant Node as NodeJS Public API
   participant DB as MySQL
   participant RAG as Python RAG Service
 
-  Web->>Node: Hide, unhide or delete with user JWT
-  Node->>Node: Require ACTIVE TEACHER owner or ADMIN
-  Node->>DB: BEGIN and lock document and active job
-  Node->>DB: Validate current state and requested transition
-  alt Unauthorized, deleted, busy or invalid transition
-    Node->>DB: ROLLBACK
-    Node-->>Web: 403, 404 or 409
-  else Valid operation
-    opt Delete supersedes an active INGEST or REPROCESS job
-      Node->>DB: Cancel the old job and set document processing CANCELLED
-    end
-    Node->>DB: Insert SET_RETRIEVAL or DELETE_VECTORS job as QUEUED
-    Node->>DB: COMMIT
-    Node->>DB: Short transaction: increment attempt_count and set job RUNNING
+  Client->>Node: Hide, unhide hoặc delete bằng user JWT
+  Node->>DB: Khóa document/active job; kiểm tra owner và transition
+  alt Không đủ quyền, deleted, busy hoặc transition sai
+    Node-->>Client: 403, 404 hoặc 409
+  else Hợp lệ
+    Node->>DB: Tạo SET_RETRIEVAL hoặc DELETE_VECTORS job; COMMIT
+    Node->>DB: Tăng attempt_count và chuyển RUNNING
     alt Hide
-      Node->>RAG: PATCH /api/docs/{doc_id}/visibility with action=hide
+      Node->>RAG: PATCH visibility action=hide
     else Unhide
-      Node->>RAG: PATCH /api/docs/{doc_id}/visibility with action=unhide
+      Node->>RAG: PATCH visibility action=unhide
     else Delete
       Node->>RAG: DELETE /api/ingest/{doc_id}
     end
-    Note over Node,RAG: Current Python snapshot shows these methods, paths and actions
-
-    alt Python rejects, times out or is unavailable
-      Node->>DB: Mark operation job FAILED and retain previous visibility
-      Node-->>Web: 503 with documentId and jobId
-    else Python accepts the operation
-      alt Mock mode completes immediately
-        Node->>DB: Mark job SUCCEEDED and apply HIDDEN, VISIBLE or DELETED
-      else Remote mode remains asynchronous
-        Note over Node,RAG: Python later sends a terminal callback through flow 02
-      end
-      Node-->>Web: 202 with the current document and job
+    alt Definitive reject/failure
+      Node->>DB: Mark operation FAILED; giữ visibility trước đó
+      Node-->>Client: 503
+    else Accepted
+      Note over Node,RAG: Remote chờ terminal callback; mock có thể hoàn tất đồng bộ
+      Node-->>Client: 202 kèm documentId và jobId
     end
   end
 
-  Note over Node,DB: A failed terminal callback retains previous visibility, and the MVP does not retry automatically
-  Note over Node,RAG: Stale callback rejection does not prove a late document-wide Qdrant mutation was ordered safely; RAG-VIS-001 remains unresolved
-  Note over DB: HIDDEN retains vectors, while DELETED retains the original file and MySQL history
+  Note over Node,RAG: Node reject stale callback không chứng minh late document-wide Qdrant mutation an toàn
+  Note over Node,RAG: RAG-VIS-001 vẫn unresolved; chưa chọn versioning/wire strategy
+  Note over DB: HIDDEN giữ vector; DELETED giữ original và MySQL/citation history

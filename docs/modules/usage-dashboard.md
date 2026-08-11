@@ -1,4 +1,4 @@
-# Usage and dashboard
+# Usage và dashboard
 
 Một assistant message có thể có nhiều `llm_usage_logs` rows qua `(request_id, call_index)`. NodeJS chỉ persist usage metadata đã normalize đủ operation/provider/model/token/status; invalid metadata làm completion transaction rollback và assistant chuyển `FAILED`.
 

@@ -1,8 +1,8 @@
-# Cloud corpus portability
+# Khả năng di chuyển cloud corpus
 
 Portable corpus là immutable release trên private GCS, không phải database synchronization và không phải runtime cloud storage.
 
-## Thành phần và ownership
+## Thành phần và quyền sở hữu
 
 - MySQL giữ document/job/chunk mapping, chat history, citation snapshot và usage.
 - Qdrant giữ vectors/retrieval payload do Python sở hữu.
@@ -11,7 +11,7 @@ Portable corpus là immutable release trên private GCS, không phải database 
 
 NodeJS/Python runtime không đọc GCS; chỉ host-side corpus tooling dùng credential. Một máy có thể diverge sau khi upload document mới. Dữ liệu không tự merge hoặc đồng bộ sang máy khác.
 
-## Immutable release và integrity
+## Immutable release và tính toàn vẹn
 
 ```text
 {GCS_OBJECT_PREFIX}/releases/{releaseId}/
@@ -42,12 +42,11 @@ không tự chứng minh object remote còn tồn tại, checksum download đún
 availability/restore/query phải được kết luận từ `corpus:verify` hoặc isolated acceptance
 đã chạy cho đúng release, không từ pointer hay tài liệu này.
 
-Historical audit evidence also mentions `v1-7463f169257976a90e65ab7c`. Repository
-metadata currently available does not establish whether it is a predecessor, a logically
-equivalent export, or a different canonical state. Do not call either ID wrong and do not
-infer MySQL–Qdrant–original equivalence until remote manifests/fingerprints are compared
-read-only. This is tracked as `CORPUS-EQ-001` in the
-[issue register](../status/issue-quality-register.md).
+Bằng chứng audit lịch sử còn nhắc `v1-7463f169257976a90e65ab7c`. Metadata hiện có trong
+repository không chứng minh đây là predecessor, logically equivalent export hay một
+canonical state khác. Không gọi ID nào là sai và không suy equivalence MySQL–Qdrant–
+original trước khi so sánh read-only manifest/fingerprint tương ứng. Gap này được theo dõi
+bằng `CORPUS-EQ-001` trong [issue register](../status/issue-quality-register.md).
 
 ## Mức kiểm chứng
 
@@ -59,7 +58,7 @@ read-only. This is tracked as `CORPUS-EQ-001` in the
 | `npm run test:corpus:live` | Live restore/query/citation; bị chặn trước mọi preflight/provider call nếu thiếu explicit approved-bundle confirmation, approved release ID/document/query. |
 | Selected private release | Pointer chọn release; remote checksum/restore/query chỉ PASS khi workflow verify/acceptance thực sự chạy cho đúng ID. |
 
-## Bootstrap modes
+## Các mode bootstrap
 
 | Mode | Hành vi |
 |---|---|
@@ -67,32 +66,29 @@ read-only. This is tracked as `CORPUS-EQ-001` in the
 | `required` | Acceptance mode: selected release/credential/artifacts phải hợp lệ và local non-empty phải khớp exact release. Mismatch fail closed. |
 | `off` | Không đọc/restore/so sánh cloud release. Local startup tiếp tục độc lập. |
 
-### Fresh-state ordering and Qdrant diagnostics
+### Thứ tự fresh state và diagnostic Qdrant
 
-**CURRENT_VERIFIED in repository code/local regression scope:** default `auto` bootstrap
-now runs the data-service bootstrap before inspecting MySQL/Qdrant. This is the ordering
-fix committed at `8abff73`: a genuinely fresh local state no longer has to fail once only
-because the resources that inspection needs have not been created. It does not weaken
-the empty/partial/mismatch guards, and rerun still follows the exact-release/dynamic-state
-rules above. Docker-backed fresh/partial/reset suites remain separate evidence and must
-not be called current PASS unless rerun.
+**CURRENT_VERIFIED trong phạm vi code/local regression:** bootstrap `auto` mặc định chạy
+data-service bootstrap trước khi inspect MySQL/Qdrant. Fix tại `8abff73` giúp fresh local
+state không còn fail lần đầu chỉ vì resource cần inspect chưa được tạo. Fix không nới
+empty/partial/mismatch guard; rerun vẫn theo exact-release/dynamic-state rule. Các suite
+fresh/partial/reset dùng Docker là evidence riêng và không được gọi current PASS nếu chưa rerun.
 
-Commit `f269334` preserves Qdrant failure context at the request boundary: operation
-phase, HTTP method, sanitized target path, HTTP status/first response line when present,
-and the underlying transport cause. Query strings are removed from the diagnostic target
-and response/cause text passes through redaction. HTTP authentication/configuration and
-other 4xx errors are not converted into blind retries.
+Commit `f269334` giữ context lỗi Qdrant tại request boundary: phase, HTTP method,
+sanitized target path, HTTP status/dòng response đầu tiên nếu có và transport cause.
+Diagnostic target loại query string; response/cause được redact. Lỗi HTTP auth/config và
+các 4xx khác không bị chuyển thành blind retry.
 
-Local loopback regression covers an unavailable endpoint and a non-success HTTP response.
-It proves diagnostic behavior, not the root cause of the earlier member report of
-`CORPUS_QDRANT_REQUEST_FAILED`. The original command/log/environment were not available,
-so that incident remains **PLAUSIBLE/UNVERIFIED** rather than reproduced or closed.
+Regression loopback local bao phủ unavailable endpoint và non-success HTTP response. Nó
+chứng minh diagnostic behavior, không chứng minh root cause của member report cũ về
+`CORPUS_QDRANT_REQUEST_FAILED`. Vì thiếu original command/log/environment, incident vẫn
+**PLAUSIBLE/UNVERIFIED**, không phải reproduced hoặc closed.
 
 Bootstrap theo dõi phase `REMOTE_READ`, `STAGE`, `VERIFY`, `APPLY`, `ROLLBACK`, `FINALIZE` cùng cờ local mutation/rollback. `auto` không degrade integrity/incompatible-manifest, local service/filesystem error, unknown programming error, post-apply failure hoặc rollback failure. Raw `TypeError("fetch failed")`, abort/timeout/network, HTTP availability, permission và missing-object được chuẩn hóa tại remote boundary; log chỉ dùng stable code/sanitized reason. Job/document đang xử lý và partial local stores là `PRESENT`, không bị gọi nhầm là cloud fingerprint corruption và không bị overwrite. `required` luôn fail closed với remote failure và unknown/partial/mismatch.
 
 Sau restore thành công, upload volume ghi `.edurag-corpus-release-state.json` gồm release ID, manifest checksum, compatibility và expected inventory (không chứa credential). Marker chỉ được ghi sau khi MySQL, Qdrant và originals đều verify. Lần `auto` sau dùng marker + dynamic fingerprint để no-op; marker thiếu/không khớp không được coi là bằng chứng local hợp lệ. `required` vẫn download/verify selected release để acceptance strict.
 
-## Publish một release mới
+## Publish release mới
 
 Target phải là private/internal. Publish kiểm tra Public Access Prevention/IAM trước upload và chặn public hoặc unverifiable target. Reader credential dùng restore/verify; writer credential mới publish. Với writer least-privilege có Object Viewer + Creator nhưng bị 403 khi đọc bucket metadata, Owner có thể opt-in bằng `GCS_PRIVATE_TARGET_OWNER_ATTESTATION=<exact-project-id>/<exact-bucket-name>` sau khi tự kiểm tra đúng target. Fallback chỉ chấp nhận credential service-account có identity `corpus-writer`, ghi diagnostic không chứa secret và không áp dụng cho 401, target mismatch, public bucket hay collision. Bỏ trống biến này để giữ mặc định fail-closed.
 
@@ -112,10 +108,10 @@ Private corpus được phép giữ toàn bộ account rows hợp lệ, email ca
 
 Flow canonical: [Corpus publish](../flows/mermaid/10_corpus_publish.mmd). Signal guard hiện best-effort resume writers trước khi thoát; do handler gọi process exit trực tiếp, cleanup staging riêng cho signal chưa được bảo đảm như normal/error `finally`. Pointer cũ vẫn không đổi nếu publish chưa verify hoàn tất.
 
-## Restore và giới hạn
+## Restore và các giới hạn
 
 Restore download/stage/verify toàn bộ trước apply và chỉ chạy khi local `EMPTY`; exact selected-release state chỉ no-op sau dynamic verification. Temporary download/staging được xóa trong normal/error path; upload-volume helper container được xóa trong `finally`. Trong apply, tool giữ writer pause, tạo in-memory recovery dump cho empty MySQL state, phục hồi exact empty Qdrant config và xóa đúng originals vừa materialize nếu bước sau thất bại. Release-state marker chỉ được publish local ở finalize sau full consistency. Đây là coordinated recovery, không phải distributed transaction; rollback failure trả `CORPUS_RESTORE_ROLLBACK_FAILED` và không được tự merge/overwrite tiếp. Không có hidden `--force`. Explicit replacement dùng duy nhất `npm run corpus:reset`: preflight source trước destructive step, nạp snapshot đã verify vào một Qdrant container tạm để kiểm tra mọi point có `is_active=true`, `is_hidden` boolean và `ingest_attempt_key`, resolve exact Compose namespace, một confirmation (`--yes` cho automation), full restore/start/health/consistency rồi mới ghi READY. Snapshot lifecycle không tương thích làm reset dừng trước khi xóa local stores; container preflight tạm luôn được cleanup. `docker:remote:reset` là alias cùng implementation.
 
 Restore không ingest, LlamaParse hoặc document-embed lại. Mỗi live query vẫn cần query embedding và có thể cần LLM generation. Thay model/dimension hoặc incompatible pipeline semantics có thể yêu cầu corpus mới.
 
-Private GCS preconditions/checksum: [request preconditions](https://cloud.google.com/storage/docs/request-preconditions), [data validation](https://cloud.google.com/storage/docs/data-validation).
+Tham khảo GCS: [request preconditions](https://cloud.google.com/storage/docs/request-preconditions), [data validation](https://cloud.google.com/storage/docs/data-validation).

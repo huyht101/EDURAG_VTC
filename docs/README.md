@@ -1,45 +1,47 @@
-# EDURAG documentation
+# Bản đồ tài liệu EDURAG
 
-Tài liệu hiện hành của NodeJS/Core. Khi có khác biệt, ưu tiên runtime code, [`schema.sql`](../src/database/schema.sql), automated tests và OpenAPI.
+Trang này là navigation chính. Mỗi domain chỉ có một tài liệu diễn giải hiện hành; các
+nguồn executable vẫn quyết định behavior đã triển khai.
 
-| Mục đích | Tài liệu canonical |
+## Điểm bắt đầu
+
+| Nhu cầu | Nguồn hiện hành |
 |---|---|
-| Bắt đầu viết báo cáo / tổng quan kỹ thuật tiếng Việt | [Technical overview](report/technical-overview.vi.md) |
-| Trạng thái/handoff hiện hành | [Project handoff](../PROJECT_HANDOFF.md) |
-| Coverage và remaining work | [MVP gap matrix](status/mvp-gap-matrix.md) |
-| Defect/contract gap/quality debt | [Issue and quality register](status/issue-quality-register.md) |
-| Chạy nhanh | [Root README](../README.md) |
-| Chạy full Docker remote, optional approved cloud restore và Swagger | [Remote Docker RAG](setup/remote-rag-e2e.md) |
-| Node local và mock reference | [Local development](setup/local-development.md) |
-| Hiểu system ownership | [System overview](architecture/system-overview.md) |
-| Hiểu cloud corpus release | [Corpus portability](architecture/corpus-portability.md) |
-| Tích hợp Web/Mobile | [Frontend integration contract](api/frontend-integration.md) |
-| Tra public role/workflow | [Public API](api/public-api.md); endpoint detail ở Swagger |
-| Tích hợp NodeJS–Python | [Internal RAG contract](api/internal-rag-contract.md) |
-| Bàn giao implementation phía Python | [Python/Data-RAG handoff](architecture/python-rag-handoff.md) |
-| Tra database | [Database index](database/README.md) |
-| Phase 2 live acceptance (Owner-run) | [Phase 2 runbook](testing/phase2-live-acceptance-runbook.md) |
-| Refresh Python snapshot | [Python snapshot](architecture/python-rag.md) và [refresh guide](setup/python-snapshot-refresh.md) |
+| Chạy project và demo | [README gốc](../README.md) |
+| Trạng thái, evidence và residual risk | [Project handoff](../PROJECT_HANDOFF.md) |
+| Chuẩn bị viết báo cáo | [Tổng quan kỹ thuật tiếng Việt](report/technical-overview.vi.md) |
+| Phạm vi MVP theo thành phần | [Ma trận MVP](status/mvp-gap-matrix.md) |
+| Defect và quality debt | [Issue register](status/issue-quality-register.md) |
 
-Tài liệu module: [Account/Auth](modules/account-auth.md), [Documents](modules/documents.md), [Chat/Citations](modules/chat-citations.md), [Usage/Dashboard](modules/usage-dashboard.md). Mermaid sources nằm tại [flow index](flows/README.md).
+## Nguồn hiện hành theo domain
 
-Nguồn chi tiết duy nhất:
+| Domain | Tài liệu diễn giải | Nguồn executable xác nhận implementation |
+|---|---|---|
+| Kiến trúc và ownership | [Tổng quan hệ thống](architecture/system-overview.md) | Runtime Node, root Compose và Python snapshot |
+| Public API | [Quy ước public API](api/public-api.md) | `/api-docs.json`, OpenAPI test |
+| Web/Mobile integration | [Frontend integration](api/frontend-integration.md) | Public OpenAPI và DTO/runtime hiện hành |
+| Node–Python boundary | [Internal RAG contract](api/internal-rag-contract.md) | Contract fixtures/tests và hai runtime snapshot |
+| Python delivery/status | [Python/Data-RAG handoff](architecture/python-rag-handoff.md) | Python upstream; snapshot chỉ là evidence quan sát |
+| Citation page/geometry | [Source locator](architecture/source-locator-handoff.md) | Contract/runtime validators và probe evidence được ghi |
+| Portable corpus | [Corpus portability](architecture/corpus-portability.md) | Corpus scripts, manifest/pointer và regression |
+| Database | [Database index](database/README.md) | `src/database/schema.sql` và migrations |
+| Account/Auth | [Account/Auth](modules/account-auth.md) | Node runtime, OpenAPI và tests |
+| Documents | [Documents](modules/documents.md) | Node runtime, schema, OpenAPI và tests |
+| Chat/Citations | [Chat/Citations](modules/chat-citations.md) | Node runtime, contract và tests |
+| Usage/Dashboard | [Usage/Dashboard](modules/usage-dashboard.md) | Node runtime, schema, OpenAPI và tests |
+| Flows | [Flow index](flows/README.md) | Runtime/contract tương ứng |
+| Setup local | [Phát triển local](setup/local-development.md) | Package scripts và Compose |
+| Full remote/demo | [Remote Docker RAG](setup/remote-rag-e2e.md) | Package scripts và Compose |
+| Live acceptance có kiểm soát | [Phase 2 runbook](testing/phase2-live-acceptance-runbook.md) | Kết quả chỉ có giá trị khi thực sự chạy |
 
-- Public endpoint/request/response/error: `/api-docs` và `/api-docs.json`.
-- Database constraints/status/indexes: [`src/database/schema.sql`](../src/database/schema.sql).
-- Internal JSON boundary: [contract v0.1](api/internal-rag-contract.md).
-- Python implementation actions: [Python/Data-RAG handoff](architecture/python-rag-handoff.md).
-- Selected-release pointer (metadata, không tự chứng minh remote availability): [`bootstrap/corpus-release.json`](../bootstrap/corpus-release.json).
-- Credential placement: [`secrets/README.md`](../secrets/README.md).
+## Quy tắc đọc authority
 
-## Phân loại tài liệu
-
-- **Canonical:** các mục trong bảng trên, runtime OpenAPI và database DDL.
-- **Supporting:** `architecture/nodejs-core.md`, `architecture/rag-boundary.md`, module,
-  flow notes, setup và `architecture/source-locator-handoff.md`.
-- **Historical:** `status/week3-*`, `status/week4-*`, `testing/week3-*`,
-  `testing/week4-*`, Week 5 evaluation note, legacy MVP handoff và OCR/Markdown audit
-  record đều ghi `HISTORICAL — NOT CURRENT AUTHORITY`. Chúng không được dùng để nâng
-  trạng thái hiện hành.
-- **Python snapshot-local:** README/docs dưới `python-service/` chỉ phản ánh bản copy tại
-  thời điểm refresh và có thể bị upstream thay thế.
+- Intended scope/business rule: Owner decision và tài liệu canonical hiện hành.
+- Behavior đã triển khai: runtime code, executable schema/migrations, OpenAPI, fixtures và
+  executable tests.
+- Tài liệu report-ready chỉ tóm tắt và liên kết, không thay schema/API/contract.
+- Bản Week 4 còn giữ là evidence lịch sử được Python snapshot tham chiếu; nó không phải
+  readiness hiện hành.
+- `python-service/` là snapshot có thể bị refresh; metadata/provenance nằm tại
+  [Python snapshot](architecture/python-rag.md) và quy trình tại
+  [hướng dẫn refresh](setup/python-snapshot-refresh.md).

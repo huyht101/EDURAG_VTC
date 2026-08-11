@@ -1,8 +1,8 @@
-# Account and authentication dictionary
+# Từ điển account và xác thực
 
 ## `roles`
 
-| Column | Type/null/default | Key/index | Meaning |
+| Column | Kiểu/null/default | Khóa/index | Ý nghĩa |
 |---|---|---|---|
 | `id` | TINYINT UNSIGNED, auto | PK | Role identifier |
 | `code` | VARCHAR(32), required | UNIQUE | `STUDENT`, `TEACHER`, `ADMIN` |
@@ -14,7 +14,7 @@ Seed role dùng upsert theo `code`; application không hard-code role ID.
 
 ## `users`
 
-| Column | Type/null/default | Key/index | Meaning |
+| Column | Kiểu/null/default | Khóa/index | Ý nghĩa |
 |---|---|---|---|
 | `id` | BIGINT UNSIGNED, auto | PK | User identifier |
 | `role_id` | TINYINT UNSIGNED, required | FK `roles.id`; composite index | Một role/user |
@@ -35,13 +35,14 @@ Seed role dùng upsert theo `code`; application không hard-code role ID.
 | `lock_reason` | VARCHAR(500), nullable | — | Last lock reason |
 | `created_at`, `updated_at` | DATETIME(3), auto UTC | created in composite index | Audit timestamps |
 
-Review/lock actor FK uses `ON DELETE SET NULL`. Student registration creates `ACTIVE`; Teacher registration creates `PENDING`. Lock/password change/reset increments `auth_version`.
+FK của actor review/lock dùng `ON DELETE SET NULL`. Student đăng ký thành `ACTIVE`;
+Teacher đăng ký thành `PENDING`. Lock/change/reset password tăng `auth_version`.
 
 Avatar private của user được lưu ngay trên `users` bằng cặp nullable `avatar_storage_key` (relative ASCII storage key, không phải URL) và `avatar_mime_type`. CHECK yêu cầu hai field cùng null hoặc cùng có giá trị; MIME chỉ có `image/jpeg`, `image/png`, `image/webp`. Public profile không serialize storage key.
 
 ## `student_profiles`
 
-| Column | Type/null/default | Key/index | Meaning |
+| Column | Kiểu/null/default | Khóa/index | Ý nghĩa |
 |---|---|---|---|
 | `user_id` | BIGINT UNSIGNED, required | PK, FK `users.id` CASCADE | Student user |
 | `student_code` | VARCHAR(32), required | UNIQUE | Immutable student code |
@@ -50,7 +51,7 @@ Avatar private của user được lưu ngay trên `users` bằng cặp nullable
 
 ## `teacher_profiles`
 
-| Column | Type/null/default | Key/index | Meaning |
+| Column | Kiểu/null/default | Khóa/index | Ý nghĩa |
 |---|---|---|---|
 | `user_id` | BIGINT UNSIGNED, required | PK, FK `users.id` CASCADE | Teacher user |
 | `academic_title` | VARCHAR(100), nullable | — | Academic title |
@@ -62,7 +63,7 @@ Không có `teacher_code`.
 
 ## `auth_tokens`
 
-| Column | Type/null/default | Key/index | Meaning |
+| Column | Kiểu/null/default | Khóa/index | Ý nghĩa |
 |---|---|---|---|
 | `id` | BIGINT UNSIGNED, auto | PK | Token row |
 | `user_id` | BIGINT UNSIGNED, required | FK `users.id` CASCADE; state index | Owner |

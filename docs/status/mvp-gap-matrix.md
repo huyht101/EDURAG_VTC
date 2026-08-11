@@ -1,54 +1,41 @@
-# MVP gap matrix
+# Ma trận phạm vi và gap MVP
 
-Updated: 2026-08-11. Status vocabulary and current evidence boundaries are defined in
-the [project handoff](../../PROJECT_HANDOFF.md). “Guidance ready” means a public contract
-is documented; no FE or Mobile implementation repository was audited in this work.
-Live-provider and corpus results below are recorded isolated evidence at commit
-`23afbec`, not a current rerun or proof that operational gaps are closed.
-The separate two-job LlamaParse probe is current fixture-bounded evidence, not live
-Node→Python→Qdrant acceptance or a general provider guarantee. Other test-result language
-is repository-recorded evidence unless explicitly labeled as a current rerun.
+Cập nhật: 2026-08-12. “Hướng dẫn sẵn sàng” chỉ nghĩa contract được tài liệu hóa; repository
+FE/Mobile không được audit. `23afbec` là isolated historical evidence, không phải current
+rerun. Bounded LlamaParse probe chỉ chứng minh fixture repeatability.
 
-| Requirement / decision | NodeJS/Core | Python/RAG | FE | Mobile | Tests/evidence | Status | Owner / next action |
-|---|---|---|---|---|---|---|---|
-| Roles, approval, lock and `auth_version` | Implemented | N/A | Guidance ready; implementation not audited | Same | Node consolidation/auth local tests | **IMPLEMENTED + CONTRACT/LOCAL TESTED** | Node: retain regression |
-| Own avatar | Authenticated self-only API and private storage implemented | N/A | Bearer Blob guidance ready; not audited | Same profile guidance; not audited | `test:user-assets`, OpenAPI | **IMPLEMENTED + CONTRACT/LOCAL TESTED** | DevOps: migrate existing DB; FE/Mobile implement |
-| Admin user CSV | ADMIN-only batched allowlist export implemented | N/A | Admin-Web guidance ready; not audited | N/A | `test:user-assets`, OpenAPI | **IMPLEMENTED + CONTRACT/LOCAL TESTED** | FE implement if required |
-| Management and Student Library | Ownership and fixed `READY + VISIBLE` Library scope implemented | N/A | Contract/guidance ready; no integration evidence | Same | `test:documents`, `test:library` | **IMPLEMENTED + CONTRACT/LOCAL TESTED** on Node | FE/Mobile integration regression remains |
-| PDF artifact lifecycle | Uploaded PDF is canonical preview/download/ingest artifact | PDF parse/embed path observed; bounded page fixture returned every page but exposed no explicit identity | Guidance ready; not audited | Same | Node tests; isolated digital/scanned run at `23afbec`; two-run page probe at the current baseline | **IMPLEMENTED + CONTRACT/LOCAL TESTED; PAGE FIXTURE DID NOT REPRODUCE; RESIDUAL RISK** | Report exact evidence boundary; no parser repair/re-ingest |
-| DOCX canonical PDF | Node publishes persistent derived PDF before ingest | Must parse the received `.pdf`; physical page identity remains required | Preview/download guidance ready; not audited | Same | Node tests; conversion/live ingest recorded at `23afbec`, not rerun | **IMPLEMENTED + CONTRACT/LOCAL TESTED; RECORDED ISOLATED EVIDENCE; PAGE PROVENANCE UNRESOLVED** | Keep residual page risk separate from re-ingest/repair |
-| TXT artifact lifecycle | Uploaded TXT used; no PDF semantics | TXT parser observed | Download/fallback guidance ready; not audited | Same | Node contract tests | **IMPLEMENTED + CONTRACT/LOCAL TESTED** on Node; **LIVE CROSS-RUNTIME NOT VERIFIED** | Future scoped cross-runtime E2E only |
-| Whole-document retrieval-disabled/ACK/activate | Callback transaction/ACK implemented | `is_active=false` upsert, exact ACK activation/replay/cleanup implemented; `is_hidden` is separate visibility state | N/A | N/A | Contract/offline lifecycle tests; isolated provider path recorded at `23afbec` | **IMPLEMENTED + OFFLINE LIFECYCLE TESTED; RECORDED ISOLATED EVIDENCE** | Do not infer operational acceptance |
-| Restart/lost-callback recovery | Timeout preserves exact attempt | Bounded activation retry, residual log, consistency check and exact manual recovery; `BackgroundTasks` remains non-durable | N/A | N/A | Python unit + disposable Qdrant evidence recorded in repository | **OFFLINE IMPLEMENTATION PRESENT; ACCEPTANCE GATE AND OWNERSHIP UNRESOLVED** | Owner/Node/Python/operator ownership remains undecided |
-| Rich Markdown answer persistence | String preserved, no HTML/chart transform | Markdown-aware marker resolution repaired | GFM/safe-render guidance ready; not audited | Same | Node regression/contract + Python offline citation tests | **IMPLEMENTED + CONTRACT/LOCAL TESTED; LIVE GENERATION NOT VERIFIED** | FE/Mobile implement; integration live test remains |
-| Structured citations and usage | Fail-closed mapping, immutable snapshot, ordered usage rows | Shape/usage observed | Guidance ready; not audited | Same | Offline tests; basic live citation recorded at `23afbec` | **CONTRACT AGREED; RECORDED ISOLATED EVIDENCE; CURRENT PROVIDER STATE NOT RE-VERIFIED** | Preserve exact evidence scope |
-| Canonical physical-page identity | Node accepts 1-based page only when supplied; no mapping heuristic | Adapter enumerates output order; two identical live jobs returned all four fixture items with empty metadata/no explicit page field | Page/source-text fallback requires a trustworthy page | Same | Current bounded probe: blank sentinel + image-only OCR repeated; mixed-PDF unit PASS remains previous-report only | **FIXTURE DID NOT REPRODUCE — RESIDUAL RISK DOCUMENTED** | Do not convert ordinal agreement into provider contract or choose a heuristic |
-| Locator validation/persistence | Nullable ordered normalized boxes implemented | No geometry generation path in snapshot | `pageNumber + sourceText` fallback only when page is trustworthy | Same | Node contract/consolidation | **GEOMETRY OPTIONAL/LATER; PAGE ALIGNMENT SEPARATELY UNRESOLVED** | Never fabricate full-page boxes |
-| Parser mode with cloud key | No API/schema change needed | Explicit `OFF|AUTO`; key presence alone leaves OFF | Do not advertise live OCR quality | Same | Config and mocked parser regression | **IMPLEMENTED + OFFLINE TESTED** | Live keyed environment remains acceptance gate |
-| OCR AUTO quality | No baseline dependency | Per-page digital/scanned/mixed/blank behavior exists offline; bounded probe observed blank sentinel and image-only OCR twice | Fallback remains citation text/page only when page is trustworthy | Same | Deterministic fixtures; scanned E2E at `23afbec`; current page-only probe | **IMPLEMENTED + OFFLINE TESTED; BOUNDED LIVE OBSERVATION; GENERAL ACCEPTANCE UNVERIFIED** | Do not infer privacy/quota/failure or sparse-alignment guarantees |
-| Hide/unhide/delete retrieval | Active-job protection and stale callback rejection implemented | Current mutation is document-wide by `doc_id` | Library fail-closed guidance ready; not audited | Same | Offline lifecycle plus isolated flow recorded at `23afbec` | **ORDERING GAP UNRESOLVED** | Do not select wire/versioning repair or owner here |
-| Current Node → Python → Qdrant compatibility | Production adapter/callback transaction verified offline | Current snapshot verified with deterministic local providers | N/A | N/A | Production offline E2E plus isolated provider evidence recorded at `23afbec` | **OFFLINE VERIFIED; RECORDED ISOLATED LIVE EVIDENCE; NOT CURRENT RERUN** | Operational acceptance gaps remain |
-| Private corpus release/equivalence | Tooling, exact local marker and selected pointer exist | Qdrant snapshot is one store in bundle | N/A | N/A | Acceptance for `v1-d07f526e059e53751402a4f3` recorded at `23afbec` | **RECORDED ACCEPTANCE; CURRENT REMOTE STATE NOT RE-VERIFIED** | Exact-key and GCS/archive-key reviews remain separately unresolved |
-| Corpus fresh bootstrap/Qdrant diagnostics | Default auto path bootstraps data services before inspect; request errors retain sanitized phase/method/target/status/cause | Qdrant remains Python-owned at runtime; host tooling only inspects/restores under explicit corpus commands | N/A | N/A | Commits `8abff73`, `f269334`; local unit/loopback regression | **IMPLEMENTED LOCALLY; HISTORICAL MEMBER INCIDENT UNVERIFIED** | Do not add speculative retry or call the member incident resolved |
-| Release-ID history | Pointer is `v1-d07f526e059e53751402a4f3`; recorded workflow created/selected it without overwriting prior immutable objects | N/A | N/A | N/A | Pointer-last workflow recorded at `23afbec`; relationship of `v1-7463...` remains unknown | **RECORDED WORKFLOW EVIDENCE; `CORPUS-EQ-001` UNRESOLVED** | Preserve create-only workflow; do not infer equivalence/predecessor semantics |
-| Subject/course/class scope | Not in public API/schema | Compatibility subject shim only | Not promised | Not promised | Schema/OpenAPI | **OPTIONAL/LATER** | Owner decision before design |
-| PPTX, byte Range, image chat, visualizations | Not CURRENT | Not CURRENT | No UI promise | Same | OpenAPI/code inspection | **OPTIONAL/LATER** | Product decision |
-| Legacy DOCX page alignment | Snapshots retained, no synthetic backfill | Old vectors may use direct DOCX segments | `pageNumber + sourceText` fallback | Same | No controlled legacy re-ingest evidence | **LEGACY LIMITATION** | Optional explicit-ID reprocess later |
+| Hạng mục | Trạng thái triển khai | Ranh giới bằng chứng | Trạng thái/hành động tiếp theo |
+|---|---|---|---|
+| Role, approval, lock, `auth_version` | Node đã triển khai | Local/contract tests | Đã triển khai + local tested; giữ regression |
+| Avatar cá nhân | Self-only private storage/API | `test:user-assets`, OpenAPI | Đã triển khai; database hiện hữu cần migration, FE/Mobile chưa audit |
+| Admin user CSV | ADMIN-only allowlist export | `test:user-assets`, OpenAPI | Đã triển khai; FE dùng nếu cần |
+| Management và Library | Ownership + fixed `READY + VISIBLE` scope | `test:documents`, `test:library` | Node implemented; FE/Mobile integration unverified |
+| PDF lifecycle | Uploaded PDF là preview/download/ingest artifact | Node tests; isolated run `23afbec`; bounded page probe | Đã triển khai; general page provenance còn rủi ro |
+| DOCX canonical PDF | Node tạo persistent PDF trước ingest | Node tests; isolated conversion/ingest tại `23afbec` | Đã triển khai; live current/page provenance unverified |
+| TXT lifecycle | Uploaded TXT, không PDF semantics | Contract tests | Node implemented; cross-runtime live unverified |
+| Whole-document ACK/activate | Node transaction/machine ACK; Python `is_active=false` trước ACK | Contract/offline lifecycle; isolated path tại `23afbec` | Đã triển khai offline; không suy operational acceptance |
+| Recovery | Exact attempt timeout preserved; bounded recovery helpers tồn tại | Repository-recorded offline evidence | Ownership/gate **UNRESOLVED**; queue không tự bắt buộc |
+| Markdown answer | Node giữ string; snapshot parser bỏ false markers | Node contract + recorded Python offline tests | Boundary đã triển khai; live rich generation unverified |
+| Structured citation/usage | Fail-closed mapping, immutable snapshot, ordered usage | Offline tests; basic isolated citation at `23afbec` | Contract agreed; current provider state unverified |
+| Physical-page identity | Node nhận 1-based page khi trustworthy; adapter enumerate output | Hai probe trả đủ fixture, metadata rỗng | **FIXTURE DID NOT REPRODUCE — RESIDUAL RISK DOCUMENTED** |
+| Source locator | Node validate/persist nullable normalized boxes | Node contract/local tests | Geometry `OPTIONAL-LATER`; page gap riêng |
+| Parser/OCR mode | Snapshot có explicit `OFF|AUTO`; key không tự bật | Config/mock tests; bounded OCR observation | Đã triển khai offline; general live acceptance unverified |
+| Hide/unhide/delete | Node active-job/stale callback guard; Python mutation document-wide | Offline + isolated flow at `23afbec` | `RAG-VIS-001` ordering gap unresolved |
+| Node–Python–Qdrant hiện hành | Production boundary có deterministic offline providers | Offline E2E + isolated historical provider evidence | Chưa có current full-stack rerun |
+| Private corpus acceptance | Selected pointer `v1-d07f...`; tooling/marker tồn tại | Isolated acceptance tại `23afbec` | Current remote/exact-key/GCS review unverified |
+| Fresh corpus bootstrap | Data services bootstrap trước inspect | `8abff73`, local regressions | Đã triển khai local; không nâng Docker/live state |
+| Qdrant diagnostics | Sanitized phase/method/target/status/cause | `f269334`, loopback regressions | Diagnostic fixed; member incident unverified |
+| Historical release relation | `v1-7463...` còn trong provenance | Không có manifest comparison | `CORPUS-EQ-001` unresolved |
+| Subject/course/class | Không có schema/public API | Schema/OpenAPI | `OPTIONAL-LATER` |
+| PPTX, byte Range, image chat, chart protocol | Không thuộc CURRENT | Code/OpenAPI | `OPTIONAL-LATER`/product decision |
+| Legacy DOCX page alignment | Snapshot cũ không được backfill/re-ingest tự động | Không có controlled legacy evidence | Legacy limitation; chỉ xử lý bằng workstream riêng |
 
-## Evidence boundaries
+## Ranh giới evidence
 
-- Node syntax/unit/contract/local HTTP suites prove only their named boundary.
-- `test:part2` uses real Node/MySQL/HTTP and deterministic RAG mock; it is not a live
-  Node → Python → Qdrant test.
-- The 2026-07-17 remote run is historical evidence for that snapshot/baseline. It does
-  not verify later canonical-DOCX, locator, OCR or citation-parser changes.
-- Commit `23afbec` records later isolated digital/scanned provider and selected-release
-  evidence. It was not rerun for the current checkpoint and does not close stale
-  visibility ordering, recovery ownership or corpus/GCS review gaps.
-- The 2026-08-11 LlamaParse probe used two submissions of one synthetic fixture. It
-  demonstrates only repeatable output for that fixture; absence of an explicit page field
-  leaves the general page-provenance risk open.
-- `corpus:inspect` reads the local pointer only. It does not verify private GCS objects,
-  downloaded checksums or equivalence among MySQL, Qdrant and original files.
-- No FE/Mobile repository, Docker conversion, live provider call or real corpus mutation was part
-  of this documentation work.
+- Syntax/unit/contract/local HTTP suite chỉ chứng minh named boundary.
+- `test:part2` dùng Node/MySQL/HTTP thật nhưng deterministic RAG mock.
+- Isolated runs tại `23afbec` không đóng recovery, visibility hoặc current corpus gap.
+- Page probe dùng hai submissions của một synthetic fixture; không có explicit page field.
+- `corpus:inspect` không verify private GCS object/checksum/store equivalence.
+- Documentation closure không chạy Docker/provider, không mutate corpus và không audit FE/
+  Mobile implementation repository.

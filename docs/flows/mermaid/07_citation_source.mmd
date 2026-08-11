@@ -1,41 +1,33 @@
-%% 07 Citation creation and source access | Detailed NodeJS/Core flow
+%% 07 Citation snapshot và source viewer
 sequenceDiagram
   participant RAG as Python RAG Service
   participant Node as NodeJS Core
   participant DB as MySQL
-  participant Client as Web or Mobile Client
+  participant Client as Web hoặc Mobile
   participant Store as Local File Storage
 
-  RAG-->>Node: Structured answer with source fragments and optional scores
-  Node->>DB: Resolve vector_node_id to document_chunks and documents
-  loop Each source fragment
-    Node->>Node: Build immutable title, page, section, text and optional locator snapshot
-    Note over Node: One parent chunk may produce multiple citation fragments
-  end
-  Node->>DB: Insert ordered citations in the assistant-completion transaction
-  Note over Node,DB: Do not parse bracket markers such as [1], and retain snapshots after hide or delete
+  RAG-->>Node: Structured answer với source fragments
+  Node->>DB: Resolve vector_node_id tới chunk/document READY + VISIBLE
+  Node->>DB: Persist ordered immutable citation snapshots trong completion transaction
+  Note over Node,DB: Không parse bracket marker; snapshot vẫn tồn tại sau hide/delete
 
-  Client->>Node: Request citation snapshot or original file with user JWT
-  Node->>DB: Read citation, assistant message and chat session
-  Node->>Node: Authorize chat-session owner; ADMIN has no bypass
-  alt Not authorized
-    Node-->>Client: 404 citation not found
-  else Snapshot requested
-    Node-->>Client: Immutable source snapshot and originalAvailable
-  else Original file requested
-    Node->>DB: Read current document and source authorization context
-    alt ADMIN or uploader and storage_key exists
-      Node->>Store: Open file using internal storage_key
-      Store-->>Node: File stream
-      Node-->>Client: Attachment stream with Content-Length; no Range support
-    else Normal session owner and document is READY and VISIBLE
-      Node->>Store: Open file using internal storage_key
-      Store-->>Node: File stream
-      Node-->>Client: Attachment stream with Content-Length; no Range support
-    else Original file is not authorized or unavailable by state
-      Node-->>Client: 409 original source unavailable
+  Client->>Node: Request citation metadata bằng user JWT
+  Node->>DB: Join citation, assistant message và session
+  alt Không phải session owner
+    Node-->>Client: 404
+  else Được phép
+    Node-->>Client: sourceText + trustworthy page nếu có + nullable locator + dynamic URLs
+    alt previewUrl có giá trị
+      Client->>Node: Fetch canonical preview bằng Bearer
+      Node->>Store: Stream uploaded PDF hoặc persistent DOCX-derived PDF
+      Store-->>Client: PDF inline
+    end
+    alt originalFileUrl có giá trị
+      Note over Client,Node: PDF/DOCX original chỉ uploader Teacher/Admin; TXT có Library fallback
+      Client->>Node: Fetch original bằng Bearer
+      Node->>Store: Stream attachment nếu current authorization/state còn hợp lệ
     end
   end
 
-  Note over Node,Store: If the database storage_key exists but the physical file is missing, the file endpoint returns 404 while the citation snapshot remains available
-  Note over RAG,Client: Current Python emits no source_locator or boxes; sourceText snapshot remains displayable, but physical-page navigation requires trustworthy page identity
+  Note over RAG,Client: sourceText luôn dùng được; physical-page navigation chỉ khi page identity đáng tin
+  Note over RAG,Client: Geometry nullable/OPTIONAL-LATER và không sửa page uncertainty

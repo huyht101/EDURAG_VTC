@@ -1,4 +1,4 @@
-# Local và mock development
+# Phát triển local và mock
 
 ## Chuẩn bị
 
@@ -9,7 +9,7 @@ Copy-Item .env.example .env
 
 Root `.env` là cấu hình local duy nhất của Node/Compose. Không commit file này. `python-service/.env` chỉ dành cho Python chạy standalone và không được root Compose đọc.
 
-## Remote integration path
+## Luồng tích hợp chính
 
 Remote là startup path canonical:
 
@@ -32,7 +32,7 @@ npm run test:library
 npm run test:contract
 ```
 
-## Chạy Node trực tiếp
+## Chạy Node trực tiếp trên host
 
 Nếu chỉ muốn dùng MySQL trong Docker:
 

@@ -1,8 +1,14 @@
-# Chat and citations
+# Chat và citation
 
 Mọi ACTIVE user có thể tạo session, list/history và gửi question trong session của chính mình. Session soft-delete bằng `deleted_at`; messages/citations/usage không hard-delete.
 
-Send question normalize `clientRequestId`: omit/null/empty/whitespace thì server sinh UUID, UUID do client cung cấp được dùng làm idempotency key. Service khóa session, cấp ordered USER/ASSISTANT pair và commit trước RAG call. Concurrent same-ID preparation retry bounded khi MySQL chọn deadlock victim, nhưng chỉ trước network call; unique/duplicate postcondition vẫn quyết định kết quả. Cùng ID trong cùng session trả pair hiện có; dùng ID đó ở session khác trả 409. NodeJS gửi bounded history từ MySQL; Python không sở hữu durable memory. Completion transaction lưu assistant, structured citation snapshots, usage rows và session timestamp; response luôn trả ID cuối cùng đã dùng.
+Khi gửi question, server normalize `clientRequestId`: omit/null/empty/whitespace thì sinh
+UUID; UUID do client cung cấp là idempotency key. Service khóa session, cấp ordered
+USER/ASSISTANT pair và commit trước RAG call. Retry chuẩn bị cùng ID chỉ bounded ở giai
+đoạn trước network call; unique/duplicate postcondition quyết định kết quả. Cùng ID trong
+cùng session trả pair hiện có, dùng ở session khác trả `409`. Node gửi bounded history từ
+MySQL; Python không sở hữu durable memory. Completion transaction lưu assistant,
+structured citation snapshots, usage rows và session timestamp.
 
 RAG timeout/failure chuyển assistant `FAILED`; không tự retry question. Client retry cùng request ID trả kết quả hiện có. `no_answer=true` không tạo citation giả. `no_answer=false` bắt buộc có ít nhất một structured citation hợp lệ; answer thiếu nguồn fail closed và không được persist `COMPLETED`.
 
@@ -10,4 +16,4 @@ Citation source phải map internal `vectorNodeId` tới chunk `READY + VISIBLE`
 
 Public JSON shape và viewer behavior canonical: [Frontend integration contract](../api/frontend-integration.md).
 
-Flows: [chat/RAG notes](../flows/notes/chat-rag-flows.md).
+Sơ đồ liên quan: [flow index](../flows/README.md).

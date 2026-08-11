@@ -1,8 +1,8 @@
-# Chat, citations and usage dictionary
+# Từ điển chat, citation và usage
 
 ## `chat_sessions`
 
-| Column | Type/null/default | Key/index | Meaning |
+| Column | Kiểu/null/default | Khóa/index | Ý nghĩa |
 |---|---|---|---|
 | `id` | BIGINT UNSIGNED, auto | PK | Session ID |
 | `user_id` | BIGINT UNSIGNED, required | FK `users.id` RESTRICT; history index | Owner |
@@ -13,7 +13,7 @@
 
 ## `chat_messages`
 
-| Column | Type/null/default | Key/index | Meaning |
+| Column | Kiểu/null/default | Khóa/index | Ý nghĩa |
 |---|---|---|---|
 | `id` | BIGINT UNSIGNED, auto | PK | Message ID |
 | `session_id` | BIGINT UNSIGNED, required | FK `chat_sessions.id` RESTRICT; UNIQUE with order | Parent session |
@@ -31,7 +31,7 @@ Service khóa session row trước khi tính `MAX(message_order)+1`, nên một 
 
 ## `citations`
 
-| Column | Type/null/default | Key/index | Meaning |
+| Column | Kiểu/null/default | Khóa/index | Ý nghĩa |
 |---|---|---|---|
 | `id` | BIGINT UNSIGNED, auto | PK | Citation ID |
 | `message_id` | BIGINT UNSIGNED, required | FK `chat_messages.id` RESTRICT; UNIQUE with order | Assistant message |
@@ -47,11 +47,11 @@ Service khóa session row trước khi tính `MAX(message_order)+1`, nên một 
 | `retrieval_score`, `rerank_score` | DOUBLE, nullable | — | Scores when Python supplies them |
 | `created_at` | DATETIME(3), auto UTC | — | Persist time |
 
-One chunk may produce multiple citation fragments. Only `(message_id, citation_order)` is unique.
+Một chunk có thể tạo nhiều citation fragment. Chỉ `(message_id, citation_order)` là unique.
 
 ## `llm_usage_logs`
 
-| Column | Type/null/default | Key/index | Meaning |
+| Column | Kiểu/null/default | Khóa/index | Ý nghĩa |
 |---|---|---|---|
 | `id` | BIGINT UNSIGNED, auto | PK | Usage row |
 | `user_id` | BIGINT UNSIGNED, nullable | FK `users.id` SET NULL; user/time index | Requesting user |

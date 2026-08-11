@@ -1,16 +1,16 @@
-# Data dictionary
+# Từ điển dữ liệu
 
 Dictionary được chia theo domain để review dễ hơn:
 
-- [Account and authentication](dictionary/account.md)
-- [Documents and processing](dictionary/documents.md)
-- [Chat, citations and usage](dictionary/chat-citations-usage.md)
+- [Account và xác thực](dictionary/account.md)
+- [Document và processing](dictionary/documents.md)
+- [Chat, citation và usage](dictionary/chat-citations-usage.md)
 
-## `schema_migrations` migration ledger
+## Migration ledger `schema_migrations`
 
 `schema_migrations` không phải business table nhưng là một phần của executable schema:
 
-| Column | Type/null/default | Key/index | Meaning |
+| Column | Kiểu/null/default | Khóa/index | Ý nghĩa |
 |---|---|---|---|
 | `name` | VARCHAR(255) ASCII binary, required | PK | Tên migration đã apply; append-only |
 | `applied_at` | DATETIME(3), default `CURRENT_TIMESTAMP(3)` | — | Thời điểm ghi ledger UTC |

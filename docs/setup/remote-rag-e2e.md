@@ -1,4 +1,4 @@
-# Remote Docker RAG
+# Vận hành Remote Docker RAG
 
 Hướng dẫn canonical cho topology NodeJS, MySQL 8.4, Python RAG và Qdrant trên cùng Docker network, kèm optional selected-release bootstrap.
 
@@ -7,7 +7,7 @@ Hướng dẫn canonical cho topology NodeJS, MySQL 8.4, Python RAG và Qdrant t
 - Node.js 20+, Docker Desktop và Docker Compose.
 - Root `.env` tạo từ `.env.example`.
 - Gemini credential cho live RAG; LlamaParse credential chỉ khi `OCR_MODE=AUTO`.
-- Reader-capable `secrets/gcs.json` để fresh machine verify/restore selected release. Writer key chỉ dành cho manager publish.
+- Credential reader tại `secrets/gcs.json` để máy mới verify/restore selected release. Writer key chỉ dành cho manager publish.
 
 ```powershell
 npm ci
@@ -32,7 +32,7 @@ Copy-Item .env.example .env
 
 Không cần file env phụ, terminal `$env:...`, Compose `-f/-p` dài hoặc GCS key trong container. Root Compose chỉ inject provider/internal variables mà runtime cần; host corpus tooling tự đọc GCS config.
 
-## 2. Start và bootstrap
+## 2. Khởi động và bootstrap
 
 ```powershell
 npm run docker:remote:config
@@ -55,7 +55,7 @@ Không đổi `DB_HOST`/`DB_PORT` của app sang host port. Startup báo
 `REMOTE_DB_HOST_PORT_UNAVAILABLE` cùng tên biến cần đổi nếu mapping remote
 bị chiếm.
 
-Foreground orchestration:
+Trình tự foreground orchestration:
 
 1. validate root environment và Compose;
 2. build Node/Python images;
@@ -77,7 +77,7 @@ Kết quả phải là `remote` và `REMOTE_PREFLIGHT_OK`. Python/Qdrant đang h
 
 Node gọi `http://rag-service:8000`; Python callback `http://app:5000`; Qdrant là `http://qdrant:6333`. Node mount uploads read/write, Python mount cùng volume read-only. GCS key không được mount/inject.
 
-Expected log trên fresh reader-enabled volumes khi selected release hợp lệ và cấu hình:
+Log mong đợi trên fresh volume có reader credential khi selected release hợp lệ:
 
 ```text
 CORPUS_RESTORE_OK
@@ -94,7 +94,7 @@ Chọn mode theo mục đích:
 - `required`: acceptance strict; selected release và local non-empty phải khớp exact;
 - `off`: không đọc/restore/so sánh cloud release.
 
-## 3. Corpus commands
+## 3. Các command corpus
 
 ```powershell
 npm run corpus:inspect
@@ -151,7 +151,7 @@ không thay thế remote verification. Upload document mới vẫn là async: re
 sau đó poll `GET /api/documents/jobs/{jobId}` đến terminal status. Chat request đơn giản
 chỉ cần `content`; `clientRequestId` optional và server tự sinh UUID.
 
-## 5. Lifecycle
+## 5. Vòng đời vận hành
 
 | Command | Mục đích |
 |---|---|
@@ -170,9 +170,9 @@ Giải nén source/clone mới không đồng nghĩa Docker state mới: named v
 
 ```powershell
 npm run corpus:reset
-# maintainer inventory, không delete/restore (data services có thể được start để inspect)
+# inventory dành cho maintainer, không delete/restore; data services có thể được start để inspect
 npm run corpus:reset -- --dry-run
-# CI/disposable automation only
+# chỉ dùng cho CI/disposable automation
 npm run corpus:reset -- --yes
 ```
 
@@ -201,7 +201,7 @@ thể rerun cùng command và không được đánh dấu READY giả.
 | Chat timeout | Kiểm tra Python/provider health và `RAG_QUERY_TIMEOUT_MS`. |
 | Python/Qdrant healthy nhưng preflight báo app không phải remote | App có thể được tạo bởi base/mock Compose rồi chỉ restart. Chạy command canonical `npm run docker:remote:dev` để recreate app với resolved remote environment; không xóa volume để “sửa” lỗi configuration. |
 
-Quy trình kiểm thử đầy đủ: [Independent test plan](../testing/week3-remote-test-plan.md).
+Live acceptance có kiểm soát: [Phase 2 runbook](../testing/phase2-live-acceptance-runbook.md).
 
 Không đóng gói `.env`, `secrets/gcs.json` hoặc credential thật vào ZIP/source handoff. Nếu credential thật từng bị phân phối trong ZIP, loại khỏi gói tiếp theo và rotate/revoke qua quy trình của owner; tooling không tự thực hiện thao tác đó.
 
