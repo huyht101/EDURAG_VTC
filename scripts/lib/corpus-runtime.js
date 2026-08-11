@@ -169,35 +169,55 @@ async function qdrantBaseUrl() {
 }
 
 async function qdrantRequest(endpoint, options = {}) {
+  const method = String(options.method || 'GET').toUpperCase();
+  const target = String(endpoint).split('?', 1)[0];
+  const {
+    allowStatuses = [],
+    baseUrl,
+    errorCode,
+    httpErrorCode,
+    qdrantPhase = 'QDRANT_REQUEST',
+    timeoutMs,
+    ...fetchOptions
+  } = options;
   let response;
   try {
-    response = await fetch(`${await qdrantBaseUrl()}${endpoint}`, {
-      ...options,
-      signal: options.signal || AbortSignal.timeout(options.timeoutMs || 30000)
+    response = await fetch(`${baseUrl || await qdrantBaseUrl()}${endpoint}`, {
+      ...fetchOptions,
+      signal: fetchOptions.signal || AbortSignal.timeout(timeoutMs || 30000)
     });
   } catch (cause) {
+    const causeCode = cause?.cause?.code || cause?.code || cause?.name || 'transport error';
+    const causeSummary = redacted(cause?.cause?.message || cause?.message || causeCode)
+      .replace(/[\r\n\t]+/g, ' ').slice(0, 300);
     const error = corpusError(
-      options.errorCode || 'CORPUS_QDRANT_REQUEST_FAILED',
-      'Qdrant request failed before an HTTP response was received.'
+      errorCode || 'CORPUS_QDRANT_REQUEST_FAILED',
+      `Qdrant ${method} ${target} failed before an HTTP response was received `
+      + `(${causeCode}: ${causeSummary}).`
     );
-    error.cause = cause;
+    Object.assign(error, { method, target, qdrantPhase, causeCode, causeSummary, cause });
     throw error;
   }
-  if (!response.ok) {
-    const message = (await response.text()).split(/\r?\n/, 1)[0].slice(0, 500);
-    throw corpusError(
-      options.errorCode || 'CORPUS_QDRANT_REQUEST_FAILED',
-      `Qdrant ${options.method || 'GET'} ${endpoint} returned ${response.status}: ${message}`
+  if (!response.ok && !allowStatuses.includes(response.status)) {
+    const responseBody = redacted((await response.text()).split(/\r?\n/, 1)[0]).slice(0, 500);
+    const error = corpusError(
+      httpErrorCode || errorCode || 'CORPUS_QDRANT_REQUEST_FAILED',
+      `Qdrant ${method} ${target} returned ${response.status}: ${responseBody}`
     );
+    Object.assign(error, { method, target, qdrantPhase, status: response.status, responseBody });
+    throw error;
   }
   return response;
 }
 
 async function qdrantRuntimeInfo() {
-  const rootInfo = await (await qdrantRequest('/')).json();
+  const rootInfo = await (await qdrantRequest('/', { qdrantPhase: 'RUNTIME_INFO_ROOT' })).json();
   const name = collectionName();
-  const response = await fetch(`${await qdrantBaseUrl()}/collections/${encodeURIComponent(name)}`, {
-    signal: AbortSignal.timeout(10000)
+  const response = await qdrantRequest(`/collections/${encodeURIComponent(name)}`, {
+    allowStatuses: [404],
+    httpErrorCode: 'CORPUS_QDRANT_INSPECT_FAILED',
+    qdrantPhase: 'RUNTIME_INFO_COLLECTION',
+    timeoutMs: 10000
   });
   if (response.status === 404) {
     return { serverVersion: rootInfo.version, collectionName: name, exists: false, pointCount: 0 };
@@ -968,6 +988,7 @@ module.exports = {
   freezeWriters,
   mysqlInput,
   qdrantContentSha256,
+  qdrantRequest,
   qdrantRuntimeInfo,
   reconcileRuntime,
   recoverEmptyQdrantState,

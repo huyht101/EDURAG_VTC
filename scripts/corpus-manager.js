@@ -1099,6 +1099,27 @@ async function inspectBootstrapStateWithRetry(options = {}) {
   throw lastError;
 }
 
+function localStateUnknown(error, message) {
+  const sourceCode = error.code || 'CORPUS_LOCAL_STATE_ERROR';
+  const detail = safePlanText(error.message);
+  const wrapped = releaseError(
+    'CORPUS_LOCAL_STATE_UNKNOWN',
+    `${message} (${sourceCode}${detail ? `: ${detail}` : ''}).`
+  );
+  Object.assign(wrapped, {
+    cause: error,
+    corpusPhase: 'LOCAL_INSPECT',
+    method: error.method,
+    target: error.target,
+    qdrantPhase: error.qdrantPhase,
+    causeCode: error.causeCode,
+    causeSummary: error.causeSummary,
+    status: error.status,
+    responseBody: error.responseBody
+  });
+  return wrapped;
+}
+
 function validateOptionalCloudConfiguration(options = {}) {
   const environment = options.environment || process.env;
   const names = ['GCS_PROJECT_ID', 'GCS_BUCKET', 'GCS_OBJECT_PREFIX', 'GCS_CREDENTIALS_FILE'];
@@ -1394,10 +1415,7 @@ async function bootstrapCorpus(options = {}) {
     try {
       local = await inspectBootstrapStateWithRetry(options);
     } catch (error) {
-      throw releaseError(
-        'CORPUS_LOCAL_STATE_UNKNOWN',
-        `Local corpus state could not be verified (${error.code || 'CORPUS_LOCAL_STATE_ERROR'}).`
-      );
+      throw localStateUnknown(error, 'Local corpus state could not be verified');
     }
     if (local.state === 'UNKNOWN') {
       throw releaseError('CORPUS_LOCAL_STATE_UNKNOWN', 'Local corpus state could not be verified as empty.');
@@ -1491,10 +1509,10 @@ async function bootstrapCorpus(options = {}) {
     let local;
     try {
       local = await inspectBootstrapStateWithRetry(options);
-    } catch (_inspectError) {
-      throw releaseError(
-        'CORPUS_LOCAL_STATE_UNKNOWN',
-        'Local corpus state could not be re-confirmed after the remote-read failure.'
+    } catch (inspectError) {
+      throw localStateUnknown(
+        inspectError,
+        'Local corpus state could not be re-confirmed after the remote-read failure'
       );
     }
     if (local.state === 'UNKNOWN') {

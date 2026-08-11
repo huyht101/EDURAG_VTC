@@ -2,6 +2,7 @@
 
 const assert = require('assert/strict');
 const fsp = require('fs/promises');
+const http = require('http');
 const os = require('os');
 const path = require('path');
 
@@ -58,6 +59,18 @@ async function cleanupTemporaryDirectories() {
     (directory) => fsp.rm(directory, { recursive: true, force: true })
   ));
   temporaryDirectories.clear();
+}
+
+async function listenLoopback(server) {
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  return `http://127.0.0.1:${server.address().port}`;
+}
+
+async function closeServer(server) {
+  await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
 }
 
 function manifestInput() {
@@ -1073,6 +1086,49 @@ async function main() {
     'EMPTY'
   );
   assert.equal(classifyBootstrapState(null, emptyQdrant, { empty: true }).state, 'UNKNOWN');
+
+  const stoppedQdrant = http.createServer();
+  const stoppedQdrantUrl = await listenLoopback(stoppedQdrant);
+  await closeServer(stoppedQdrant);
+  await assert.rejects(
+    () => corpusRuntime.qdrantRequest('/collections/test?api_key=must-not-appear', {
+      baseUrl: stoppedQdrantUrl,
+      method: 'POST',
+      qdrantPhase: 'TEST_UNAVAILABLE',
+      timeoutMs: 500
+    }),
+    (error) => error.code === 'CORPUS_QDRANT_REQUEST_FAILED'
+      && error.method === 'POST'
+      && error.target === '/collections/test'
+      && error.qdrantPhase === 'TEST_UNAVAILABLE'
+      && error.causeCode === 'ECONNREFUSED'
+      && error.causeSummary.includes('ECONNREFUSED')
+      && error.cause
+      && !error.message.includes('must-not-appear')
+  );
+
+  const deniedQdrant = http.createServer((_request, response) => {
+    response.writeHead(401, { 'content-type': 'text/plain' });
+    response.end('permission denied\nignored detail');
+  });
+  const deniedQdrantUrl = await listenLoopback(deniedQdrant);
+  try {
+    await assert.rejects(
+      () => corpusRuntime.qdrantRequest('/collections/test', {
+        baseUrl: deniedQdrantUrl,
+        httpErrorCode: 'CORPUS_QDRANT_INSPECT_FAILED',
+        qdrantPhase: 'TEST_HTTP_ERROR'
+      }),
+      (error) => error.code === 'CORPUS_QDRANT_INSPECT_FAILED'
+        && error.method === 'GET'
+        && error.target === '/collections/test'
+        && error.qdrantPhase === 'TEST_HTTP_ERROR'
+        && error.status === 401
+        && error.responseBody === 'permission denied'
+    );
+  } finally {
+    await closeServer(deniedQdrant);
+  }
   const qdrantOnly = classifyBootstrapState(
     emptyStats, { exists: true, pointCount: 1 }, { empty: true, fileCount: 0 }
   );
@@ -1256,12 +1312,25 @@ async function main() {
     (error) => error.code === 'CORPUS_PARTIAL_STATE'
   );
 
+  const qdrantInspectCause = Object.assign(
+    releaseError('CORPUS_QDRANT_REQUEST_FAILED', 'Qdrant GET / failed (ECONNREFUSED).'),
+    {
+      method: 'GET', target: '/', qdrantPhase: 'RUNTIME_INFO_ROOT',
+      cause: Object.assign(new Error('connect failed'), { code: 'ECONNREFUSED' })
+    }
+  );
   await assert.rejects(
     () => bootstrapCorpus({
       mode: 'auto', localInspectAttempts: 1,
-      inspectBootstrap: async () => { throw releaseError('CORPUS_MYSQL_INSPECT_FAILED', 'offline'); }
+      inspectBootstrap: async () => { throw qdrantInspectCause; }
     }),
     (error) => error.code === 'CORPUS_LOCAL_STATE_UNKNOWN'
+      && error.corpusPhase === 'LOCAL_INSPECT'
+      && error.method === 'GET'
+      && error.target === '/'
+      && error.qdrantPhase === 'RUNTIME_INFO_ROOT'
+      && error.cause === qdrantInspectCause
+      && error.message.includes('ECONNREFUSED')
   );
   await assert.rejects(
     () => bootstrapCorpus({
@@ -1406,6 +1475,8 @@ async function main() {
       downloadRelease: async () => { throw new TypeError('fetch failed'); }
     }),
     (error) => error.code === 'CORPUS_LOCAL_STATE_UNKNOWN'
+      && error.corpusPhase === 'LOCAL_INSPECT'
+      && error.cause?.code === 'CORPUS_QDRANT_REQUEST_FAILED'
   );
   await assert.rejects(
     () => bootstrapCorpus({
