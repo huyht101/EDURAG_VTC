@@ -62,7 +62,7 @@ Project phù hợp integration/demo và viết báo cáo; chưa được gọi l
 | Python provenance | Exact upstream branch/commit của tracked snapshot là `UNKNOWN`. |
 | `CORPUS-EQ-001` | Quan hệ/equivalence của historical `v1-7463...` chưa được repository evidence giải quyết. |
 | `CORPUS-ACC-001` | Acceptance của `v1-d07f...` tại `23afbec` là recorded isolated evidence; không đóng exact-key, GCS/archive-key hoặc current remote-state review. |
-| `CORPUS-QDRANT-001` | Thứ tự fresh bootstrap và diagnostic context đã sửa/test local; incident thành viên cũ thiếu original evidence nên vẫn `PLAUSIBLE/UNVERIFIED`. |
+| `CORPUS-QDRANT-001` | Mobile log và synthetic socket-close regression xác nhận equivalent startup-readiness defect. Shared `/readyz` deadline/backoff đã test local; member rerun vẫn chưa có. |
 | `DB-MIG-001` | Interrupted multi-statement MySQL DDL cần inspect/repair plan; thiếu ledger row không chứng minh chưa có statement nào apply. |
 | Live E2E | Tích hợp Node–Python–Qdrant/provider và FE/Mobile hiện hành chưa được xác minh end-to-end. |
 

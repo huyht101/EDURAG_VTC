@@ -21,7 +21,7 @@ và scope; mock/isolated evidence không được nâng thành current full-stac
 | `TEST-HARNESS-001` | Maintainability | `part2-smoke.js` bao phủ nhiều domain trong một scenario | Medium maintenance; chưa có contract failure | Tách helper/domain fixture sau MVP nhưng giữ một top-level acceptance command |
 | `FE-CD-001` | Contract gap | `Content-Disposition` chưa được CORS expose cho browser JS | Low; download vẫn hoạt động | FE dùng metadata fallback; chỉ patch header nếu FE xác nhận cần |
 | `CORPUS-SIG-001` | Maintainability | Signal handler resume writer best-effort nhưng direct exit không bảo đảm staging cleanup | Low; pointer-last bảo vệ selected release | Route signal qua normal cleanup khi corpus tooling được sửa tiếp |
-| `CORPUS-QDRANT-001` | Verification gap | `f269334` giữ sanitized phase/method/target/status/cause; loopback test unavailable + 401; thiếu original member log/env | Diagnostics corrected; incident **PLAUSIBLE/UNVERIFIED** | Nếu tái diễn, thu exact command/exit/redacted target/Docker status; không blind retry |
+| `CORPUS-QDRANT-001` | Startup defect | Mobile log có socket-close sau TCP health; synthetic regression tái hiện cùng readiness defect và thành công sau transient window >5 giây | **EQUIVALENT ROOT CAUSE**; shared `/readyz` deadline/backoff, permanent fail-fast và sanitized cause đã test local | Member rerun vẫn cần để xác nhận môi trường thật; không suy corpus equivalence từ startup PASS |
 | `TOOL-DEP-001` | Maintainability | `@google-cloud/storage → gaxios → node-fetch → whatwg-url → tr46` gây `DEP0040` | Low, non-blocking; `P2 POST-MVP` | Upgrade compatible direct dependency sau corpus regression, không suppress warning |
 
 ## Quy tắc đóng issue

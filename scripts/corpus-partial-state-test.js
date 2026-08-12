@@ -80,19 +80,25 @@ async function main() {
     const previousMode = process.env.CORPUS_BOOTSTRAP;
     process.env.CORPUS_BOOTSTRAP = 'auto';
     try {
-      await assert.rejects(
-        () => bootstrapCorpus({
-          inspectBootstrap: () => inspectBootstrapState({
-            inspectUploads: async () => ({ empty: true, fileCount: 0, releaseState: null })
-          })
+      const result = await bootstrapCorpus({
+        inspectBootstrap: () => inspectBootstrapState({
+          inspectUploads: async () => ({ empty: true, fileCount: 0, releaseState: null })
         }),
-        (error) => error.code === 'CORPUS_PARTIAL_STATE'
-      );
+        restore: async () => { throw new Error('Auto partial state must not restore.'); }
+      });
+      assert.equal(result.status, 'CORPUS_LOCAL_PARTIAL_RETAINED');
+      assert.equal(result.mutation, false);
+      const retained = await inspectBootstrapState({
+        inspectUploads: async () => ({ empty: true, fileCount: 0, releaseState: null })
+      });
+      assert.equal(retained.partial, true);
+      assert.equal(retained.diagnostics.readyDocuments, 1);
+      assert.equal(retained.diagnostics.qdrantPoints, 0);
     } finally {
       if (previousMode === undefined) delete process.env.CORPUS_BOOTSTRAP;
       else process.env.CORPUS_BOOTSTRAP = previousMode;
     }
-    console.log('CORPUS_PARTIAL_STATE_TEST_OK auto=failed_closed no_overwrite=true');
+    console.log('CORPUS_PARTIAL_STATE_TEST_OK auto=retained_partial no_overwrite=true mutation=false');
   } finally {
     compose(['down', '-v', '--remove-orphans'], { allowFailure: true });
     assertProjectUnused();

@@ -164,6 +164,40 @@ async function main() {
       docker(['volume', 'inspect', `${composeProject}_${suffix}`]);
     }
 
+    const failedChild = spawn(process.execPath, [path.join(root, 'scripts', 'remote-dev.js')], {
+      cwd: root,
+      env: {
+        ...process.env,
+        CORPUS_BOOTSTRAP: 'required',
+        GCS_PROJECT_ID: '',
+        GCS_BUCKET: '',
+        GCS_OBJECT_PREFIX: '',
+        GCS_CREDENTIALS_FILE: '',
+        REMOTE_DEV_ALL_LOGS: 'false'
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true
+    });
+    let failedOutput = '';
+    failedChild.stdout.on('data', (chunk) => { failedOutput += redacted(chunk.toString()); });
+    failedChild.stderr.on('data', (chunk) => { failedOutput += redacted(chunk.toString()); });
+    const failedDeadline = setTimeout(() => {
+      if (!failedChild.killed) failedChild.kill('SIGTERM');
+    }, lifecycleTimeoutMs);
+    const failedCode = await new Promise((resolve, reject) => {
+      failedChild.once('error', reject);
+      failedChild.once('exit', resolve);
+    });
+    clearTimeout(failedDeadline);
+    assert.equal(failedCode, 1, `Expected startup failure, received exit ${failedCode}.`);
+    assert.match(failedOutput, /GCS_CONFIG_MISSING:/);
+    assert.match(failedOutput, /REMOTE_DEV_STOPPING reason=STARTUP_FAILURE/);
+    assert.match(failedOutput, /REMOTE_DEV_STOPPED volumes=retained/);
+    assert.doesNotMatch(failedOutput, /REMOTE_DEV_ATTACHED/);
+    for (const suffix of ['mysql_data', 'qdrant_data', 'uploads_data']) {
+      docker(['volume', 'inspect', `${composeProject}_${suffix}`]);
+    }
+
     compose(['down', '--remove-orphans']);
     assert.equal(docker([
       'ps', '-a', '--filter', `label=com.docker.compose.project=${composeProject}`, '--format', '{{.ID}}'
@@ -182,7 +216,7 @@ async function main() {
     console.log(
       'REMOTE_DEV_LIFECYCLE_OK legacy_port_3306=unavailable '
       + 'internal_db=db:3306 mode=remote corpus=degraded_empty '
-      + 'controlled_shutdown=true down=volumes_retained rerun=true'
+      + 'controlled_shutdown=true startup_failure_cleanup=true down=volumes_retained rerun=true'
     );
   } finally {
     if (blocker.owned) docker(['rm', '-f', blocker.name], { allowFailure: true });

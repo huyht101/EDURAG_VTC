@@ -53,8 +53,9 @@ bằng `CORPUS-EQ-001` trong [issue register](../status/issue-quality-register.m
 | Mức | Bằng chứng được phép kết luận |
 |---|---|
 | `npm run test:corpus` | Unit/local simulation bằng fake object store và fixture tạm; kiểm tra validation, deterministic identity, rollback và zero external mutation. Không chứng minh live lifecycle. |
-| `npm run test:corpus:partial` | Failure/isolation test trên project `edurag_corpus_partial_*` mới, đã xác nhận không có resource cũ; chỉ test local MySQL/Qdrant và tự cleanup. |
+| `npm run test:corpus:partial` | Retention/isolation test trên project `edurag_corpus_partial_*` mới: partial local corpus được giữ nguyên trong `auto`, không restore/overwrite, rồi test tự cleanup resource disposable. |
 | `npm run test:corpus:fresh` | Synthetic immutable release được restore vào MySQL/Qdrant/upload volume của project `edurag_corpus_fresh_*` mới; kiểm tra cross-store consistency, verified release-state marker, exact-release no-op và cleanup. Không gọi GCS/provider thật. |
+| `npm run test:corpus:startup` | Unit/loopback matrix cho Qdrant readiness deadline/backoff, permanent error, mutation single-attempt và policy `auto|required|off`; fake clock nên không chờ thật. |
 | `npm run test:corpus:live` | Live restore/query/citation; bị chặn trước mọi preflight/provider call nếu thiếu explicit approved-bundle confirmation, approved release ID/document/query. |
 | Selected private release | Pointer chọn release; remote checksum/restore/query chỉ PASS khi workflow verify/acceptance thực sự chạy cho đúng ID. |
 
@@ -62,31 +63,33 @@ bằng `CORPUS-EQ-001` trong [issue register](../status/issue-quality-register.m
 
 | Mode | Hành vi |
 |---|---|
-| `auto` | Nếu cả MySQL business state, Qdrant và uploads đều `EMPTY`, restore đúng selected release. Local complete được verify động: exact selected release no-op; valid different release được retain với warning, không replace. Partial, busy, missing/stale marker, same-release checksum mismatch, cross-store mismatch hoặc `UNKNOWN/ERROR` đều fail closed. Confirmed `EMPTY` chỉ được tiếp tục `DEGRADED` với remote config/credential/permission/missing-object/transport failure ở phase remote read trước local mutation. |
+| `auto` | Chỉ restore selected release khi cả MySQL business state, Qdrant và uploads đều `EMPTY`. Exact selected release là verified no-op; release local khác đã verify, local unmarked/diverged, busy hoặc partial nhưng runtime-compatible đều được giữ nguyên với warning và `mutation=false`. Release mismatch không phải runtime gate. `UNKNOWN/ERROR` hoặc proven runtime incompatibility vẫn fail. Confirmed `EMPTY` chỉ được tiếp tục `DEGRADED` với remote config/credential/permission/missing-object/transport failure ở phase remote read trước local mutation. |
 | `required` | Acceptance mode: selected release/credential/artifacts phải hợp lệ và local non-empty phải khớp exact release. Mismatch fail closed. |
 | `off` | Không đọc/restore/so sánh cloud release. Local startup tiếp tục độc lập. |
 
 ### Thứ tự fresh state và diagnostic Qdrant
 
-**CURRENT_VERIFIED trong phạm vi code/local regression:** bootstrap `auto` mặc định chạy
-data-service bootstrap trước khi inspect MySQL/Qdrant. Fix tại `8abff73` giúp fresh local
-state không còn fail lần đầu chỉ vì resource cần inspect chưa được tạo. Fix không nới
-empty/partial/mismatch guard; rerun vẫn theo exact-release/dynamic-state rule. Các suite
-fresh/partial/reset dùng Docker là evidence riêng và không được gọi current PASS nếu chưa rerun.
+Bootstrap `auto` chạy data-service bootstrap trước khi inspect MySQL/Qdrant. Qdrant image
+được pin `1.18.2`; Compose healthcheck và host tooling dùng `GET /readyz`. Shared readiness
+retry chỉ áp dụng cho transport timeout/reset/refused/socket-close và HTTP
+`408/425/429/5xx`, theo bounded deadline mặc định 60 giây; `401/403`, invalid response và
+runtime incompatibility fail ngay. Log có `QDRANT_NOT_READY ...` rồi `QDRANT_READY ...`.
+Request mutation vẫn single-attempt; readiness không thay thế collection compatibility.
 
 Commit `f269334` giữ context lỗi Qdrant tại request boundary: phase, HTTP method,
 sanitized target path, HTTP status/dòng response đầu tiên nếu có và transport cause.
 Diagnostic target loại query string; response/cause được redact. Lỗi HTTP auth/config và
 các 4xx khác không bị chuyển thành blind retry.
 
-Regression loopback local bao phủ unavailable endpoint và non-success HTTP response. Nó
-chứng minh diagnostic behavior, không chứng minh root cause của member report cũ về
-`CORPUS_QDRANT_REQUEST_FAILED`. Vì thiếu original command/log/environment, incident vẫn
-**PLAUSIBLE/UNVERIFIED**, không phải reproduced hoặc closed.
+Mobile log ghi TCP health đã qua nhưng Qdrant đóng socket ở `GET /`; patch retry cục bộ
+sau đó startup thành công. Synthetic fake-clock/loopback và disposable fresh-state suite
+đều tái hiện transient socket-close rồi thành công qua shared readiness. Kết luận là
+**EQUIVALENT ROOT CAUSE**, chưa phải reproduction của exact member environment; member
+rerun vẫn cần để xác nhận acceptance thực tế.
 
-Bootstrap theo dõi phase `REMOTE_READ`, `STAGE`, `VERIFY`, `APPLY`, `ROLLBACK`, `FINALIZE` cùng cờ local mutation/rollback. `auto` không degrade integrity/incompatible-manifest, local service/filesystem error, unknown programming error, post-apply failure hoặc rollback failure. Raw `TypeError("fetch failed")`, abort/timeout/network, HTTP availability, permission và missing-object được chuẩn hóa tại remote boundary; log chỉ dùng stable code/sanitized reason. Job/document đang xử lý và partial local stores là `PRESENT`, không bị gọi nhầm là cloud fingerprint corruption và không bị overwrite. `required` luôn fail closed với remote failure và unknown/partial/mismatch.
+Bootstrap theo dõi phase `REMOTE_READ`, `STAGE`, `VERIFY`, `APPLY`, `ROLLBACK`, `FINALIZE` cùng cờ local mutation/rollback. `auto` không degrade runtime incompatibility, local inspection error, unknown programming error, post-apply failure hoặc rollback failure. Raw `TypeError("fetch failed")`, abort/timeout/network, HTTP availability, permission và missing-object được chuẩn hóa tại remote boundary; log chỉ dùng stable code/sanitized reason. Job/document đang xử lý và partial local stores là `PRESENT`; khi runtime-compatible chúng được retain, không gọi nhầm là `EMPTY`, không cloud lookup và không overwrite. `required` luôn fail closed với remote failure và unknown/partial/mismatch.
 
-Sau restore thành công, upload volume ghi `.edurag-corpus-release-state.json` gồm release ID, manifest checksum, compatibility và expected inventory (không chứa credential). Marker chỉ được ghi sau khi MySQL, Qdrant và originals đều verify. Lần `auto` sau dùng marker + dynamic fingerprint để no-op; marker thiếu/không khớp không được coi là bằng chứng local hợp lệ. `required` vẫn download/verify selected release để acceptance strict.
+Sau restore thành công, upload volume ghi `.edurag-corpus-release-state.json` gồm release ID, manifest checksum, compatibility và expected inventory (không chứa credential). Marker chỉ được ghi sau khi MySQL, Qdrant và originals đều verify. Lần `auto` sau dùng marker + dynamic fingerprint để nhận exact no-op; marker thiếu/không khớp được phân loại divergence và giữ local, không gọi là `CORPUS_ALREADY_RESTORED`. `required` vẫn download/verify selected release để acceptance strict.
 
 ## Publish release mới
 

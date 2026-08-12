@@ -1076,36 +1076,40 @@ async function main() {
   assert.equal(restoreCalls, 0);
 
   const emptyStats = {
+    mysqlVersion: '8.4.0',
     users: 1, nonDemoUsers: 0, authTokens: 0, documents: 0, readyDocuments: 0,
     inProgressDocuments: 0, jobs: 0, activeJobs: 0, chunks: 0, activeChunks: 0,
     sessions: 0, messages: 0, citations: 0, usageRows: 0
   };
-  const emptyQdrant = { exists: false, pointCount: 0 };
+  const emptyQdrant = { serverVersion: '1.18.2', exists: false, pointCount: 0 };
   assert.equal(
     classifyBootstrapState(emptyStats, emptyQdrant, { empty: true, fileCount: 0 }).state,
     'EMPTY'
   );
   assert.equal(classifyBootstrapState(null, emptyQdrant, { empty: true }).state, 'UNKNOWN');
 
-  const stoppedQdrant = http.createServer();
-  const stoppedQdrantUrl = await listenLoopback(stoppedQdrant);
-  await closeServer(stoppedQdrant);
-  await assert.rejects(
-    () => corpusRuntime.qdrantRequest('/collections/test?api_key=must-not-appear', {
-      baseUrl: stoppedQdrantUrl,
-      method: 'POST',
-      qdrantPhase: 'TEST_UNAVAILABLE',
-      timeoutMs: 500
-    }),
-    (error) => error.code === 'CORPUS_QDRANT_REQUEST_FAILED'
-      && error.method === 'POST'
-      && error.target === '/collections/test'
-      && error.qdrantPhase === 'TEST_UNAVAILABLE'
-      && error.causeCode === 'ECONNREFUSED'
-      && error.causeSummary.includes('ECONNREFUSED')
-      && error.cause
-      && !error.message.includes('must-not-appear')
-  );
+  const socketClosingQdrant = http.createServer();
+  socketClosingQdrant.on('connection', (socket) => socket.destroy());
+  const socketClosingQdrantUrl = await listenLoopback(socketClosingQdrant);
+  try {
+    await assert.rejects(
+      () => corpusRuntime.qdrantRequest('/collections/test?api_key=must-not-appear', {
+        baseUrl: socketClosingQdrantUrl,
+        method: 'POST',
+        qdrantPhase: 'TEST_UNAVAILABLE',
+        timeoutMs: 500
+      }),
+      (error) => error.code === 'CORPUS_QDRANT_REQUEST_FAILED'
+        && error.method === 'POST'
+        && error.target === '/collections/test'
+        && error.qdrantPhase === 'TEST_UNAVAILABLE'
+        && ['UND_ERR_SOCKET', 'ECONNRESET'].includes(error.causeCode)
+        && error.cause
+        && !error.message.includes('must-not-appear')
+    );
+  } finally {
+    await closeServer(socketClosingQdrant);
+  }
 
   const deniedQdrant = http.createServer((_request, response) => {
     response.writeHead(401, { 'content-type': 'text/plain' });
@@ -1220,6 +1224,20 @@ async function main() {
   assert.equal(localRetained.releaseState, 'VERIFIED');
   assert.equal(restoreCalls, 1, 'Auto attempted to restore over existing local data.');
 
+  await assert.rejects(
+    () => bootstrapCorpus({
+      mode: 'auto', pointer,
+      inspectBootstrap: async () => ({
+        state: 'PRESENT', activeJobs: 0, partial: false, stores: {}, releaseState: selectedState
+      }),
+      verifyMarkedLocalRelease: async () => {
+        throw releaseError('CORPUS_QDRANT_REQUEST_FAILED', 'synthetic inspection failure');
+      },
+      restore: async () => { throw new Error('Inspection failure must not restore.'); }
+    }),
+    (error) => error.code === 'CORPUS_QDRANT_REQUEST_FAILED'
+  );
+
   const differentSelectedPointer = {
     ...pointer,
     releaseId: `v1-${'a'.repeat(24)}`,
@@ -1256,28 +1274,25 @@ async function main() {
     (error) => error.code === 'CORPUS_EXISTING_STATE_MISMATCH'
   );
 
-  await assert.rejects(
-    () => bootstrapCorpus({
-      mode: 'auto',
-      pointer,
-      inspectBootstrap: async () => ({
-        state: 'PRESENT', activeJobs: 0, partial: false, stores: {},
-        releaseState: { ...selectedState, manifestSha256: 'f'.repeat(64) }
-      })
-    }),
-    (error) => error.code === 'CORPUS_EXISTING_STATE_MISMATCH'
-  );
-  await assert.rejects(
-    () => bootstrapCorpus({
-      mode: 'auto',
-      inspectBootstrap: async () => ({
-        state: 'EMPTY', activeJobs: 0, partial: false, stores: {}, releaseState: selectedState
-      })
-    }),
-    (error) => error.code === 'CORPUS_RELEASE_STATE_STALE'
-  );
-  await assert.rejects(
-    () => bootstrapCorpus({
+  const mismatchedMarker = await bootstrapCorpus({
+    mode: 'auto',
+    pointer,
+    inspectBootstrap: async () => ({
+      state: 'PRESENT', activeJobs: 0, partial: false, stores: {},
+      releaseState: { ...selectedState, manifestSha256: 'f'.repeat(64) }
+    })
+  });
+  assert.equal(mismatchedMarker.status, 'CORPUS_LOCAL_DIVERGED_RETAINED');
+  assert.equal(mismatchedMarker.mutation, false);
+  const staleMarker = await bootstrapCorpus({
+    mode: 'auto',
+    inspectBootstrap: async () => ({
+      state: 'EMPTY', activeJobs: 0, partial: false, stores: {}, releaseState: selectedState
+    })
+  });
+  assert.equal(staleMarker.status, 'CORPUS_LOCAL_DIVERGED_RETAINED');
+  assert.equal(staleMarker.mutation, false);
+  const unmarkedPresent = await bootstrapCorpus({
       mode: 'auto', environment: cloudEnvironment, rootDirectory: credentialRoot,
       inspectBootstrap: async () => ({
         state: 'PRESENT', activeJobs: 0, partial: false, stores: {}, releaseState: null
@@ -1287,30 +1302,28 @@ async function main() {
           phase: 'REMOTE_READ', localMutationStarted: false, rollbackConfirmed: false
         });
       }
-    }),
-    (error) => error.code === 'GCS_REMOTE_UNAVAILABLE'
-  );
+    });
+  assert.equal(unmarkedPresent.status, 'CORPUS_LOCAL_DIVERGED_RETAINED');
+  assert.equal(unmarkedPresent.mutation, false);
 
-  await assert.rejects(
-    () => bootstrapCorpus({
+  const busyPresent = await bootstrapCorpus({
       mode: 'auto',
       inspectBootstrap: async () => ({
         state: 'PRESENT', activeJobs: 1, inProgress: true, partial: false, stores: {}
       }),
       restore: async () => { throw new Error('must not restore busy local state'); }
-    }),
-    (error) => error.code === 'CORPUS_LOCAL_STATE_BUSY'
-  );
-  await assert.rejects(
-    () => bootstrapCorpus({
+    });
+  assert.equal(busyPresent.status, 'CORPUS_LOCAL_DIVERGED_RETAINED');
+  assert.equal(busyPresent.activeJobs, 1);
+  const partialPresent = await bootstrapCorpus({
       mode: 'auto',
       inspectBootstrap: async () => ({
         state: 'PRESENT', activeJobs: 0, partial: true, stores: {}
       }),
       restore: async () => { throw new Error('must not restore partial local state'); }
-    }),
-    (error) => error.code === 'CORPUS_PARTIAL_STATE'
-  );
+    });
+  assert.equal(partialPresent.status, 'CORPUS_LOCAL_PARTIAL_RETAINED');
+  assert.equal(partialPresent.mutation, false);
 
   const qdrantInspectCause = Object.assign(
     releaseError('CORPUS_QDRANT_REQUEST_FAILED', 'Qdrant GET / failed (ECONNREFUSED).'),

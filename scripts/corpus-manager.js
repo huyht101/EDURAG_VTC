@@ -980,8 +980,7 @@ async function inspectLocalStateWithRetry(manifest, options = {}) {
       return await inspect(manifest);
     } catch (error) {
       lastError = error;
-      if (!['CORPUS_DOCKER_COMMAND_FAILED', 'CORPUS_MYSQL_INSPECT_FAILED', 'CORPUS_QDRANT_REQUEST_FAILED']
-        .includes(error.code) || attempt === attempts) throw error;
+      if (!localInspectionRetryable(error) || attempt === attempts) throw error;
       await delay(Math.min(250 * attempt, 1500));
     }
   }
@@ -1008,10 +1007,13 @@ function classifyBootstrapState(stats, qdrant, uploads) {
     qdrant: empty.qdrantEmpty ? 'EMPTY' : 'PRESENT',
     uploads: uploads.empty ? 'EMPTY' : 'PRESENT'
   };
+  const runtimeCompatibility = runtime.qdrantRuntimeCompatibility(stats, qdrant);
   if (Object.values(stores).every((state) => state === 'EMPTY')) {
     return {
       state: 'EMPTY', stores, activeJobs, uploads: uploads.fileCount || 0, partial: false,
-      releaseState: uploads.releaseState || null
+      releaseState: uploads.releaseState || null,
+      runtimeCompatibility: runtimeCompatibility.state,
+      incompatibility: runtimeCompatibility.state === 'INCOMPATIBLE' ? runtimeCompatibility : null
     };
   }
   const inProgress = activeJobs > 0 || inProgressDocuments > 0;
@@ -1027,6 +1029,8 @@ function classifyBootstrapState(stats, qdrant, uploads) {
     partial,
     exactRelease: 'NOT_CHECKED',
     releaseState: uploads.releaseState || null,
+    runtimeCompatibility: runtimeCompatibility.state,
+    incompatibility: runtimeCompatibility.state === 'INCOMPATIBLE' ? runtimeCompatibility : null,
     diagnostics: {
       readyDocuments,
       activeChunks,
@@ -1091,12 +1095,63 @@ async function inspectBootstrapStateWithRetry(options = {}) {
       return await inspect(options);
     } catch (error) {
       lastError = error;
-      if (!['CORPUS_DOCKER_COMMAND_FAILED', 'CORPUS_MYSQL_INSPECT_FAILED', 'CORPUS_QDRANT_REQUEST_FAILED',
-        'CORPUS_UPLOAD_STATE_UNKNOWN'].includes(error.code) || attempt === attempts) throw error;
+      if (!localInspectionRetryable(error) || attempt === attempts) throw error;
       await delay(Math.min(250 * attempt, 1500));
     }
   }
   throw lastError;
+}
+
+function localInspectionRetryable(error) {
+  if (error?.code === 'CORPUS_QDRANT_READINESS_TIMEOUT') return false;
+  return ['CORPUS_DOCKER_COMMAND_FAILED', 'CORPUS_MYSQL_INSPECT_FAILED',
+    'CORPUS_QDRANT_REQUEST_FAILED', 'CORPUS_UPLOAD_STATE_UNKNOWN'].includes(error?.code)
+    || runtime.qdrantReadinessTransient(error);
+}
+
+const RUNTIME_INCOMPATIBILITY_CODES = new Set([
+  'CORPUS_RUNTIME_VERSION_MISMATCH',
+  'CORPUS_EMBEDDING_MISMATCH',
+  'CORPUS_QDRANT_CONFIG_UNSUPPORTED',
+  'CORPUS_QDRANT_COLLECTION_UNAVAILABLE'
+]);
+const RELEASE_DIVERGENCE_CODES = new Set([
+  'CORPUS_RELEASE_STATE_INVALID',
+  'CORPUS_EXISTING_STATE_MISMATCH',
+  'CORPUS_ORIGINAL_LOCAL_MISMATCH',
+  'CORPUS_RESTORE_COUNT_MISMATCH',
+  'CORPUS_CROSS_STORE_MISMATCH',
+  'CORPUS_QDRANT_LIFECYCLE_INCOMPATIBLE',
+  'CORPUS_MYSQL_MAPPING_INVALID'
+]);
+
+function assertBootstrapRuntimeCompatible(local) {
+  if (local.runtimeCompatibility !== 'INCOMPATIBLE') return;
+  const code = local.incompatibility?.code || 'CORPUS_RUNTIME_INCOMPATIBLE';
+  throw releaseError(
+    code,
+    `Local ${local.incompatibility?.component || 'corpus'} runtime is incompatible with the configured stack.`
+  );
+}
+
+function retainedAutoResult(local, releaseEquivalence = 'UNVERIFIED') {
+  const localState = local.partial ? 'PARTIAL' : 'DIVERGED';
+  const status = local.partial
+    ? 'CORPUS_LOCAL_PARTIAL_RETAINED'
+    : 'CORPUS_LOCAL_DIVERGED_RETAINED';
+  console.warn(
+    `CORPUS_LOCAL_PRESENT mode=auto state=${localState} action=RETAIN_LOCAL `
+    + `runtime=COMPATIBLE releaseEquivalence=${releaseEquivalence}`
+  );
+  return {
+    status,
+    mutation: false,
+    local: localState,
+    runtimeCompatibility: 'COMPATIBLE',
+    releaseEquivalence,
+    stores: local.stores,
+    activeJobs: Number(local.activeJobs || 0)
+  };
 }
 
 function localStateUnknown(error, message) {
@@ -1415,72 +1470,69 @@ async function bootstrapCorpus(options = {}) {
     try {
       local = await inspectBootstrapStateWithRetry(options);
     } catch (error) {
+      if (RUNTIME_INCOMPATIBILITY_CODES.has(error.code)
+        || error.code === 'CORPUS_QDRANT_READINESS_TIMEOUT') throw error;
       throw localStateUnknown(error, 'Local corpus state could not be verified');
     }
     if (local.state === 'UNKNOWN') {
       throw releaseError('CORPUS_LOCAL_STATE_UNKNOWN', 'Local corpus state could not be verified as empty.');
     }
     initialLocal = local;
+    assertBootstrapRuntimeCompatible(local);
     if (local.state === 'EMPTY' && local.releaseState) {
-      throw releaseError(
-        'CORPUS_RELEASE_STATE_STALE',
-        'Local release-state marker exists while all corpus stores are empty.'
-      );
-    }
-    if (local.state !== 'EMPTY' && local.partial) {
-      throw releaseError(
-        'CORPUS_PARTIAL_STATE',
-        'Local MySQL, originals and Qdrant are not a complete consistent set.'
-      );
-    }
-    if (local.state !== 'EMPTY' && (local.inProgress || Number(local.activeJobs || 0) > 0)) {
-      throw releaseError(
-        'CORPUS_LOCAL_STATE_BUSY',
-        'Local corpus has in-progress processing and cannot be treated as a selected-release no-op.'
-      );
+      console.warn('CORPUS_LOCAL_PRESENT mode=auto state=STALE_MARKER action=RETAIN_LOCAL runtime=COMPATIBLE');
+      return {
+        status: 'CORPUS_LOCAL_DIVERGED_RETAINED', mutation: false, local: 'DIVERGED',
+        runtimeCompatibility: 'COMPATIBLE', releaseEquivalence: 'DIVERGED', stores: local.stores
+      };
     }
     if (local.state !== 'EMPTY' && local.releaseState) {
-      const pointer = options.pointer || await (options.readPointer || readPointer)(options);
-      if (!pointer) {
-        throw releaseError(
-          'CORPUS_RELEASE_POINTER_MISSING',
-          'bootstrap/corpus-release.json is required to verify local corpus state.'
-        );
+      try {
+        const pointer = options.pointer || await (options.readPointer || readPointer)(options);
+        if (pointer) {
+          const selectedMatches = local.releaseState.releaseId === pointer.releaseId
+            && local.releaseState.manifestSha256 === pointer.manifestSha256;
+          const differentRelease = local.releaseState.releaseId !== pointer.releaseId;
+          const manifest = manifestFromLocalReleaseState(
+            local.releaseState,
+            pointer,
+            { requireSelected: !differentRelease }
+          );
+          const verified = await (options.verifyMarkedLocalRelease || verifyLocalSelectedRelease)(
+            manifest,
+            options
+          );
+          const counts = assertExpectedCounts(verified.structured.reconciled, manifest);
+          const result = {
+            status: selectedMatches ? 'CORPUS_ALREADY_RESTORED' : 'CORPUS_LOCAL_RELEASE_RETAINED',
+            mutation: false,
+            releaseId: manifest.releaseId,
+            selectedReleaseId: pointer.releaseId,
+            local: 'COMPATIBLE',
+            originals: 'COMPATIBLE',
+            runtimeCompatibility: 'COMPATIBLE',
+            releaseEquivalence: selectedMatches ? 'EXACT' : 'DIFFERENT_VERIFIED_RELEASE',
+            counts,
+            checksumVerified: true,
+            releaseState: 'VERIFIED'
+          };
+          if (!selectedMatches) {
+            console.warn(
+              `CORPUS_LOCAL_PRESENT mode=auto action=RETAIN_VALID_LOCAL_RELEASE `
+              + `localRelease=${manifest.releaseId} selectedRelease=${pointer.releaseId}`
+            );
+          }
+          console.log(JSON.stringify(result));
+          return result;
+        }
+      } catch (error) {
+        if (RUNTIME_INCOMPATIBILITY_CODES.has(error.code)) throw error;
+        if (!RELEASE_DIVERGENCE_CODES.has(error.code)) throw error;
+        console.warn(`CORPUS_RELEASE_DIVERGED mode=auto action=RETAIN_LOCAL reason=${error.code || 'VERIFY_FAILED'}`);
       }
-      const selectedMatches = local.releaseState.releaseId === pointer.releaseId
-        && local.releaseState.manifestSha256 === pointer.manifestSha256;
-      const differentRelease = local.releaseState.releaseId !== pointer.releaseId;
-      const manifest = manifestFromLocalReleaseState(
-        local.releaseState,
-        pointer,
-        { requireSelected: !differentRelease }
-      );
-      const verified = await (options.verifyMarkedLocalRelease || verifyLocalSelectedRelease)(
-        manifest,
-        options
-      );
-      const counts = assertExpectedCounts(verified.structured.reconciled, manifest);
-      const result = {
-        status: selectedMatches ? 'CORPUS_ALREADY_RESTORED' : 'CORPUS_LOCAL_RELEASE_RETAINED',
-        releaseId: manifest.releaseId,
-        selectedReleaseId: pointer.releaseId,
-        local: 'COMPATIBLE',
-        originals: 'COMPATIBLE',
-        counts,
-        checksumVerified: true,
-        releaseState: 'VERIFIED'
-      };
-      if (!selectedMatches) {
-        console.warn(
-          `CORPUS_LOCAL_PRESENT mode=auto action=RETAIN_VALID_LOCAL_RELEASE `
-          + `localRelease=${manifest.releaseId} selectedRelease=${pointer.releaseId}`
-        );
-      }
-      console.log(JSON.stringify(result));
-      return result;
     }
     if (local.state !== 'EMPTY') {
-      console.log('CORPUS_LOCAL_PRESENT mode=auto action=VERIFY_SELECTED_RELEASE');
+      return retainedAutoResult(local, local.releaseState ? 'DIVERGED' : 'UNVERIFIED');
     } else {
       let cloud;
       try {

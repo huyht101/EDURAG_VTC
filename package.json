@@ -12,6 +12,7 @@
     "test:openapi": "node scripts/openapi-test.js",
     "test:docs": "node scripts/docs-link-test.js",
     "test:corpus": "node scripts/corpus-release-test.js",
+    "test:corpus:startup": "node scripts/corpus-startup-policy-test.js",
     "test:corpus:partial": "node scripts/corpus-partial-state-test.js",
     "test:corpus:fresh": "node scripts/corpus-fresh-install-test.js",
     "test:corpus:reset": "node scripts/corpus-reset-test.js",

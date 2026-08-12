@@ -9,6 +9,7 @@ const {
 } = require('./remote-test-utils');
 const { main: runPreflight } = require('./remote-preflight');
 const { bootstrapCorpus } = require('./corpus-manager');
+const { waitForQdrantReady } = require('./lib/corpus-runtime');
 
 let logProcess = null;
 let shuttingDown = false;
@@ -48,6 +49,7 @@ async function main() {
 
   compose(['build', 'app', 'rag-service']);
   compose(['up', '-d', '--wait', 'db', 'qdrant']);
+  await waitForQdrantReady();
   compose(['create', '--force-recreate', 'app']);
   console.log('REMOTE_DEV_RECREATED service=app mode=remote volumes=retained');
   const corpus = await bootstrapCorpus();

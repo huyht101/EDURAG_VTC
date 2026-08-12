@@ -4,6 +4,7 @@ const assert = require('assert/strict');
 const crypto = require('crypto');
 const mysql = require('mysql2/promise');
 const { checkDocumentSchema } = require('./document-schema-check');
+const { waitForQdrantReady } = require('./lib/corpus-runtime');
 const {
   docker,
   compose,
@@ -68,14 +69,13 @@ async function main() {
   const nodePort = composePort('app', 5000);
   const pythonPort = composePort('rag-service', 8000);
   const qdrantPort = composePort('qdrant', 6333);
-  const [nodeHealth, pythonHealth, qdrantHealth] = await Promise.all([
+  const [nodeHealth, pythonHealth] = await Promise.all([
     waitForHttp(`http://127.0.0.1:${nodePort}/health`, 'Node health'),
     waitForHttp(`http://127.0.0.1:${pythonPort}/api/health`, 'Python health'),
-    waitForHttp(`http://127.0.0.1:${qdrantPort}/healthz`, 'Qdrant health')
+    waitForQdrantReady({ baseUrl: `http://127.0.0.1:${qdrantPort}` })
   ]);
   assert.equal(nodeHealth.status, 200, 'Node health failed.');
   assert.equal(pythonHealth.status, 200, 'Python health failed.');
-  assert.equal(qdrantHealth.status, 200, 'Qdrant health failed.');
 
   composeExec('app', ['node', '-e', [
     "if(process.env.RAG_MODE!=='remote') throw new Error('RAG_MODE is not remote')",

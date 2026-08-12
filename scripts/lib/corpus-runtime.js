@@ -11,6 +11,7 @@ const {
   compose,
   composeCommandArgs,
   composePort,
+  delay,
   redacted
 } = require('../remote-test-utils');
 const { assertPublishableDocuments } = require('./corpus-release');
@@ -22,6 +23,16 @@ const MYSQL_DUMP_RELATIVE = 'mysql/edurag.sql';
 const INVENTORY_RELATIVE = 'inventory.json';
 const MYSQL_SERVER_SERIES = '8.4.';
 const QDRANT_SERVER_VERSION = '1.18.2';
+const QDRANT_READY_TIMEOUT_MS = 60000;
+const QDRANT_READY_TIMEOUT_MAX_MS = 300000;
+const QDRANT_READY_RETRY_BASE_MS = 250;
+const QDRANT_READY_RETRY_MAX_MS = 2000;
+const QDRANT_TRANSIENT_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
+const QDRANT_TRANSIENT_CODES = new Set([
+  'ABORT_ERR', 'ECONNABORTED', 'ECONNREFUSED', 'ECONNRESET', 'EAI_AGAIN',
+  'ENETDOWN', 'ENETUNREACH', 'ENOTFOUND', 'ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_SOCKET', 'ABORTERROR', 'TIMEOUTERROR'
+]);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA256 = /^[0-9a-f]{64}$/i;
 const BCRYPT_HASH = /^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/;
@@ -210,7 +221,99 @@ async function qdrantRequest(endpoint, options = {}) {
   return response;
 }
 
-async function qdrantRuntimeInfo() {
+function qdrantReadinessTransient(error) {
+  if (QDRANT_TRANSIENT_STATUS.has(Number(error?.status || 0))) return true;
+  const codes = [error?.causeCode, error?.code, error?.cause?.code]
+    .map((value) => String(value || '').toUpperCase());
+  return codes.some((code) => QDRANT_TRANSIENT_CODES.has(code))
+    || error?.name === 'AbortError' || error?.name === 'TimeoutError';
+}
+
+function readinessCause(error) {
+  if (Number(error?.status || 0)) return `HTTP_${error.status}`;
+  return String(error?.causeCode || error?.cause?.code || error?.code || error?.name || 'UNKNOWN')
+    .replace(/[^A-Za-z0-9_.-]/g, '_').slice(0, 80);
+}
+
+async function waitForQdrantReady(options = {}) {
+  const request = options.request || qdrantRequest;
+  const sleep = options.sleep || delay;
+  const now = options.now || Date.now;
+  const log = options.log || console;
+  const deadlineMs = Number(options.deadlineMs
+    ?? process.env.QDRANT_READY_TIMEOUT_MS ?? QDRANT_READY_TIMEOUT_MS);
+  const retryBaseMs = Number(options.retryBaseMs ?? QDRANT_READY_RETRY_BASE_MS);
+  const retryMaxMs = Number(options.retryMaxMs ?? QDRANT_READY_RETRY_MAX_MS);
+  if (!Number.isFinite(deadlineMs) || deadlineMs <= 0 || deadlineMs > QDRANT_READY_TIMEOUT_MAX_MS
+    || !Number.isFinite(retryBaseMs) || retryBaseMs <= 0
+    || !Number.isFinite(retryMaxMs) || retryMaxMs < retryBaseMs) {
+    throw corpusError(
+      'CORPUS_CONFIG_INVALID',
+      `Qdrant readiness timing must use positive bounded milliseconds (deadline <= ${QDRANT_READY_TIMEOUT_MAX_MS}).`
+    );
+  }
+  const startedAt = now();
+  let attempt = 0;
+  let lastError;
+  while (now() - startedAt < deadlineMs) {
+    attempt += 1;
+    try {
+      await request('/readyz', {
+        baseUrl: options.baseUrl,
+        errorCode: 'CORPUS_QDRANT_NOT_READY',
+        httpErrorCode: 'CORPUS_QDRANT_NOT_READY',
+        qdrantPhase: 'READINESS',
+        timeoutMs: Math.min(Number(options.requestTimeoutMs || 5000), deadlineMs)
+      });
+      const elapsedMs = now() - startedAt;
+      log.log(`QDRANT_READY attempts=${attempt} elapsedMs=${elapsedMs}`);
+      return { attempts: attempt, elapsedMs };
+    } catch (error) {
+      if (!qdrantReadinessTransient(error)) throw error;
+      lastError = error;
+      const elapsedMs = now() - startedAt;
+      const remainingMs = deadlineMs - elapsedMs;
+      if (remainingMs <= 0) break;
+      const retryInMs = Math.min(retryBaseMs * (2 ** Math.min(attempt - 1, 8)), retryMaxMs, remainingMs);
+      log.warn(`QDRANT_NOT_READY attempt=${attempt} retryInMs=${retryInMs} cause=${readinessCause(error)}`);
+      await sleep(retryInMs);
+    }
+  }
+  const error = corpusError(
+    'CORPUS_QDRANT_READINESS_TIMEOUT',
+    `Qdrant did not become ready within ${deadlineMs}ms (${readinessCause(lastError)}).`
+  );
+  Object.assign(error, {
+    cause: lastError,
+    qdrantPhase: 'READINESS',
+    attempts: attempt,
+    elapsedMs: now() - startedAt,
+    causeCode: lastError?.causeCode || lastError?.cause?.code || lastError?.code
+  });
+  throw error;
+}
+
+function qdrantRuntimeCompatibility(stats, qdrant) {
+  if (!String(stats?.mysqlVersion || '').startsWith(MYSQL_SERVER_SERIES)) {
+    return { state: 'INCOMPATIBLE', code: 'CORPUS_RUNTIME_VERSION_MISMATCH', component: 'MYSQL' };
+  }
+  if (String(qdrant?.serverVersion || '') !== QDRANT_SERVER_VERSION) {
+    return { state: 'INCOMPATIBLE', code: 'CORPUS_RUNTIME_VERSION_MISMATCH', component: 'QDRANT' };
+  }
+  if (qdrant.exists && Number(qdrant.vectorSize) !== embeddingDimension()) {
+    return { state: 'INCOMPATIBLE', code: 'CORPUS_EMBEDDING_MISMATCH', component: 'QDRANT' };
+  }
+  if (qdrant.exists && String(qdrant.distance || '').toLowerCase() !== 'cosine') {
+    return { state: 'INCOMPATIBLE', code: 'CORPUS_QDRANT_CONFIG_UNSUPPORTED', component: 'QDRANT' };
+  }
+  if (qdrant.exists && !['green', 'yellow', 'grey'].includes(String(qdrant.collectionStatus || '').toLowerCase())) {
+    return { state: 'INCOMPATIBLE', code: 'CORPUS_QDRANT_COLLECTION_UNAVAILABLE', component: 'QDRANT' };
+  }
+  return { state: 'COMPATIBLE', code: null, component: null };
+}
+
+async function qdrantRuntimeInfo(options = {}) {
+  await (options.waitForReady || waitForQdrantReady)(options.readiness || {});
   const rootInfo = await (await qdrantRequest('/', { qdrantPhase: 'RUNTIME_INFO_ROOT' })).json();
   const name = collectionName();
   const response = await qdrantRequest(`/collections/${encodeURIComponent(name)}`, {
@@ -234,7 +337,8 @@ async function qdrantRuntimeInfo() {
     exists: true,
     pointCount: Number(payload.result.points_count || 0),
     vectorSize: Number(vectors.size),
-    distance: vectors.distance
+    distance: vectors.distance,
+    collectionStatus: payload.result.status
   };
 }
 
@@ -988,13 +1092,16 @@ module.exports = {
   freezeWriters,
   mysqlInput,
   qdrantContentSha256,
+  qdrantReadinessTransient,
   qdrantRequest,
   qdrantRuntimeInfo,
+  qdrantRuntimeCompatibility,
   reconcileRuntime,
   recoverEmptyQdrantState,
   resumeWriters,
   restoreCorpus,
   scanSensitiveText,
   validatePrivateAccountRows,
+  waitForQdrantReady,
   verifyBundle
 };

@@ -25,6 +25,7 @@ Copy-Item .env.example .env
 - `REMOTE_MYSQL_HOST_PORT=13306` là loopback port cho host-side E2E tooling;
   containers luôn kết nối MySQL bằng `db:3306`;
 - `CORPUS_BOOTSTRAP=auto`;
+- `QDRANT_READY_TIMEOUT_MS=60000` là deadline bounded cho host-side `/readyz` probe;
 - `GCS_PROJECT_ID`, `GCS_BUCKET`, `GCS_OBJECT_PREFIX`, `GCS_CREDENTIALS_FILE`. Chỉ khi
   bucket-metadata introspection của least-privilege `corpus-writer` bị 403 và Owner đã
   kiểm tra exact target, đặt `GCS_PRIVATE_TARGET_OWNER_ATTESTATION` thành chính xác
@@ -59,8 +60,8 @@ Trình tự foreground orchestration:
 
 1. validate root environment và Compose;
 2. build Node/Python images;
-3. start MySQL + Qdrant;
-4. probe local MySQL, Qdrant và upload volume;
+3. start MySQL + Qdrant; Compose và host tooling chờ Qdrant `GET /readyz`;
+4. kiểm tra riêng Qdrant runtime/collection compatibility rồi probe local MySQL, Qdrant và upload volume;
 5. với `auto`, chỉ download/restore selected cloud release khi local thực sự empty; local đã có dữ liệu được giữ nguyên;
 6. start Node + Python;
 7. chạy remote preflight;
@@ -84,13 +85,13 @@ CORPUS_RESTORE_OK
 REMOTE_PREFLIGHT_OK
 ```
 
-Trên retained volumes, `auto` verify động release-state marker với MySQL/Qdrant/originals. Exact selected release trả `CORPUS_ALREADY_RESTORED`; một release local khác nhưng đầy đủ và tự nhất quán trả `CORPUS_LOCAL_RELEASE_RETAINED` và không bị replace. Partial/in-progress, thiếu hoặc stale marker, same-release checksum mismatch và cross-store mismatch đều fail closed; không silent merge/replace. Nếu probe trả `UNKNOWN/ERROR`, tool fail closed với `CORPUS_LOCAL_STATE_UNKNOWN`: không restore và không gọi đó là degraded-empty startup. `auto` chỉ báo `CORPUS_BOOTSTRAP_SKIPPED`/`DEGRADED` rồi tiếp tục empty khi local đã được xác nhận `EMPTY` và lỗi config/credential/permission/missing-object/transport xảy ra ở remote read trước local mutation. Raw fetch/timeout/network error được chuẩn hóa thành stable reason; không fallback sang dump/snapshot trong Git.
+Trên retained volumes, `auto` verify động release-state marker khi có thể. Exact selected release mới trả `CORPUS_ALREADY_RESTORED`; release local khác đã verify trả `CORPUS_LOCAL_RELEASE_RETAINED`. Local unmarked/diverged hoặc partial trả `CORPUS_LOCAL_DIVERGED_RETAINED` hay `CORPUS_LOCAL_PARTIAL_RETAINED`, kèm `mutation=false`; không cloud lookup, restore, overwrite hoặc delete. `UNKNOWN/ERROR` fail với `CORPUS_LOCAL_STATE_UNKNOWN`; Qdrant/MySQL version, vector dimension/distance hoặc collection availability đã chứng minh không tương thích vẫn fail. `auto` chỉ tiếp tục `DEGRADED` trên local confirmed `EMPTY` khi remote read thất bại trước mutation.
 
-Checksum/integrity, manifest không tương thích, lỗi local filesystem/MySQL/Qdrant, lỗi sau khi apply bắt đầu, hoặc rollback không được xác nhận đều fatal trong cả `auto` và `required`. `required` cũng fail closed với mọi remote-read failure thay vì tiếp tục bằng corpus rỗng.
+Checksum/integrity của selected release đang restore, manifest không tương thích, lỗi local inspection, lỗi sau khi apply bắt đầu hoặc rollback không được xác nhận đều fatal trong cả `auto` và `required`. `required` cũng fail closed với mọi remote-read failure thay vì tiếp tục bằng corpus rỗng.
 
 Chọn mode theo mục đích:
 
-- `auto`: development; restore khi cả ba store empty; no-op exact release; retain release khác đã verify động;
+- `auto`: development; restore khi cả ba store empty; no-op exact release; retain mọi local present/partial/diverged nếu runtime-compatible;
 - `required`: acceptance strict; selected release và local non-empty phải khớp exact;
 - `off`: không đọc/restore/so sánh cloud release.
 
@@ -137,7 +138,7 @@ Local divergence trong development là hợp lệ. Public corpus hoặc complian
 | Node health | `http://localhost:5001/health` |
 | Node readiness | `http://localhost:5001/ready` |
 | Python health | `http://localhost:8000/api/health` |
-| Qdrant health | `http://localhost:6333/healthz` |
+| Qdrant readiness | `http://localhost:6333/readyz` |
 
 Demo Admin: `admin@example.com` / `123456` (local only).
 
@@ -190,11 +191,12 @@ thể rerun cùng command và không được đánh dấu READY giả.
 |---|---|
 | Port in use | Đổi host port trong root `.env`. |
 | `GCS_CREDENTIAL_MISSING` | Với `auto`, stack chạy degraded; fresh canonical restore cần reader key. |
-| `CORPUS_PARTIAL_STATE` / `CORPUS_LOCAL_STATE_BUSY` | Local không phải một exact, quiescent selected release; dừng và inspect, không restore đè. |
+| `CORPUS_LOCAL_PARTIAL_RETAINED` / `CORPUS_LOCAL_DIVERGED_RETAINED` | `auto` giữ local runtime-compatible và tiếp tục; inspect trước khi chọn explicit reset/publish. Không đồng nghĩa exact selected release. |
+| `CORPUS_QDRANT_READINESS_TIMEOUT` | Qdrant không ready trong bounded deadline; cause cuối được giữ. Kiểm tra container log/config, không xóa volume để retry. |
 | `CORPUS_LOCAL_STATE_UNKNOWN` | Không xác định an toàn emptiness; cả `auto` và `required` fail closed. Kiểm tra MySQL/Qdrant/upload probe rồi chạy lại. |
 | `GCS_REMOTE_UNAVAILABLE` | Fetch/timeout/network/remote availability đã được chuẩn hóa. Chỉ `auto` + confirmed `EMPTY` + pre-mutation remote read được tiếp tục `DEGRADED`; `required` fail closed. |
 | `CORPUS_RESTORE_ROLLBACK_FAILED` | Apply thất bại và không thể phục hồi exact empty pre-state; dừng, không chạy replace/merge tự động. |
-| `CORPUS_EXISTING_STATE_MISMATCH` / `CORPUS_RELEASE_STATE_STALE` | Marker, pointer hoặc dynamic MySQL–Qdrant–original fingerprint không khớp; cả `auto` và `required` fail closed. |
+| `CORPUS_EXISTING_STATE_MISMATCH` | `required` hoặc explicit restore/verify vẫn strict; trong `auto`, release divergence runtime-compatible được retain và không gọi là exact. |
 | `CORPUS_REVIEW_CONFIRMATION_REQUIRED` | Chạy dry-run, review plan rồi dùng đúng `--confirm-reviewed`. |
 | `401` public API | Dùng user JWT, không dùng internal token. |
 | Original unavailable | Corpus/original chưa restore; citation snapshot vẫn dùng được nếu structured local data tồn tại. |
