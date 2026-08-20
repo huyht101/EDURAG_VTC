@@ -17,8 +17,9 @@ Error handling thống nhất dùng ErrorResponse.
 import logging
 import time
 from datetime import datetime, timezone
+from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, status, Depends
+from fastapi import APIRouter, BackgroundTasks, Body, HTTPException, Path, status, Depends
 from fastapi.responses import JSONResponse
 
 from api.dependencies import verify_internal_token
@@ -32,6 +33,7 @@ from models.schemas import (
     QueryRequest,
     QueryResponse,
     ErrorResponse,
+    HealthResponse,
 )
 from services.ingestion import ingest_document_background
 from services.doc_manager import (
@@ -82,9 +84,27 @@ def _error_response(
         "Xử lý nền: Parse → Chunk → Embed → Lưu Qdrant. "
         "Gọi callback_url khi hoàn tất (SUCCEEDED/FAILED)."
     ),
+    operation_id="ingestDocument",
+    responses={
+        401: {"description": "Bearer token thiếu hoặc không hợp lệ"},
+        422: {"description": "Request không đúng schema"},
+    },
 )
 async def ingest_endpoint(
-    request: IngestRequest,
+    request: Annotated[IngestRequest, Body(openapi_examples={
+        "pdf_document": {
+            "summary": "Nạp một tài liệu PDF",
+            "value": {
+                "doc_id": "42",
+                "job_id": "105",
+                "attempt_count": 1,
+                "subject_id": "mvp-global",
+                "file_path": "/shared/uploads/documents/document-42.pdf",
+                "callback_url": "http://app:5000/api/internal/rag/processing-callback",
+                "teacher_metadata": {},
+            },
+        }
+    })],
     background_tasks: BackgroundTasks,
 ) -> IngestAcceptedResponse:
     """
@@ -123,8 +143,41 @@ async def ingest_endpoint(
         "- RAG_REQUIRED → Search READY+VISIBLE docs trong Qdrant → LLM → Citations.\n"
         "Trả kèm usage (token counts) để Node.js lưu cho dashboard."
     ),
+    operation_id="queryRag",
+    responses={
+        401: {"description": "Bearer token thiếu hoặc không hợp lệ"},
+        404: {"model": ErrorResponse, "description": "Không tìm thấy resource cần thiết"},
+        422: {"model": ErrorResponse, "description": "Input không hợp lệ"},
+        500: {"model": ErrorResponse, "description": "Lỗi xử lý nội bộ đã được làm sạch"},
+    },
 )
-async def query_endpoint(request: QueryRequest) -> QueryResponse:
+async def query_endpoint(
+    request: Annotated[QueryRequest, Body(openapi_examples={
+        "rag_question": {
+            "summary": "Câu hỏi cần tra cứu tài liệu",
+            "value": {
+                "request_id": "req-7f94",
+                "user_id": "12",
+                "conversation_id": "87",
+                "question": "Khái niệm học máy là gì?",
+                "history": [],
+            },
+        },
+        "with_history": {
+            "summary": "Câu hỏi có lịch sử hội thoại",
+            "value": {
+                "request_id": "req-7f95",
+                "user_id": "12",
+                "conversation_id": "87",
+                "question": "Hãy giải thích kỹ hơn phần đó",
+                "history": [
+                    {"role": "user", "content": "Học máy là gì?"},
+                    {"role": "assistant", "content": "Học máy là một nhánh của AI."},
+                ],
+            },
+        },
+    })],
+) -> QueryResponse:
     """Xử lý truy vấn RAG (sync, trả kết quả ngay)."""
     start_time = time.time()
 
@@ -185,10 +238,34 @@ async def query_endpoint(request: QueryRequest) -> QueryResponse:
         "Unhide: set is_hidden=false → tài liệu xuất hiện lại khi search.\n"
         "Async: trả 202, callback khi xong."
     ),
+    operation_id="changeDocumentVisibility",
+    responses={
+        401: {"description": "Bearer token thiếu hoặc không hợp lệ"},
+        422: {"description": "Request không đúng schema"},
+    },
 )
 async def visibility_endpoint(
-    doc_id: str,
-    request: VisibilityRequest,
+    doc_id: Annotated[str, Path(description="ID tài liệu", examples=["42"])],
+    request: Annotated[VisibilityRequest, Body(openapi_examples={
+        "hide": {
+            "summary": "Ẩn tài liệu khỏi kết quả RAG",
+            "value": {
+                "job_id": "106",
+                "attempt_count": 1,
+                "action": "hide",
+                "callback_url": "http://app:5000/api/internal/rag/processing-callback",
+            },
+        },
+        "unhide": {
+            "summary": "Hiện lại tài liệu",
+            "value": {
+                "job_id": "107",
+                "attempt_count": 1,
+                "action": "unhide",
+                "callback_url": "http://app:5000/api/internal/rag/processing-callback",
+            },
+        },
+    })],
     background_tasks: BackgroundTasks,
 ) -> AcceptedResponse:
     """Xử lý hide/unhide tài liệu (async pattern)."""
@@ -236,10 +313,24 @@ async def visibility_endpoint(
         "File gốc và lịch sử MySQL vẫn được giữ (Node.js quản lý).\n"
         "Async: trả 202, callback khi xong."
     ),
+    operation_id="deleteDocumentVectors",
+    responses={
+        401: {"description": "Bearer token thiếu hoặc không hợp lệ"},
+        422: {"description": "Request không đúng schema"},
+    },
 )
 async def delete_endpoint(
-    doc_id: str,
-    request: DeleteRequest,
+    doc_id: Annotated[str, Path(description="ID tài liệu", examples=["42"])],
+    request: Annotated[DeleteRequest, Body(openapi_examples={
+        "delete_vectors": {
+            "summary": "Xóa vector của một tài liệu",
+            "value": {
+                "job_id": "108",
+                "attempt_count": 1,
+                "callback_url": "http://app:5000/api/internal/rag/processing-callback",
+            },
+        }
+    })],
     background_tasks: BackgroundTasks,
 ) -> AcceptedResponse:
     """Xử lý xóa vectors tài liệu (async pattern)."""
@@ -269,15 +360,12 @@ async def delete_endpoint(
 
 @public_router.get(
     "/health",
+    response_model=HealthResponse,
     summary="Kiểm tra trạng thái service",
     description="Endpoint để monitoring/load balancer kiểm tra service còn hoạt động.",
+    operation_id="getHealth",
 )
-async def health_check() -> dict:
+async def health_check() -> HealthResponse:
     """Trả về trạng thái hoạt động của service."""
     settings = get_settings()
-    return {
-        "status": "healthy",
-        "service": "rag-education-service",
-        "version": "3.0.0",
-        "ocr_mode": settings.OCR_MODE.value,
-    }
+    return HealthResponse(version="3.0.0", ocr_mode=settings.OCR_MODE.value)

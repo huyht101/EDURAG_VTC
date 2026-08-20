@@ -42,6 +42,33 @@ def test_health_check():
     assert response.json()["ocr_mode"] == "OFF"
 
 
+def test_openapi_documents_routes_and_bearer_auth():
+    response = client.get("/openapi.json")
+    assert response.status_code == 200
+
+    schema = response.json()
+    assert schema["info"]["title"] == "EDURAG Python RAG API"
+    assert "/api/ingest" in schema["paths"]
+    assert "/api/query" in schema["paths"]
+    assert "/api/docs/{doc_id}/visibility" in schema["paths"]
+    assert schema["paths"]["/api/query"]["post"]["security"] == [
+        {"HTTPBearer": []}
+    ]
+    assert schema["paths"]["/api/health"]["get"].get("security") is None
+    assert "examples" in schema["components"]["schemas"]["IngestRequest"]
+    ingest_examples = schema["paths"]["/api/ingest"]["post"]["requestBody"][
+        "content"
+    ]["application/json"]["examples"]
+    assert ingest_examples["pdf_document"]["value"]["doc_id"] == "42"
+    query_examples = schema["paths"]["/api/query"]["post"]["requestBody"][
+        "content"
+    ]["application/json"]["examples"]
+    assert set(query_examples) == {"rag_question", "with_history"}
+    assert schema["components"]["schemas"]["QueryResponse"]["example"][
+        "no_answer"
+    ] is False
+
+
 @patch("api.routes.process_query", side_effect=RuntimeError("secret provider detail"))
 def test_query_error_response_is_sanitized(_mock_process_query):
     response = client.post(

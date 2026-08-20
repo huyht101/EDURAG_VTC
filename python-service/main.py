@@ -23,6 +23,27 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.routes import router as api_router, public_router
 from core.config import get_settings
 from core.database import get_qdrant_client, close_qdrant_client
+from models.schemas import ServiceInfoResponse
+
+API_VERSION = "3.0.0"
+
+OPENAPI_TAGS = [
+    {
+        "name": "Public",
+        "description": "Endpoint công khai phục vụ health check và monitoring.",
+    },
+    {
+        "name": "RAG",
+        "description": (
+            "API nội bộ NodeJS–Python. Nhấn **Authorize** và nhập internal token; "
+            "Swagger UI tự gửi header `Authorization: Bearer <token>`."
+        ),
+    },
+    {
+        "name": "Root",
+        "description": "Thông tin service và các đường dẫn tài liệu.",
+    },
+]
 
 # ── Cấu hình logging ────────────────────────────────────────────
 logging.basicConfig(
@@ -80,15 +101,26 @@ async def lifespan(app: FastAPI):
 # ══════════════════════════════════════════════════════════════════
 
 app = FastAPI(
-    title="RAG Education Service",
+    title="EDURAG Python RAG API",
     description=(
-        "Microservice xử lý RAG (Retrieval-Augmented Generation) "
-        "cho hệ thống Trợ lý Giáo dục. Giao tiếp nội bộ với Node.js backend."
+        "Microservice xử lý RAG (Retrieval-Augmented Generation) cho EDURAG.\n\n"
+        "Các endpoint nghiệp vụ chỉ dành cho NodeJS/Core và yêu cầu Bearer token. "
+        "Client web/mobile không gọi trực tiếp service này. Các thao tác ingest, "
+        "visibility và delete trả `202 Accepted`; kết quả cuối được gửi về "
+        "`callback_url`.\n\n"
+        "Contract chuẩn: `docs/api/internal-rag-contract.md` tại repository gốc."
     ),
-    version="3.0.0",
+    version=API_VERSION,
     lifespan=lifespan,
     docs_url="/docs",       # Swagger UI tại /docs
     redoc_url="/redoc",     # ReDoc tại /redoc
+    openapi_url="/openapi.json",
+    openapi_tags=OPENAPI_TAGS,
+    swagger_ui_parameters={
+        "persistAuthorization": True,
+        "displayRequestDuration": True,
+        "filter": True,
+    },
 )
 
 
@@ -113,15 +145,22 @@ app.include_router(api_router)
 # ROOT ENDPOINT
 # ══════════════════════════════════════════════════════════════════
 
-@app.get("/", tags=["Root"])
-async def root():
+@app.get(
+    "/",
+    tags=["Root"],
+    response_model=ServiceInfoResponse,
+    summary="Thông tin Python RAG service",
+    operation_id="getServiceInfo",
+)
+async def root() -> ServiceInfoResponse:
     """Endpoint gốc — hiển thị thông tin cơ bản về service."""
-    return {
-        "service": "RAG Education Service",
-        "version": "3.0.0",
-        "docs": "/docs",
-        "health": "/api/health",
-    }
+    return ServiceInfoResponse(
+        service="RAG Education Service",
+        version=API_VERSION,
+        docs="/docs",
+        openapi="/openapi.json",
+        health="/api/health",
+    )
 
 
 # ── Chạy trực tiếp bằng: python main.py ─────────────────────────

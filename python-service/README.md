@@ -71,7 +71,15 @@ npm run docker:remote:dev
 | `PATCH` | `/api/docs/{doc_id}/visibility` | Internal Bearer | Hide/Unhide |
 | `DELETE` | `/api/ingest/{doc_id}` | Internal Bearer | Xóa vectors |
 
-Swagger UI: `http://localhost:8000/docs`
+Tài liệu API khi service đang chạy:
+
+- Swagger UI: `http://localhost:8000/docs`
+- ReDoc: `http://localhost:8000/redoc`
+- OpenAPI JSON: `http://localhost:8000/openapi.json`
+
+Để thử endpoint nội bộ trong Swagger UI, chọn **Authorize** và nhập giá trị
+`INTERNAL_SECRET`. Swagger sẽ gửi request bằng Bearer authentication. Endpoint
+`GET /api/health` không yêu cầu token.
 
 ---
 

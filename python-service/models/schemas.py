@@ -13,7 +13,7 @@ Phiên bản v4 (Tuần 4):
 from datetime import datetime, timezone
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 # ============================================================
@@ -31,6 +31,42 @@ class ErrorResponse(BaseModel):
         default_factory=lambda: datetime.now(timezone.utc).isoformat(),
         description="Thời điểm xảy ra lỗi (ISO format)"
     )
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "error_code": "INVALID_INPUT",
+            "message": "Query input is invalid.",
+            "timestamp": "2026-08-21T08:30:00+00:00",
+        }
+    })
+
+
+class HealthResponse(BaseModel):
+    """Trạng thái công khai của Python RAG service."""
+
+    status: Literal["healthy"] = "healthy"
+    service: Literal["rag-education-service"] = "rag-education-service"
+    version: str = Field(..., description="Phiên bản API của service")
+    ocr_mode: Literal["OFF", "AUTO"] = Field(..., description="Chế độ OCR đã resolve")
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "status": "healthy",
+            "service": "rag-education-service",
+            "version": "3.0.0",
+            "ocr_mode": "OFF",
+        }
+    })
+
+
+class ServiceInfoResponse(BaseModel):
+    """Thông tin điều hướng cơ bản của service."""
+
+    service: str
+    version: str
+    docs: str
+    openapi: str
+    health: str
 
 
 # ============================================================
@@ -72,6 +108,18 @@ class IngestRequest(BaseModel):
         description="Metadata bổ sung từ giáo viên (tên tác giả, ghi chú, ...)"
     )
 
+    model_config = ConfigDict(json_schema_extra={
+        "examples": [{
+            "doc_id": "42",
+            "job_id": "105",
+            "attempt_count": 1,
+            "subject_id": "mvp-global",
+            "file_path": "/app/uploads/document-42.pdf",
+            "callback_url": "http://node:5000/api/internal/rag/processing-callback",
+            "teacher_metadata": {},
+        }]
+    })
+
 
 class IngestAcceptedResponse(BaseModel):
     """
@@ -81,6 +129,14 @@ class IngestAcceptedResponse(BaseModel):
     status: Literal["accepted"] = Field(default="accepted", description="Luôn là 'accepted'")
     job_id: str = Field(..., description="Job ID để tracking")
     message: str = Field(default="Tài liệu đang được xử lý", description="Thông báo")
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "status": "accepted",
+            "job_id": "105",
+            "message": "Tài liệu 42 đang được xử lý",
+        }
+    })
 
 
 # ============================================================
@@ -158,6 +214,15 @@ class VisibilityRequest(BaseModel):
     )
     callback_url: str = Field(..., description="URL callback kết quả")
 
+    model_config = ConfigDict(json_schema_extra={
+        "examples": [{
+            "job_id": "106",
+            "attempt_count": 1,
+            "action": "hide",
+            "callback_url": "http://node:5000/api/internal/rag/processing-callback",
+        }]
+    })
+
 
 class DeleteRequest(BaseModel):
     """
@@ -168,6 +233,14 @@ class DeleteRequest(BaseModel):
     attempt_count: int = Field(..., ge=1, description="Processing attempt hiện tại")
     callback_url: str = Field(..., description="URL callback kết quả")
 
+    model_config = ConfigDict(json_schema_extra={
+        "examples": [{
+            "job_id": "107",
+            "attempt_count": 1,
+            "callback_url": "http://node:5000/api/internal/rag/processing-callback",
+        }]
+    })
+
 
 class AcceptedResponse(BaseModel):
     """
@@ -175,6 +248,10 @@ class AcceptedResponse(BaseModel):
     """
     status: Literal["accepted"] = Field(default="accepted", description="Luôn là 'accepted'")
     job_id: str = Field(..., description="Job ID để tracking")
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {"status": "accepted", "job_id": "106"}
+    })
 
 
 # ============================================================
@@ -201,6 +278,16 @@ class QueryRequest(BaseModel):
     )
     request_id: Optional[str] = Field(default=None, description="Correlation/idempotency extension")
     user_id: Optional[str] = Field(default=None, description="Correlation context")
+
+    model_config = ConfigDict(json_schema_extra={
+        "examples": [{
+            "request_id": "req-7f94",
+            "user_id": "12",
+            "conversation_id": "87",
+            "question": "Khái niệm học máy là gì?",
+            "history": [{"role": "user", "content": "Chào trợ lý"}],
+        }]
+    })
 
 
 class Citation(BaseModel):
@@ -316,6 +403,39 @@ class QueryResponse(BaseModel):
             "Tổng token của tất cả usage_calls có status=SUCCEEDED."
         )
     )
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "answer": "Học máy là một nhánh của trí tuệ nhân tạo [1].",
+            "citations": [{
+                "vector_node_id": "0e52fb89-6d69-58b1-8535-7ade8f099122",
+                "doc_id": "42",
+                "snippet": "Học máy là một lĩnh vực thuộc trí tuệ nhân tạo.",
+                "page_number": 3,
+                "chapter": "Trí tuệ nhân tạo",
+                "section": "Học máy",
+            }],
+            "confidence": "high",
+            "no_answer": False,
+            "usage_calls": [{
+                "call_index": 1,
+                "operation_type": "QUERY_REWRITE",
+                "provider": "google",
+                "model": "models/gemini-3.5-flash",
+                "prompt_tokens": 25,
+                "completion_tokens": 4,
+                "total_tokens": 29,
+                "status": "SUCCEEDED",
+                "error_code": None,
+            }],
+            "usage": {
+                "prompt_tokens": 25,
+                "completion_tokens": 4,
+                "total_tokens": 29,
+                "model": "models/gemini-3.5-flash",
+            },
+        }
+    })
 
     @model_validator(mode="after")
     def validate_contract_invariants(self):
